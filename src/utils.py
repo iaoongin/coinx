@@ -1,12 +1,22 @@
+import sys
+import os
+
+# 添加项目根目录到路径
+project_root = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, project_root)
+
 import os
 import json
 import logging
 from datetime import datetime
-from .config import DATA_DIR, LOGS_DIR
+from src.config import DATA_DIR, LOGS_DIR
 
 # 配置日志
 def setup_logger():
     """设置日志配置"""
+    # 确保日志目录存在
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    
     log_file = os.path.join(LOGS_DIR, 'app.log')
     logging.basicConfig(
         level=logging.INFO,
@@ -16,7 +26,9 @@ def setup_logger():
             logging.StreamHandler()
         ]
     )
-    return logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
+    logger.info(f"日志系统已初始化，日志文件路径: {log_file}")
+    return logger
 
 logger = setup_logger()
 
@@ -27,27 +39,66 @@ def save_all_coins_data(data):
         filepath = os.path.join(DATA_DIR, filename)
         
         # 如果文件存在，读取现有数据
+        existing_data = []
         if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                existing_data = json.load(f)
-        else:
-            existing_data = []
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                # 验证数据格式
+                if not isinstance(existing_data, list):
+                    existing_data = []
+            except (json.JSONDecodeError, Exception) as e:
+                logger.error(f"读取现有数据文件失败: {e}")
+                existing_data = []
         
         # 添加新数据
-        existing_data.append({
+        new_entry = {
             'timestamp': int(datetime.now().timestamp() * 1000),
             'data': data
-        })
+        }
         
-        # 只保留最近的100条记录
-        if len(existing_data) > 100:
-            existing_data = existing_data[-100:]
+        existing_data.append(new_entry)
         
-        # 保存数据
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        # 只保留最近的10条记录，避免文件过大
+        if len(existing_data) > 10:
+            existing_data = existing_data[-10:]
         
-        logger.info(f"所有币种数据已保存: {filename}")
+        # 在保存前验证数据是否可序列化
+        try:
+            json.dumps(existing_data, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"数据序列化失败: {e}")
+            # 尝试简化数据结构
+            simplified_data = []
+            for entry in existing_data:
+                simplified_entry = {
+                    'timestamp': entry.get('timestamp', 0),
+                    'data': []
+                }
+                for item in entry.get('data', []):
+                    simplified_item = {
+                        'symbol': item.get('symbol', ''),
+                        'current_open_interest': item.get('current', {}).get('openInterest') if item.get('current') else None,
+                        'changes': item.get('changes', {})
+                    }
+                    simplified_entry['data'].append(simplified_item)
+                simplified_data.append(simplified_entry)
+            existing_data = simplified_data
+        
+        # 保存数据，先写入临时文件再重命名，避免写入过程中断导致文件损坏
+        temp_filepath = filepath + ".tmp"
+        try:
+            with open(temp_filepath, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+            # 原子性地替换原文件
+            os.replace(temp_filepath, filepath)
+            logger.info(f"所有币种数据已保存: {filename}，共 {len(existing_data)} 条记录")
+        except Exception as e:
+            # 清理临时文件
+            if os.path.exists(temp_filepath):
+                os.remove(temp_filepath)
+            raise e
+            
     except Exception as e:
         logger.error(f"保存所有币种数据失败: {e}")
 
@@ -58,11 +109,23 @@ def load_all_coins_data():
         filepath = os.path.join(DATA_DIR, filename)
         
         if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                # 返回最新的数据
-                if data:
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # 验证数据格式并返回最新的数据
+                if isinstance(data, list) and len(data) > 0:
                     return data[-1]['data']
+                else:
+                    return []
+            except (json.JSONDecodeError, Exception) as e:
+                logger.error(f"加载所有币种数据失败: {e}")
+                # 如果文件损坏，尝试创建新文件
+                try:
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump([], f, ensure_ascii=False, indent=2)
+                except Exception as write_error:
+                    logger.error(f"重置数据文件失败: {write_error}")
+                return []
         return []
     except Exception as e:
         logger.error(f"加载所有币种数据失败: {e}")

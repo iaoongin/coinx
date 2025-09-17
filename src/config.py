@@ -15,7 +15,7 @@ BINANCE_BASE_URL = 'https://fapi.binance.com'
 UPDATE_INTERVAL = 300  # 5分钟更新一次
 
 # 支持的时间间隔 (根据币安API文档)
-TIME_INTERVALS = ['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h']
+TIME_INTERVALS = ['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']
 
 # 代理配置
 PROXY_HOST = '127.0.0.1'
