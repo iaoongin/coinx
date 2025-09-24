@@ -29,15 +29,23 @@ function loadCoinsData() {
     fetch('/api/update')
         .then(response => response.json())
         .then(updateResult => {
-            // 更新成功后再获取数据
-            return fetch('/api/coins');
+            if (updateResult.status === 'success') {
+                // 更新成功后再获取数据
+                return fetch('/api/coins');
+            } else {
+                throw new Error(updateResult.message);
+            }
         })
         .then(response => response.json())
-        .then(data => {
-            // 更新缓存
-            allCoinsData = data;
-            // 显示最新数据
-            renderCoinsTable(data);
+        .then(result => {
+            if (result.status === 'success') {
+                // 更新缓存
+                allCoinsData = result.data;
+                // 显示最新数据
+                renderCoinsTable(result.data);
+            } else {
+                throw new Error(result.message);
+            }
             isDataLoading = false;
             showLoading(false);
         })
@@ -148,12 +156,16 @@ function updateData() {
             }
         })
         .then(response => response.json())
-        .then(data => {
-            // 更新缓存
-            allCoinsData = data;
-            // 显示最新数据
-            renderCoinsTable(data);
-            showMessage('数据更新成功', 'success');
+        .then(result => {
+            if (result.status === 'success') {
+                // 更新缓存
+                allCoinsData = result.data;
+                // 显示最新数据
+                renderCoinsTable(result.data);
+                showMessage('数据更新成功', 'success');
+            } else {
+                throw new Error(result.message);
+            }
             isDataLoading = false;
             showLoading(false);
         })
