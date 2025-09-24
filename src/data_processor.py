@@ -50,7 +50,7 @@ def get_coin_data(symbol='BTCUSDT'):
     # 查找指定币种的数据
     symbol_data = None
     for coin_data in all_coins_data:
-        if coin_data.get('symbol') == symbol:
+        if coin_data and isinstance(coin_data, dict) and coin_data.get('symbol') == symbol:
             symbol_data = coin_data
             break
     
@@ -82,9 +82,9 @@ def get_coin_data(symbol='BTCUSDT'):
     result = {
         'symbol': symbol,
         'current_open_interest': current_interest,
-        'current_open_interest_formatted': format_number(current_interest),
+        'current_open_interest_formatted': format_number(current_interest) if current_interest is not None else "N/A",
         'current_open_interest_value': current_interest_value,
-        'current_open_interest_value_formatted': format_number(current_interest_value),
+        'current_open_interest_value_formatted': format_number(current_interest_value) if current_interest_value is not None else "N/A",
         'current_price': current_price,
         'current_price_formatted': format_number(current_price) if current_price is not None else "N/A",
         'price_change': price_change,
@@ -143,9 +143,9 @@ def get_coin_data(symbol='BTCUSDT'):
                     'ratio': round(ratio, 2) if ratio is not None else (0 if current_interval_interest == 0 else None),
                     'value_ratio': round(value_ratio, 2) if value_ratio is not None else None,
                     'open_interest': current_interval_interest,
-                    'open_interest_formatted': format_number(current_interval_interest),
+                    'open_interest_formatted': format_number(current_interval_interest) if current_interval_interest is not None else "N/A",
                     'open_interest_value': current_interval_interest_value,
-                    'open_interest_value_formatted': format_number(current_interval_interest_value),
+                    'open_interest_value_formatted': format_number(current_interval_interest_value) if current_interval_interest_value is not None else "N/A",
                     'price_change': price_change,
                     'price_change_percent': price_change_percent,
                     'price_change_formatted': format_number(price_change) if price_change is not None else "N/A",
@@ -169,14 +169,123 @@ def get_coin_data(symbol='BTCUSDT'):
     
     return result
 
-def get_all_coins_data(symbols=['BTCUSDT']):
+def get_all_coins_data(symbols=None):
     """
     获取所有币种的数据
-    :param symbols: 币种列表
+    :param symbols: 币种列表，如果为None则返回所有币种数据
     :return: 所有币种数据列表
     """
-    coins_data = []
-    for symbol in symbols:
-        coin_data = get_coin_data(symbol)
-        coins_data.append(coin_data)
-    return coins_data
+    # 加载所有币种数据
+    all_coins_data = load_all_coins_data()
+    
+    # 检查是否有数据
+    if not all_coins_data:
+        from src.utils import logger
+        logger.warning("未加载到任何币种数据")
+        return []
+    
+    # 如果指定了币种列表，则只返回指定币种的数据
+    if symbols:
+        filtered_data = []
+        symbol_set = set(symbols)
+        for coin_data in all_coins_data:
+            if coin_data.get('symbol') in symbol_set:
+                # 格式化数据
+                formatted_data = {
+                    'symbol': coin_data.get('symbol'),
+                    'current_open_interest': coin_data.get('current', {}).get('openInterest') if coin_data.get('current') else None,
+                    'current_open_interest_formatted': format_number(coin_data.get('current', {}).get('openInterest')) if coin_data.get('current', {}).get('openInterest') is not None else "N/A",
+                    'current_open_interest_value': coin_data.get('current', {}).get('openInterestValue') if coin_data.get('current') else None,
+                    'current_open_interest_value_formatted': format_number(coin_data.get('current', {}).get('openInterestValue')) if coin_data.get('current', {}).get('openInterestValue') is not None else "N/A",
+                    'current_price': None,
+                    'current_price_formatted': "N/A",
+                    'price_change': coin_data.get('price_change', {}).get('priceChange') if coin_data.get('price_change') else None,
+                    'price_change_percent': coin_data.get('price_change', {}).get('priceChangePercent') if coin_data.get('price_change') else None,
+                    'price_change_formatted': format_number(coin_data.get('price_change', {}).get('priceChange')) if coin_data.get('price_change', {}).get('priceChange') is not None else "N/A",
+                    'changes': {}
+                }
+                
+                # 计算当前价格
+                current_interest = coin_data.get('current', {}).get('openInterest') if coin_data.get('current') else None
+                current_interest_value = coin_data.get('current', {}).get('openInterestValue') if coin_data.get('current') else None
+                if current_interest is not None and current_interest != 0 and current_interest_value is not None:
+                    current_price = current_interest_value / current_interest
+                    formatted_data['current_price'] = current_price
+                    formatted_data['current_price_formatted'] = format_number(current_price)
+                
+                # 处理各时间间隔的变化数据
+                interval_data_map = {}
+                for item in coin_data.get('intervals', []):
+                    interval = item.get('interval')
+                    if interval:
+                        interval_data_map[interval] = item
+                
+                for interval in TIME_INTERVALS:
+                    interval_data = interval_data_map.get(interval)
+                    if interval_data:
+                        current_interval_interest = interval_data.get('openInterest')
+                        current_interval_interest_value = interval_data.get('openInterestValue')
+                        
+                        ratio = None
+                        value_ratio = None
+                        price_change = None
+                        price_change_percent = None
+                        current_interval_price = None
+                        
+                        # 计算当前价格（持仓价值/持仓量）
+                        if current_interval_interest is not None and current_interval_interest != 0 and current_interval_interest_value is not None:
+                            current_interval_price = current_interval_interest_value / current_interval_interest
+                        
+                        # 计算价格变化和价格变化百分比
+                        if current_interval_price is not None and formatted_data['current_price'] is not None:
+                            price_change = formatted_data['current_price'] - current_interval_price
+                            if formatted_data['current_price'] != 0:
+                                price_change_percent = (price_change / formatted_data['current_price']) * 100
+                        
+                        # 计算持仓量变化比例
+                        if current_interest is not None and current_interval_interest != 0:
+                            ratio = ((current_interest - current_interval_interest) / current_interest) * 100
+                        
+                        # 计算持仓价值变化比例
+                        if current_interval_interest_value is not None and current_interest_value is not None and current_interval_interest_value != 0:
+                            value_ratio = ((current_interest_value - current_interval_interest_value) / current_interval_interest_value) * 100
+                        
+                        formatted_data['changes'][interval] = {
+                            'ratio': round(ratio, 2) if ratio is not None else (0 if current_interval_interest == 0 else None),
+                            'value_ratio': round(value_ratio, 2) if value_ratio is not None else None,
+                            'open_interest': current_interval_interest,
+                            'open_interest_formatted': format_number(current_interval_interest) if current_interval_interest is not None else "N/A",
+                            'open_interest_value': current_interval_interest_value,
+                            'open_interest_value_formatted': format_number(current_interval_interest_value) if current_interval_interest_value is not None else "N/A",
+                            'price_change': price_change,
+                            'price_change_percent': price_change_percent,
+                            'price_change_formatted': format_number(price_change) if price_change is not None else "N/A",
+                            'current_price': current_interval_price,
+                            'current_price_formatted': format_number(current_interval_price) if current_interval_price is not None else "N/A",
+                        }
+                    else:
+                        formatted_data['changes'][interval] = {
+                            'ratio': None,
+                            'value_ratio': None,
+                            'open_interest': None,
+                            'open_interest_formatted': "N/A",
+                            'open_interest_value': None,
+                            'open_interest_value_formatted': "N/A",
+                            'price_change': None,
+                            'price_change_percent': None,
+                            'price_change_formatted': "N/A",
+                            'current_price': None,
+                            'current_price_formatted': "N/A",
+                        }
+                
+                filtered_data.append(formatted_data)
+        return filtered_data
+    else:
+        # 返回所有币种数据
+        coins_data = []
+        for coin_data in all_coins_data:
+            symbol = coin_data.get('symbol')
+            if symbol:  # 确保symbol存在
+                formatted_data = get_coin_data(symbol)
+                coins_data.append(formatted_data)
+        return coins_data

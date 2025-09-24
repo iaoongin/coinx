@@ -142,7 +142,9 @@ def load_all_coins_data():
                     data = json.load(f)
                 # 验证数据格式并返回最新的数据
                 if isinstance(data, list) and len(data) > 0:
-                    return data[-1]['data']
+                    latest_data = data[-1].get('data', [])
+                    # 确保返回的是列表而不是None
+                    return latest_data if latest_data is not None else []
                 else:
                     return []
             except (json.JSONDecodeError, Exception) as e:
@@ -177,3 +179,36 @@ def calculate_change_ratio(current, past):
         return 0
     ratio = ((current[1] - past[1]) / past[1]) * 100
     return round(ratio, 2)
+
+def get_cache_update_time():
+    """获取缓存更新时间"""
+    try:
+        import os
+        import json
+        from datetime import datetime
+        
+        # 缓存文件路径
+        CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'open_interest_cache.json')
+        
+        logger.info(f"尝试获取缓存更新时间，缓存文件路径: {CACHE_FILE}")
+        
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # 获取最新的缓存时间戳
+            if cache_data:
+                timestamps = sorted(cache_data.keys(), key=int)
+                latest_timestamp = int(timestamps[-1])
+                logger.info(f"找到缓存数据，最新时间戳: {latest_timestamp}")
+                return latest_timestamp * 1000  # 转换为毫秒
+            else:
+                logger.info("缓存文件存在但无数据")
+        else:
+            logger.info("缓存文件不存在")
+        
+        return None
+    except Exception as e:
+        logger.error(f"获取缓存更新时间失败: {e}")
+        logger.exception(e)
+        return None

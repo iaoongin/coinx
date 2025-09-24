@@ -12,12 +12,19 @@ def scheduled_update():
     """定时更新数据的任务"""
     try:
         logger.info("开始执行定时数据更新任务...")
-        # 获取活跃币种列表
+        # 获取活跃币种列表（用于Web展示）
         from .coin_manager import get_active_coins
         symbols = get_active_coins()
         
-        # 更新数据
-        update_all_data(symbols)
+        # 检查是否需要更新缓存（基于自然5分钟间隔）
+        from .binance_api import should_update_cache
+        if not should_update_cache():
+            logger.info("当前5分钟周期内已有缓存数据，跳过定时更新")
+            return
+        
+        # 更新所有币种数据（内部会根据缓存策略决定是否真正更新）
+        from .binance_api import update_all_data
+        update_all_data()
         logger.info("定时数据更新任务执行完成")
     except Exception as e:
         logger.error(f"定时任务执行失败: {e}")
