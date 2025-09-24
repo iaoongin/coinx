@@ -29,6 +29,37 @@
 - 代理地址: `127.0.0.1:7897`
 - 可在 `src/config.py` 中修改代理配置
 
+## 服务管理
+
+系统提供了完善的服务管理脚本：
+
+### 启动服务
+```bash
+python start_app.py start
+```
+
+### 停止服务
+```bash
+python start_app.py stop
+```
+
+### 重启服务
+```bash
+python start_app.py restart
+```
+
+### 查看服务状态
+```bash
+python start_app.py status
+```
+
+### 自动监控和重启服务
+```bash
+python monitor_service.py
+```
+
+监控脚本会自动检测服务状态，如果服务停止会自动重启。
+
 ## 单元测试
 
 本项目包含完整的单元测试，确保代码质量和功能可靠性。

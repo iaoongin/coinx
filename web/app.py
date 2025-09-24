@@ -112,7 +112,7 @@ def get_coins():
             'error': str(e)
         }
         logger.error(f"获取币种数据失败: {e}")
-        raise e
+        logger.exception(e)
         return jsonify(error_response), 500
 
 @app.route('/api/update')

@@ -14,19 +14,24 @@ from src.config import BINANCE_BASE_URL, TIME_INTERVALS, USE_PROXY, PROXY_URL, H
 from src.utils import save_all_coins_data, logger
 from src.coin_manager import get_active_coins
 
+# 创建一个全局会话对象，用于复用连接
+_global_session = None
+
 def get_session():
     """创建带代理配置的会话"""
-    session = requests.Session()
+    global _global_session
+    if _global_session is None:
+        _global_session = requests.Session()
+        
+        if USE_PROXY:
+            proxies = {
+                'http': PROXY_URL,
+                'https': HTTPS_PROXY_URL
+            }
+            _global_session.proxies.update(proxies)
+            logger.info(f"使用代理: {PROXY_URL}")
     
-    if USE_PROXY:
-        proxies = {
-            'http': PROXY_URL,
-            'https': HTTPS_PROXY_URL
-        }
-        session.proxies.update(proxies)
-        logger.info(f"使用代理: {PROXY_URL}")
-    
-    return session
+    return _global_session
 
 def get_latest_price(symbol):
     """
@@ -50,6 +55,9 @@ def get_latest_price(symbol):
         logger.info(f"最新价格数据响应: {data}")
         
         return float(data['price'])
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: {symbol}, 错误: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取最新价格失败: {symbol}, 错误: {e}")
         return None
@@ -83,6 +91,9 @@ def get_24hr_ticker(symbol):
             'lowPrice': float(data['lowPrice']),
             'volume': float(data['volume'])
         }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: {symbol}, 错误: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取24小时价格变化数据失败: {symbol}, 错误: {e}")
         return None
@@ -120,6 +131,9 @@ def get_open_interest(symbol):
             'openInterestValue': open_interest_value,
             'time': data['time']
         }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: {symbol}, 错误: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取持仓量数据失败: {symbol}, 错误: {e}")
         # 不再返回模拟数据，直接返回None
@@ -181,6 +195,9 @@ def get_open_interest_history(symbol, interval, limit=2):
             }
         
         return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: {symbol}, {interval}, 错误: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取历史持仓量数据失败: {symbol}, {interval}, 错误: {e}")
         # 不再返回模拟数据，直接返回None
@@ -220,6 +237,7 @@ def update_all_data(symbols=None):
                         logger.warning(f"未获取到 {symbol} 数据")
                 except Exception as e:
                     logger.error(f"更新 {symbol} 数据时出错: {e}")
+                    logger.exception(e)
     except RuntimeError as e:
         if "cannot schedule new futures after interpreter shutdown" in str(e):
             logger.error("检测到解释器关闭，停止并行处理")
@@ -232,12 +250,24 @@ def update_all_data(symbols=None):
                 else:
                     logger.warning(f"未获取到 {symbol} 数据（串行）")
         else:
-            raise e
+            logger.error(f"运行时错误: {e}")
+            logger.exception(e)
+            # 避免抛出异常导致服务中断
+            # raise e
+    except Exception as e:
+        logger.error(f"并行处理过程中出现未预期的错误: {e}")
+        logger.exception(e)
+        # 避免抛出异常导致服务中断
+        # raise e
     
     # 保存所有币种数据
     if all_coins_data:
-        save_all_coins_data(all_coins_data)
-        logger.info("所有币种数据已保存")
+        try:
+            save_all_coins_data(all_coins_data)
+            logger.info("所有币种数据已保存")
+        except Exception as e:
+            logger.error(f"保存所有币种数据失败: {e}")
+            logger.exception(e)
     else:
         logger.warning("没有币种数据需要保存")
     
@@ -296,6 +326,7 @@ def update_single_coin_data(symbol):
                             logger.warning(f"未获取到 {symbol} {interval} 历史数据")
                     except Exception as e:
                         logger.error(f"获取 {symbol} {interval} 数据时出错: {e}")
+                        logger.exception(e)
         except RuntimeError as e:
             if "cannot schedule new futures after interpreter shutdown" in str(e):
                 logger.error(f"检测到解释器关闭，停止并行处理 {symbol} 的时间周期数据")
@@ -309,7 +340,15 @@ def update_single_coin_data(symbol):
                     else:
                         logger.warning(f"未获取到 {symbol} {interval} 历史数据（串行）")
             else:
-                raise e
+                logger.error(f"运行时错误: {e}")
+                logger.exception(e)
+                # 避免抛出异常导致服务中断
+                # raise e
+        except Exception as e:
+            logger.error(f"并行处理时间周期数据过程中出现未预期的错误: {e}")
+            logger.exception(e)
+            # 避免抛出异常导致服务中断
+            # raise e
         
         # 组装币种数据
         coin_data = {
@@ -323,4 +362,5 @@ def update_single_coin_data(symbol):
         return coin_data
     except Exception as e:
         logger.error(f"更新 {symbol} 数据时出错: {e}")
+        logger.exception(e)
         return None
