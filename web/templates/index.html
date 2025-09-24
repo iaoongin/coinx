@@ -1057,15 +1057,15 @@
           .then((response) => response.json())
           .then((data) => {
             if (data.status === "success") {
-              showMessageModal(data.message, "success");
+              showMessageModal(data.message || "币种配置更新成功", "success");
               loadCoinsConfigModal();
             } else {
-              showMessageModal(data.message, "error");
+              showMessageModal(data.message || "币种配置更新失败", "error");
             }
           })
           .catch((error) => {
             console.error("Error:", error);
-            showMessageModal("更新币种配置失败", "error");
+            showMessageModal("更新币种配置时发生网络错误: " + error.message, "error");
           });
       }
 
@@ -1077,8 +1077,50 @@
 
       // 显示消息（弹窗内）
       function showMessageModal(message, type) {
-        // 这里可以实现弹窗内的消息显示，或者使用页面上的消息区域
-        alert(message);
+        // 创建或获取消息显示区域
+        let messageContainer = document.getElementById('modal-message');
+        if (!messageContainer) {
+          // 创建消息容器
+          messageContainer = document.createElement('div');
+          messageContainer.id = 'modal-message';
+          messageContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+            z-index: 1001;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            display: none;
+          `;
+          document.body.appendChild(messageContainer);
+        }
+        
+        // 设置消息内容和样式
+        messageContainer.textContent = message;
+        messageContainer.style.display = 'block';
+        
+        // 根据消息类型设置背景色
+        switch(type) {
+          case 'success':
+            messageContainer.style.backgroundColor = '#28a745';
+            break;
+          case 'error':
+            messageContainer.style.backgroundColor = '#dc3545';
+            break;
+          case 'info':
+            messageContainer.style.backgroundColor = '#17a2b8';
+            break;
+          default:
+            messageContainer.style.backgroundColor = '#6c757d';
+        }
+        
+        // 3秒后自动隐藏消息
+        setTimeout(() => {
+          messageContainer.style.display = 'none';
+        }, 3000);
       }
 
       // 关闭弹窗

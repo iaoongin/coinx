@@ -57,7 +57,8 @@ def get_all_coins_from_binance():
         return usdt_pairs
     except Exception as e:
         logger.error(f"从币安获取交易对列表失败: {e}")
-        return []
+        # 返回None而不是空列表，以便调用方能区分是错误还是空结果
+        return None
 
 def load_coins_config():
     """
@@ -157,27 +158,35 @@ def update_coins_config():
         
         # 从币安获取所有USDT交易对
         all_coins = get_all_coins_from_binance()
-        if not all_coins:
-            logger.warning("未能从币安获取到交易对列表")
-            return False
-        
-        # 提取交易对名称
-        coin_symbols = [coin['symbol'] for coin in all_coins]
         
         # 加载现有配置
         current_config = load_coins_config_dict()
         
-        # 更新配置：保留现有币种的跟踪状态，添加新币种（默认不跟踪）
-        updated_config = current_config.copy()
-        for symbol in coin_symbols:
-            if symbol not in updated_config:
-                updated_config[symbol] = False  # 新币种默认不跟踪
-        
-        # 保存更新后的配置
-        save_coins_config_dict(updated_config)
-        
-        logger.info(f"币种配置更新完成，共 {len(updated_config)} 个币种")
-        return True
+        # 检查是否获取到了币种数据
+        if all_coins is None:
+            # 网络请求失败
+            logger.error("从币安获取交易对列表失败")
+            return False
+        elif len(all_coins) == 0:
+            # 获取到了响应但没有符合条件的交易对
+            logger.warning("未找到符合条件的USDT交易对")
+            # 仍然认为更新操作成功，因为配置文件未受影响
+            return True
+        else:
+            # 提取交易对名称
+            coin_symbols = [coin['symbol'] for coin in all_coins]
+            
+            # 更新配置：保留现有币种的跟踪状态，添加新币种（默认不跟踪）
+            updated_config = current_config.copy()
+            for symbol in coin_symbols:
+                if symbol not in updated_config:
+                    updated_config[symbol] = False  # 新币种默认不跟踪
+            
+            # 保存更新后的配置
+            save_coins_config_dict(updated_config)
+            
+            logger.info(f"币种配置更新完成，共 {len(updated_config)} 个币种")
+            return True
     except Exception as e:
         logger.error(f"更新币种配置失败: {e}")
         return False

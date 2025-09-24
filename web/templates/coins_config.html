@@ -220,12 +220,12 @@
                         renderTransferLists(allCoins);
                     } else {
                         console.log('数据获取失败:', data.message);
-                        showMessage(data.message, 'error');
+                        // 移除消息显示
                     }
                 })
                 .catch(error => {
                     console.error('获取币种配置时出错:', error);
-                    showMessage('获取币种配置失败: ' + error.message, 'error');
+                    // 移除消息显示
                 });
         }
         
@@ -398,12 +398,7 @@
                 });
             }))
             .then(() => {
-                if (failCount === 0) {
-                    showMessage(`成功更新 ${successCount} 个币种的跟踪状态`, 'success');
-                } else {
-                    showMessage(`更新完成: ${successCount} 个成功, ${failCount} 个失败`, 
-                              failCount > 0 ? 'error' : 'success');
-                }
+                // 直接自动保存，不显示任何消息
                 if (callback) callback();
             });
         }
@@ -444,8 +439,6 @@
                 return;
             }
             
-            showMessage('正在从币安更新币种配置...', 'info');
-            
             // 调用从币安更新币种配置的API
             fetch('/api/coins-config/update-from-binance', {
                 method: 'POST',
@@ -456,36 +449,27 @@
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
-                    showMessage(data.message, 'success');
                     // 重新加载币种配置
                     loadCoinsConfig();
                 } else {
-                    showMessage(data.message, 'error');
+                    // 不显示错误消息
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                showMessage('更新币种配置失败: ' + error.message, 'error');
+                // 不显示错误消息
             });
         }
         
         // 保存跟踪状态
         function saveTrackingStatus() {
             // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
-            showMessage('跟踪配置已保存', 'success');
+            // 不显示任何消息
         }
         
-        // 显示消息
+        // 显示消息（保留函数但不执行任何操作）
         function showMessage(message, type) {
-            const messageElement = document.getElementById('message');
-            messageElement.textContent = message;
-            messageElement.className = 'message ' + type;
-            messageElement.style.display = 'block';
-            
-            // 3秒后自动隐藏消息
-            setTimeout(() => {
-                messageElement.style.display = 'none';
-            }, 3000);
+            // 移除所有消息显示功能
         }
     </script>
 </body>
