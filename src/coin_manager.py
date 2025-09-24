@@ -208,6 +208,22 @@ def get_active_coins(filter_symbols=None):
     
     return tracked_coins
 
+def get_all_coins_list():
+    """
+    获取所有币种列表（从币安获取）
+    :return: 所有币种列表
+    """
+    try:
+        all_coins = get_all_coins_from_binance()
+        if all_coins:
+            return [coin['symbol'] for coin in all_coins]
+        else:
+            # 如果无法从币安获取，返回空列表
+            return []
+    except Exception as e:
+        logger.error(f"获取所有币种列表失败: {e}")
+        return []
+
 def set_coin_tracking(symbol, tracked):
     """
     设置币种的跟踪状态

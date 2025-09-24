@@ -7,10 +7,9 @@ import json
 project_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
 
-from src.binance_api import update_all_data
 from src.data_processor import get_all_coins_data
 from src.coin_manager import get_active_coins, load_coins_config_dict, save_coins_config_dict, add_coin, remove_coin, set_coin_tracking, update_coins_config
-from src.utils import logger
+from src.utils import logger, get_cache_update_time
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -49,63 +48,44 @@ def get_coins():
         logger.info(f"获取到 {len(coins_data)} 个币种的数据")
         logger.info(f"原始数据示例: {coins_data[:2] if coins_data else '无数据'}")
         
+        # 获取缓存更新时间
+        cache_update_time = get_cache_update_time()
+        
         # 处理数据格式，使其更适合前端展示
         formatted_data = []
         for coin in coins_data:
-            # 处理格式化字段，如果不存在则使用默认值
-            current_open_interest_formatted = coin.get('current_open_interest_formatted', 
-                                                     f"{coin.get('current_open_interest', 0):,.2f}" if coin.get('current_open_interest') else 'N/A')
-            current_open_interest_value_formatted = coin.get('current_open_interest_value_formatted',
-                                                           f"${coin.get('current_open_interest_value', 0):,.2f}" if coin.get('current_open_interest_value') else 'N/A')
-            current_price_formatted = coin.get('current_price_formatted',
-                                             f"${coin.get('current_price', 0):,.2f}" if coin.get('current_price') else 'N/A')
-            price_change_formatted = coin.get('price_change_formatted',
-                                            f"${coin.get('price_change', 0):,.2f}" if coin.get('price_change') else 'N/A')
-            
             formatted_coin = {
                 'symbol': coin['symbol'],
-                'current_open_interest': coin.get('current_open_interest', 0),
-                'current_open_interest_formatted': current_open_interest_formatted,
-                'current_open_interest_value': coin.get('current_open_interest_value', 0),
-                'current_open_interest_value_formatted': current_open_interest_value_formatted,
-                'current_price': coin.get('current_price', 0),
-                'current_price_formatted': current_price_formatted,
-                'price_change': coin.get('price_change', 0),
-                'price_change_percent': coin.get('price_change_percent', 0),
-                'price_change_formatted': price_change_formatted
+                'current_open_interest': coin['current_open_interest'],
+                'current_open_interest_formatted': coin['current_open_interest_formatted'],
+                'current_open_interest_value': coin['current_open_interest_value'],
+                'current_open_interest_value_formatted': coin['current_open_interest_value_formatted'],
+                'current_price': coin['current_price'],
+                'current_price_formatted': coin['current_price_formatted'],
+                'price_change': coin['price_change'],
+                'price_change_percent': coin['price_change_percent'],
+                'price_change_formatted': coin['price_change_formatted']
             }
             
             # 处理变化数据，转换为数组格式
             changes = []
-            if coin.get('changes'):
+            if coin['changes']:
                 for interval, data in coin['changes'].items():
-                    # 处理格式化字段，如果不存在则使用默认值
-                    open_interest_formatted = data.get('open_interest_formatted',
-                                                     f"{data.get('open_interest', 0):,.2f}" if data.get('open_interest') else 'N/A')
-                    open_interest_value_formatted = data.get('open_interest_value_formatted',
-                                                           f"${data.get('open_interest_value', 0):,.2f}" if data.get('open_interest_value') else 'N/A')
-                    current_price_formatted = data.get('current_price_formatted',
-                                                     f"${data.get('current_price', 0):,.2f}" if data.get('current_price') else 'N/A')
-                    price_change_formatted = data.get('price_change_formatted',
-                                                    f"${data.get('price_change', 0):,.2f}" if data.get('price_change') else 'N/A')
-                    past_price_formatted = data.get('past_price_formatted',
-                                                  f"${data.get('past_price', 0):,.2f}" if data.get('past_price') else 'N/A')
-                    
                     changes.append({
                         'interval': interval,
-                        'ratio': data.get('ratio', 0),
-                        'value_ratio': data.get('value_ratio', 0),
-                        'open_interest': data.get('open_interest', 0),
-                        'open_interest_formatted': open_interest_formatted,
-                        'open_interest_value': data.get('open_interest_value', 0),
-                        'open_interest_value_formatted': open_interest_value_formatted,
-                        'price_change': data.get('price_change', 0),
-                        'price_change_percent': data.get('price_change_percent', 0),
-                        'price_change_formatted': price_change_formatted,
-                        'current_price': data.get('current_price', 0),
-                        'past_price': data.get('past_price', 0),
-                        'current_price_formatted': current_price_formatted,
-                        'past_price_formatted': past_price_formatted
+                        'ratio': data['ratio'],
+                        'value_ratio': data['value_ratio'],
+                        'open_interest': data['open_interest'],
+                        'open_interest_formatted': data['open_interest_formatted'],
+                        'open_interest_value': data['open_interest_value'],
+                        'open_interest_value_formatted': data['open_interest_value_formatted'],
+                        'price_change': data['price_change'],
+                        'price_change_percent': data['price_change_percent'],
+                        'price_change_formatted': data['price_change_formatted'],
+                        'current_price': data['current_price'],
+                        # 'past_price': data['past_price'],
+                        'current_price_formatted': data['current_price_formatted'],
+                        # 'past_price_formatted': data['past_price_formatted']
                     })
             
             # 按时间间隔排序
@@ -125,7 +105,8 @@ def get_coins():
         response_data = {
             'status': 'success',
             'message': '获取币种数据成功',
-            'data': formatted_data
+            'data': formatted_data,
+            'cache_update_time': cache_update_time  # 添加缓存更新时间
         }
         logger.info(f"返回 {len(formatted_data)} 个币种数据")
         return jsonify(response_data)
@@ -143,10 +124,27 @@ def update_data():
     """手动更新数据"""
     logger.info("手动更新数据")
     try:
-        update_all_data()
+        # 检查是否需要更新（基于自然5分钟间隔）
+        from src.binance_api import should_update_cache, update_all_data
+        import threading
+        
+        # 如果不需要更新，直接返回成功消息
+        if not should_update_cache():
+            response_data = {
+                'status': 'success',
+                'message': '数据已是最新，无需更新'
+            }
+            logger.info("数据已是最新，无需更新")
+            return jsonify(response_data)
+        
+        # 在后台线程中执行数据更新，不阻塞Web请求
+        update_thread = threading.Thread(target=update_all_data, kwargs={'force_update': True})
+        update_thread.daemon = True
+        update_thread.start()
+        
         response_data = {
             'status': 'success',
-            'message': '数据更新成功'
+            'message': '已触发数据更新，请稍后刷新页面查看最新数据'
         }
         logger.info(f"更新响应: {response_data}")
         return jsonify(response_data)
@@ -156,7 +154,7 @@ def update_data():
             'message': f'数据更新失败: {str(e)}'
         }
         logger.error(f"更新数据失败: {e}")
-        return jsonify(error_response), 200  # 返回200状态码而不是500
+        return jsonify(error_response), 500
 
 @app.route('/coins-config')
 def coins_config():
@@ -185,7 +183,6 @@ def get_coins_config():
             'message': f'获取币种配置失败: {str(e)}'
         }
         logger.error(f"获取币种配置失败: {e}")
-        logger.exception(e)
         return jsonify(error_response), 500
 
 @app.route('/api/coins-config', methods=['POST'])
@@ -220,7 +217,6 @@ def update_coins_config():
             'message': f'更新币种配置失败: {str(e)}'
         }
         logger.error(f"更新币种配置失败: {e}")
-        logger.exception(e)
         return jsonify(error_response), 500
 
 @app.route('/api/coins-config/add', methods=['POST'])
@@ -254,7 +250,6 @@ def add_coin_api():
             'message': f'添加币种失败: {str(e)}'
         }
         logger.error(f"添加币种失败: {e}")
-        logger.exception(e)
         return jsonify(error_response), 500
 
 @app.route('/api/coins-config/delete', methods=['POST'])
@@ -288,7 +283,6 @@ def delete_coin():
             'message': f'删除币种失败: {str(e)}'
         }
         logger.error(f"删除币种失败: {e}")
-        logger.exception(e)
         return jsonify(error_response), 500
 
 @app.route('/api/coins-config/track', methods=['POST'])
@@ -323,7 +317,6 @@ def set_coin_track():
             'message': f'设置币种跟踪状态失败: {str(e)}'
         }
         logger.error(f"设置币种跟踪状态失败: {e}")
-        logger.exception(e)
         return jsonify(error_response), 500
 
 @app.route('/api/coins-config/update-from-binance', methods=['POST'])
@@ -354,7 +347,6 @@ def update_coins_config_api():
             'message': f'更新币种配置失败: {str(e)}'
         }
         logger.error(f"更新币种配置失败: {e}")
-        logger.exception(e)
         return jsonify(error_response), 500
 
 if __name__ == '__main__':
