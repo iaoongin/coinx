@@ -54,6 +54,39 @@ def get_latest_price(symbol):
         logger.error(f"获取最新价格失败: {symbol}, 错误: {e}")
         return None
 
+def get_24hr_ticker(symbol):
+    """
+    获取指定币种的24小时价格变化数据
+    :param symbol: 币种对，如 BTCUSDT
+    :return: 24小时价格变化数据
+    """
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/ticker/24hr"
+        params = {
+            'symbol': symbol
+        }
+        
+        # 使用会话
+        session = get_session()
+        logger.info(f"请求24小时价格变化数据: {url}?symbol={symbol}")
+        response = session.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        logger.info(f"24小时价格变化数据响应: {data}")
+        
+        return {
+            'priceChange': float(data['priceChange']),
+            'priceChangePercent': float(data['priceChangePercent']),
+            'lastPrice': float(data['lastPrice']),
+            'highPrice': float(data['highPrice']),
+            'lowPrice': float(data['lowPrice']),
+            'volume': float(data['volume'])
+        }
+    except Exception as e:
+        logger.error(f"获取24小时价格变化数据失败: {symbol}, 错误: {e}")
+        return None
+
 def get_open_interest(symbol):
     """
     获取指定币种的当前持仓量数据
@@ -117,8 +150,23 @@ def get_open_interest_history(symbol, interval, limit=2):
         
         logger.info(f"历史持仓量数据响应: {data}")
         
-        if data and len(data) >= 1:
-            # 只取最新的数据点（当前数据）
+        if data and len(data) >= 2:
+            # 取最新的两个数据点（当前数据和前一个数据点）
+            current_item = data[0]
+            # previous_item = data[1]
+            
+            return {
+                'timestamp': current_item['timestamp'],
+                'symbol': symbol,
+                'interval': interval,
+                'openInterest': float(current_item['sumOpenInterest']),
+                'openInterestValue': float(current_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in current_item else 0,
+                # 'previous_openInterest': float(previous_item['sumOpenInterest']),
+                # 'previous_openInterestValue': float(previous_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in previous_item else 0,
+                'time': current_item['timestamp']
+            }
+        elif data and len(data) >= 1:
+            # 如果只有一个数据点，只取最新的数据点
             current_item = data[0]
             
             return {
@@ -127,6 +175,8 @@ def get_open_interest_history(symbol, interval, limit=2):
                 'interval': interval,
                 'openInterest': float(current_item['sumOpenInterest']),
                 'openInterestValue': float(current_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in current_item else 0,
+                # 'previous_openInterest': None,
+                # 'previous_openInterestValue': None,
                 'time': current_item['timestamp']
             }
         
@@ -217,6 +267,9 @@ def update_single_coin_data(symbol):
             else:
                 logger.warning(f"无法获取 {symbol} 最新价格，持仓价值仍为0")
         
+        # 获取24小时价格变化数据
+        price_change_data = get_24hr_ticker(symbol)
+        
         # 并行获取各时间间隔的历史数据，减少线程数避免资源耗尽
         intervals_data = []
         latest_history_data = {}  # 用于存储各时间间隔的最新数据
@@ -263,6 +316,7 @@ def update_single_coin_data(symbol):
             'symbol': symbol,
             'current': current_data,
             'intervals': intervals_data,
+            'price_change': price_change_data,  # 添加价格变化数据
             'update_time': int(time.time() * 1000)
         }
         

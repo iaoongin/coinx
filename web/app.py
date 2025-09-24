@@ -57,7 +57,12 @@ def get_coins():
                 'current_open_interest': coin['current_open_interest'],
                 'current_open_interest_formatted': coin['current_open_interest_formatted'],
                 'current_open_interest_value': coin['current_open_interest_value'],
-                'current_open_interest_value_formatted': coin['current_open_interest_value_formatted']
+                'current_open_interest_value_formatted': coin['current_open_interest_value_formatted'],
+                'current_price': coin['current_price'],
+                'current_price_formatted': coin['current_price_formatted'],
+                'price_change': coin['price_change'],
+                'price_change_percent': coin['price_change_percent'],
+                'price_change_formatted': coin['price_change_formatted']
             }
             
             # 处理变化数据，转换为数组格式
@@ -71,7 +76,14 @@ def get_coins():
                         'open_interest': data['open_interest'],
                         'open_interest_formatted': data['open_interest_formatted'],
                         'open_interest_value': data['open_interest_value'],
-                        'open_interest_value_formatted': data['open_interest_value_formatted']
+                        'open_interest_value_formatted': data['open_interest_value_formatted'],
+                        'price_change': data['price_change'],
+                        'price_change_percent': data['price_change_percent'],
+                        'price_change_formatted': data['price_change_formatted'],
+                        'current_price': data['current_price'],
+                        # 'past_price': data['past_price'],
+                        'current_price_formatted': data['current_price_formatted'],
+                        # 'past_price_formatted': data['past_price_formatted']
                     })
             
             # 按时间间隔排序
@@ -100,6 +112,7 @@ def get_coins():
             'error': str(e)
         }
         logger.error(f"获取币种数据失败: {e}")
+        raise e
         return jsonify(error_response), 500
 
 @app.route('/api/update')

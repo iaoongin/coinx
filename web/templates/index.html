@@ -1,459 +1,489 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>币种数据监控</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-        }
-        .controls {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        .btn {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 16px;
-            margin: 4px 2px;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-        .btn:hover {
-            background-color: #0056b3;
-        }
-        .loading {
-            text-align: center;
-            font-size: 18px;
-            color: #666;
-        }
-        .info-note {
-            background-color: #e9ecef;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            text-align: center;
-            font-size: 14px;
-            color: #495057;
-        }
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-            padding: 15px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        .no-data {
-            text-align: center;
-            color: #999;
-            font-style: italic;
-            padding: 20px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        th, td {
-            padding: 12px 15px;
-            text-align: center;
-            border-bottom: 1px solid #ddd;
-        }
-        th {
-            background-color: #f8f9fa;
-            font-weight: bold;
-            color: #333;
-        }
-        tr:hover {
-            background-color: #f5f5f5;
-        }
-        .positive {
-            color: #28a745;
-        }
-        .negative {
-            color: #dc3545;
-        }
-        .current-interest {
-            font-weight: bold;
-        }
-        .change-cell {
-            font-size: 14px;
-            line-height: 1.4;
-        }
-        .change-row {
-            margin-bottom: 3px;
-        }
-        .change-row:last-child {
-            margin-bottom: 0;
-        }
-        .change-value {
-            font-weight: bold;
-        }
-        .change-percent {
-            display: inline-block;
-            margin-right: 5px;
-        }
-        .change-amount {
-            font-size: 12px;
-            color: #666;
-        }
-        .auto-refresh {
-            text-align: center;
-            margin-bottom: 10px;
-            font-size: 14px;
-            color: #666;
-        }
-        .formatted-value {
-            cursor: help;
-        }
-        .data-section {
-            margin-bottom: 5px;
-        }
-        .data-label {
-            display: none;
-        }
-        .ratio-section {
-            font-weight: bold;
-            font-size: 16px;
-            margin-bottom: 8px;
-        }
-        .interest-section, .value-section {
-            font-size: 14px;
-            margin-bottom: 3px;
-        }
-        .value-ratio-section {
-            font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 3px;
-            display: block;
-        }
-        .value-row-label {
-            text-align: right;
-            font-weight: bold;
-            font-size: 14px;
-            color: #666;
-            background-color: #f8f9fa;
-        }
-        .last-update {
-            text-align: center;
-            margin-bottom: 10px;
-            font-size: 14px;
-            color: #666;
-        }
-        .countdown {
-            font-weight: bold;
-            color: #007bff;
-        }
-        .value-only {
-            display: none;
-        }
-        /* 弹窗样式 */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.4);
-        }
-        .modal-content {
-            background-color: #fefefe;
-            margin: 5% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 80%;
-            max-width: 800px;
-            border-radius: 8px;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        .close {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .close:hover,
-        .close:focus {
-            color: black;
-            text-decoration: none;
-        }
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .modal-header h2 {
-            margin: 0;
-        }
-        .transfer-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 20px 0;
-        }
-        .transfer-box {
-            width: 45%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 10px;
-            background: white;
-        }
-        .transfer-box h3 {
-            margin-top: 0;
-            text-align: center;
-        }
-        .transfer-list {
-            max-height: 300px;
-            overflow-y: auto;
-            min-height: 200px;
-        }
-        .transfer-item {
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-        }
-        .transfer-item:hover {
-            background: #f0f0f0;
-        }
-        .transfer-actions {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            width: 10%;
-        }
-        .transfer-btn {
-            margin: 5px 0;
-            padding: 5px 10px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .transfer-btn:hover {
-            background: #0056b3;
-        }
-        .transfer-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .filter-input {
-            margin-bottom: 15px;
-        }
-        .filter-input input {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 300px;
-        }
-        .selected-item {
-            background: #e7f3ff;
-        }
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        /* max-width: 1200px; */
+        margin: 0 auto;
+      }
+      h1 {
+        text-align: center;
+        color: #333;
+      }
+      .controls {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .btn {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .btn:hover {
+        background-color: #0056b3;
+      }
+      .loading {
+        text-align: center;
+        font-size: 18px;
+        color: #666;
+      }
+      .info-note {
+        background-color: #e9ecef;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        text-align: center;
+        font-size: 14px;
+        color: #495057;
+      }
+      .error {
+        background-color: #f8d7da;
+        color: #721c24;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+      }
+      .no-data {
+        text-align: center;
+        color: #999;
+        font-style: italic;
+        padding: 20px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: white;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 12px 15px;
+        text-align: center;
+        border-bottom: 1px solid #ddd;
+      }
+      th {
+        background-color: #f8f9fa;
+        font-weight: bold;
+        color: #333;
+      }
+      tr:hover {
+        background-color: #f5f5f5;
+      }
+      .positive {
+        color: #28a745;
+      }
+      .negative {
+        color: #dc3545;
+      }
+      .current-interest {
+        font-weight: bold;
+      }
+      .change-cell {
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      .change-row {
+        margin-bottom: 3px;
+      }
+      .change-row:last-child {
+        margin-bottom: 0;
+      }
+      .change-value {
+        font-weight: bold;
+      }
+      .change-percent {
+        display: inline-block;
+        margin-right: 5px;
+      }
+      .change-amount {
+        font-size: 12px;
+        color: #666;
+      }
+      .auto-refresh {
+        text-align: center;
+        margin-bottom: 10px;
+        font-size: 14px;
+        color: #666;
+      }
+      .formatted-value {
+        cursor: help;
+      }
+      .data-section {
+        margin-bottom: 5px;
+      }
+      .data-label {
+        display: none;
+      }
+      .ratio-section {
+        font-weight: bold;
+        font-size: 16px;
+        margin-bottom: 8px;
+      }
+      .interest-section,
+      .value-section {
+        font-size: 14px;
+        margin-bottom: 3px;
+      }
+      .value-ratio-section {
+        font-weight: bold;
+        font-size: 14px;
+        margin-bottom: 3px;
+        display: block;
+      }
+      .value-row-label {
+        text-align: right;
+        font-weight: bold;
+        font-size: 14px;
+        color: #666;
+        background-color: #f8f9fa;
+      }
+      .last-update {
+        text-align: center;
+        margin-bottom: 10px;
+        font-size: 14px;
+        color: #666;
+      }
+      .countdown {
+        font-weight: bold;
+        color: #007bff;
+      }
+      .value-only {
+        display: none;
+      }
+      /* 弹窗样式 */
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.4);
+      }
+      .modal-content {
+        background-color: #fefefe;
+        margin: 5% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+        max-width: 800px;
+        border-radius: 8px;
+        max-height: 80vh;
+        overflow-y: auto;
+      }
+      .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .close:hover,
+      .close:focus {
+        color: black;
+        text-decoration: none;
+      }
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .modal-header h2 {
+        margin: 0;
+      }
+      .transfer-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 20px 0;
+      }
+      .transfer-box {
+        width: 45%;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 10px;
+        background: white;
+      }
+      .transfer-box h3 {
+        margin-top: 0;
+        text-align: center;
+      }
+      .transfer-list {
+        max-height: 300px;
+        overflow-y: auto;
+        min-height: 200px;
+      }
+      .transfer-item {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+      }
+      .transfer-item:hover {
+        background: #f0f0f0;
+      }
+      .transfer-actions {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        width: 10%;
+      }
+      .transfer-btn {
+        margin: 5px 0;
+        padding: 5px 10px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .transfer-btn:hover {
+        background: #0056b3;
+      }
+      .transfer-btn:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .filter-input {
+        margin-bottom: 15px;
+      }
+      .filter-input input {
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        width: 300px;
+      }
+      .selected-item {
+        background: #e7f3ff;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="container">
-        <h1>币种数据监控</h1>
-        
-        <div class="controls">
-            <button class="btn" onclick="openCoinsConfig()">币种配置</button>
-        </div>
-        
-        <div class="last-update">
-            最后更新时间: <span id="last-update-time">--</span> | 
-            下次刷新倒计时: <span id="countdown" class="countdown">--</span>
-        </div>
-        
-        <div class="auto-refresh">
-            数据每5分钟自动更新一次
-        </div>
-        
-        <div id="data-container">
-            <div class="loading">正在获取最新数据...</div>
-        </div>
+      <h1>币种数据监控</h1>
+
+      <div class="controls">
+        <button class="btn" onclick="openCoinsConfig()">币种配置</button>
+      </div>
+
+      <div class="last-update">
+        最后更新时间: <span id="last-update-time">--</span> | 下次刷新倒计时:
+        <span id="countdown" class="countdown">--</span>
+      </div>
+
+      <div class="auto-refresh">数据每5分钟自动更新一次</div>
+
+      <div id="data-container">
+        <div class="loading">正在获取最新数据...</div>
+      </div>
     </div>
-    
+
     <!-- 币种配置弹窗 -->
     <div id="coinsConfigModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>币种配置管理</h2>
-                <span class="close">&times;</span>
-            </div>
-            <div id="modal-content">
-                <div class="controls">
-                    <button class="btn btn-success" onclick="updateFromBinanceModal()">从币安更新</button>
-                    <button class="btn btn-warning" onclick="saveTrackingStatusModal()">保存配置</button>
-                </div>
-                
-                <div class="transfer-container">
-                    <div class="transfer-box">
-                        <h3>所有币种</h3>
-                        <div class="filter-input">
-                            <input type="text" id="modalAllCoinsFilter" placeholder="搜索币种..." onkeyup="filterAllCoinsModal()">
-                        </div>
-                        <div id="modalAllCoinsList" class="transfer-list">
-                            <div class="loading">加载中...</div>
-                        </div>
-                    </div>
-                    
-                    <div class="transfer-actions">
-                        <button class="transfer-btn" id="modalAddBtn" onclick="addToTrackedModal()" disabled>>></button>
-                        <button class="transfer-btn" id="modalRemoveBtn" onclick="removeFromTrackedModal()" disabled><<</button>
-                    </div>
-                    
-                    <div class="transfer-box">
-                        <h3>跟踪的币种</h3>
-                        <div class="filter-input">
-                            <input type="text" id="modalTrackedCoinsFilter" placeholder="搜索币种..." onkeyup="filterTrackedCoinsModal()">
-                        </div>
-                        <div id="modalTrackedCoinsList" class="transfer-list">
-                            <div class="loading">加载中...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>币种配置管理</h2>
+          <span class="close">&times;</span>
         </div>
+        <div id="modal-content">
+          <div class="controls">
+            <button class="btn btn-success" onclick="updateFromBinanceModal()">
+              从币安更新
+            </button>
+            <button class="btn btn-warning" onclick="saveTrackingStatusModal()">
+              保存配置
+            </button>
+          </div>
+
+          <div class="transfer-container">
+            <div class="transfer-box">
+              <h3>所有币种</h3>
+              <div class="filter-input">
+                <input
+                  type="text"
+                  id="modalAllCoinsFilter"
+                  placeholder="搜索币种..."
+                  onkeyup="filterAllCoinsModal()"
+                />
+              </div>
+              <div id="modalAllCoinsList" class="transfer-list">
+                <div class="loading">加载中...</div>
+              </div>
+            </div>
+
+            <div class="transfer-actions">
+              <button
+                class="transfer-btn"
+                id="modalAddBtn"
+                onclick="addToTrackedModal()"
+                disabled
+              >
+                >>
+              </button>
+              <button
+                class="transfer-btn"
+                id="modalRemoveBtn"
+                onclick="removeFromTrackedModal()"
+                disabled
+              >
+                <<
+              </button>
+            </div>
+
+            <div class="transfer-box">
+              <h3>跟踪的币种</h3>
+              <div class="filter-input">
+                <input
+                  type="text"
+                  id="modalTrackedCoinsFilter"
+                  placeholder="搜索币种..."
+                  onkeyup="filterTrackedCoinsModal()"
+                />
+              </div>
+              <div id="modalTrackedCoinsList" class="transfer-list">
+                <div class="loading">加载中...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-        let countdownInterval;
-        let lastUpdateTime = 0;
-        let allCoins = {}; // 存储所有币种及其跟踪状态
-        let selectedAllCoins = new Set(); // 选中的所有币种
-        let selectedTrackedCoins = new Set(); // 选中的跟踪币种
-        
-        // 页面加载完成后获取数据
-        document.addEventListener('DOMContentLoaded', function() {
-            loadData();
-            // 每5分钟自动刷新数据 (300秒)
-            setInterval(loadData, 300000);
-        });
+      let countdownInterval;
+      let lastUpdateTime = 0;
+      let allCoins = {}; // 存储所有币种及其跟踪状态
+      let selectedAllCoins = new Set(); // 选中的所有币种
+      let selectedTrackedCoins = new Set(); // 选中的跟踪币种
 
-        // 加载数据
-        function loadData() {
-            const container = document.getElementById('data-container');
-            const lastUpdateElement = document.getElementById('last-update-time');
-            const countdownElement = document.getElementById('countdown');
-            
-            container.innerHTML = '<div class="loading">正在获取最新数据...</div>';
-            
-            // 更新最后更新时间
-            const now = new Date();
-            lastUpdateElement.textContent = now.toLocaleString('zh-CN');
-            lastUpdateTime = now.getTime();
-            
-            // 重置倒计时
-            if (countdownInterval) {
-                clearInterval(countdownInterval);
-            }
-            
-            // 开始倒计时
-            let secondsLeft = 300; // 5分钟 = 300秒
-            updateCountdown(secondsLeft);
-            
-            countdownInterval = setInterval(() => {
-                secondsLeft--;
-                if (secondsLeft <= 0) {
-                    secondsLeft = 300;
-                }
-                updateCountdown(secondsLeft);
-            }, 1000);
-            
-            // 先调用更新接口获取最新数据
-            console.log('开始获取数据...');
-            fetch('/api/update')
-                .then(response => {
-                    console.log('更新接口响应:', response);
-                    return response.json();
-                })
-                .then(updateResult => {
-                    console.log('更新结果:', updateResult);
-                    if (updateResult.success) {
-                        // 更新成功后获取数据
-                        console.log('更新成功，开始获取币种数据...');
-                        return fetch('/api/coins');
-                    } else {
-                        // 更新失败时也尝试获取现有数据
-                        console.log('更新失败，但仍尝试获取币种数据...');
-                        return fetch('/api/coins');
-                    }
-                })
-                .then(response => {
-                    console.log('币种数据接口响应:', response);
-                    return response.json();
-                })
-                .then(result => {
-                    console.log('币种数据结果:', result);
-                    if (result.success) {
-                        console.log('数据获取成功，开始渲染数据...');
-                        renderData(result.data);
-                    } else {
-                        console.log('数据获取失败:', result.error);
-                        container.innerHTML = `<div class="error">加载失败: ${result.error}</div>`;
-                    }
-                })
-                .catch(error => {
-                    console.error('加载数据时出错:', error);
-                    container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
-                });
-        }
-        
-        // 更新倒计时显示
-        function updateCountdown(seconds) {
-            const countdownElement = document.getElementById('countdown');
-            const minutes = Math.floor(seconds / 60);
-            const secs = seconds % 60;
-            countdownElement.textContent = `${minutes}:${secs.toString().padStart(2, '0')}`;
+      // 页面加载完成后获取数据
+      document.addEventListener("DOMContentLoaded", function () {
+        loadData();
+        // 每5分钟自动刷新数据 (300秒)
+        setInterval(loadData, 300000);
+      });
+
+      // 加载数据
+      function loadData() {
+        const container = document.getElementById("data-container");
+        const lastUpdateElement = document.getElementById("last-update-time");
+        const countdownElement = document.getElementById("countdown");
+
+        container.innerHTML = '<div class="loading">正在获取最新数据...</div>';
+
+        // 更新最后更新时间
+        const now = new Date();
+        lastUpdateElement.textContent = now.toLocaleString("zh-CN");
+        lastUpdateTime = now.getTime();
+
+        // 重置倒计时
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
         }
 
-        // 渲染数据
-        function renderData(coinsData) {
-            console.log('开始渲染数据:', coinsData);
-            const container = document.getElementById('data-container');
-            
-            if (!coinsData || !Array.isArray(coinsData) || coinsData.length === 0) {
-                console.log('无数据可渲染');
-                container.innerHTML = '<div class="no-data">暂无数据</div>';
-                return;
+        // 开始倒计时
+        let secondsLeft = 300; // 5分钟 = 300秒
+        updateCountdown(secondsLeft);
+
+        countdownInterval = setInterval(() => {
+          secondsLeft--;
+          if (secondsLeft <= 0) {
+            secondsLeft = 300;
+          }
+          updateCountdown(secondsLeft);
+        }, 1000);
+
+        // 先调用更新接口获取最新数据
+        console.log("开始获取数据...");
+        fetch("/api/update")
+          .then((response) => {
+            console.log("更新接口响应:", response);
+            return response.json();
+          })
+          .then((updateResult) => {
+            console.log("更新结果:", updateResult);
+            if (updateResult.success) {
+              // 更新成功后获取数据
+              console.log("更新成功，开始获取币种数据...");
+              return fetch("/api/coins");
+            } else {
+              // 更新失败时也尝试获取现有数据
+              console.log("更新失败，但仍尝试获取币种数据...");
+              return fetch("/api/coins");
             }
-            
-            try {
-                // 获取所有时间间隔
-                let intervals = [];
-                if (coinsData[0] && coinsData[0].changes) {
-                    intervals = coinsData[0].changes.map(change => change.interval);
-                }
-                console.log('时间间隔:', intervals);
-                
-                // 构建表格HTML
-                let html = `
+          })
+          .then((response) => {
+            console.log("币种数据接口响应:", response);
+            return response.json();
+          })
+          .then((result) => {
+            console.log("币种数据结果:", result);
+            if (result.success) {
+              console.log("数据获取成功，开始渲染数据...");
+              renderData(result.data);
+            } else {
+              console.log("数据获取失败:", result.error);
+              container.innerHTML = `<div class="error">加载失败: ${result.error}</div>`;
+            }
+          })
+          .catch((error) => {
+            console.error("加载数据时出错:", error);
+            container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
+          });
+      }
+
+      // 更新倒计时显示
+      function updateCountdown(seconds) {
+        const countdownElement = document.getElementById("countdown");
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        countdownElement.textContent = `${minutes}:${secs
+          .toString()
+          .padStart(2, "0")}`;
+      }
+
+      // 渲染数据
+      function renderData(coinsData) {
+        console.log("开始渲染数据:", coinsData);
+        const container = document.getElementById("data-container");
+
+        if (!coinsData || !Array.isArray(coinsData) || coinsData.length === 0) {
+          console.log("无数据可渲染");
+          container.innerHTML = '<div class="no-data">暂无数据</div>';
+          return;
+        }
+
+        try {
+          // 获取所有时间间隔
+          let intervals = [];
+          if (coinsData[0] && coinsData[0].changes) {
+            intervals = coinsData[0].changes.map((change) => change.interval);
+          }
+          console.log("时间间隔:", intervals);
+
+          // 构建表格HTML
+          let html = `
                     <table>
                         <thead>
                             <tr>
@@ -461,445 +491,606 @@
                                 <th>类型</th>
                                 <th>当前</th>
                 `;
-                
-                // 添加时间间隔列
-                intervals.forEach(interval => {
-                    html += `<th>${interval}</th>`;
-                });
-                
-                html += `
+
+          // 添加时间间隔列
+          intervals.forEach((interval) => {
+            html += `<th>${interval}</th>`;
+          });
+
+          html += `
                             </tr>
                         </thead>
                         <tbody>
                 `;
-                
-                // 添加数据行
-                coinsData.forEach((coin, index) => {
-                    console.log(`渲染币种 ${index}:`, coin);
-                    
-                    // 检查必要的属性
-                    if (!coin || !coin.symbol) {
-                        console.warn(`币种 ${index} 数据不完整:`, coin);
-                        return;
-                    }
-                    
-                    // 第一行：展示币种和持仓量数据
-                    html += `
+
+          // 添加数据行
+          coinsData.forEach((coin, index) => {
+            console.log(`渲染币种 ${index}:`, coin);
+
+            // 检查必要的属性
+            if (!coin || !coin.symbol) {
+              console.warn(`币种 ${index} 数据不完整:`, coin);
+              return;
+            }
+
+            // 第一行：展示币种和持仓量数据
+            html += `
                         <tr>
-                            <td rowspan="2"><strong>${coin.symbol}</strong></td>
+                            <td rowspan="3"><strong>${coin.symbol}</strong></td>
                             <td>持仓量</td>
                             <td>
-                                <span class="formatted-value" title="${coin.current_open_interest ? coin.current_open_interest.toLocaleString() : 'N/A'}">
-                                    ${coin.current_open_interest_formatted ? coin.current_open_interest_formatted : 'N/A'}
+                                <span class="formatted-value" title="${
+                                  coin.current_open_interest
+                                    ? coin.current_open_interest.toLocaleString()
+                                    : "N/A"
+                                }">
+                                    ${
+                                      coin.current_open_interest_formatted
+                                        ? coin.current_open_interest_formatted
+                                        : "N/A"
+                                    }
                                 </span>
                             </td>
                     `;
-                    
-                    // 添加每个时间间隔的持仓量数据
-                    if (coin.changes && Array.isArray(coin.changes) && coin.changes.length > 0) {
-                        coin.changes.forEach((change, changeIndex) => {
-                            console.log(`币种 ${index} 的变化数据 ${changeIndex}:`, change);
-                            
-                            // 检查必要的属性
-                            if (!change) {
-                                console.warn(`币种 ${index} 的变化数据 ${changeIndex} 不存在`);
-                                return;
-                            }
-                            
-                            const ratio = change.ratio;
-                            const interest = change.open_interest;
-                            const formattedInterest = change.open_interest_formatted;
-                            let ratioClass = '';
-                            let ratioText = 'N/A';
-                            
-                            if (ratio !== null && ratio !== undefined) {
-                                ratioText = (ratio > 0 ? '+' : '') + ratio.toFixed(2) + '%';
-                                ratioClass = ratio > 0 ? 'positive' : ratio < 0 ? 'negative' : '';
-                            }
-                            
-                            html += `
+
+            // 添加每个时间间隔的持仓量数据
+            if (
+              coin.changes &&
+              Array.isArray(coin.changes) &&
+              coin.changes.length > 0
+            ) {
+              coin.changes.forEach((change, changeIndex) => {
+                console.log(`币种 ${index} 的变化数据 ${changeIndex}:`, change);
+
+                // 检查必要的属性
+                if (!change) {
+                  console.warn(
+                    `币种 ${index} 的变化数据 ${changeIndex} 不存在`
+                  );
+                  return;
+                }
+
+                const ratio = change.ratio;
+                const interest = change.open_interest;
+                const formattedInterest = change.open_interest_formatted;
+                let ratioClass = "";
+                let ratioText = "N/A";
+
+                if (ratio !== null && ratio !== undefined) {
+                  ratioText = (ratio > 0 ? "+" : "") + ratio.toFixed(2) + "%";
+                  ratioClass =
+                    ratio > 0 ? "positive" : ratio < 0 ? "negative" : "";
+                }
+
+                html += `
                                 <td class="change-cell">
                                     <div class="ratio-section ${ratioClass}">${ratioText}</div>
                                     <div class="interest-section">
-                                        <span class="formatted-value" title="${interest ? interest.toLocaleString() : 'N/A'}">
-                                            ${formattedInterest ? formattedInterest : 'N/A'}
+                                        <span class="formatted-value" title="${
+                                          interest
+                                            ? interest.toLocaleString()
+                                            : "N/A"
+                                        }">
+                                            ${
+                                              formattedInterest
+                                                ? formattedInterest
+                                                : "N/A"
+                                            }
                                         </span>
                                     </div>
                                 </td>
                             `;
-                        });
-                    } else {
-                        // 如果没有变化数据，填充空单元格
-                        intervals.forEach(() => {
-                            html += '<td>N/A</td>';
-                        });
-                    }
-                    
-                    html += `
+              });
+            } else {
+              // 如果没有变化数据，填充空单元格
+              intervals.forEach(() => {
+                html += "<td>N/A</td>";
+              });
+            }
+
+            html += `
                         </tr>
                     `;
-                    
-                    // 第二行：展示持仓价值数据
-                    html += `
+
+            // 第二行：展示持仓价值数据
+            html += `
                         <tr>
                             <td>持仓价值</td>
                             <td>
-                                <span class="formatted-value" title="${coin.current_open_interest_value ? coin.current_open_interest_value.toLocaleString() : 'N/A'}">
-                                    ${coin.current_open_interest_value_formatted ? coin.current_open_interest_value_formatted : 'N/A'}
+                                <span class="formatted-value" title="${
+                                  coin.current_open_interest_value
+                                    ? coin.current_open_interest_value.toLocaleString()
+                                    : "N/A"
+                                }">
+                                    ${
+                                      coin.current_open_interest_value_formatted
+                                        ? coin.current_open_interest_value_formatted
+                                        : "N/A"
+                                    }
                                 </span>
                             </td>
                     `;
-                    
-                    // 添加每个时间间隔的持仓价值数据
-                    if (coin.changes && Array.isArray(coin.changes) && coin.changes.length > 0) {
-                        coin.changes.forEach(change => {
-                            // 检查必要的属性
-                            if (!change) {
-                                console.warn(`币种 ${index} 的变化数据不存在`);
-                                return;
-                            }
-                            
-                            const valueRatio = change.value_ratio;
-                            const interestValue = change.open_interest_value;
-                            const formattedInterestValue = change.open_interest_value_formatted;
-                            let valueRatioClass = '';
-                            let valueRatioText = 'N/A';
-                            
-                            if (valueRatio !== null && valueRatio !== undefined) {
-                                valueRatioText = (valueRatio > 0 ? '+' : '') + valueRatio.toFixed(2) + '%';
-                                valueRatioClass = valueRatio > 0 ? 'positive' : valueRatio < 0 ? 'negative' : '';
-                            }
-                            
-                            html += `
+
+            // 添加每个时间间隔的持仓价值数据
+            if (
+              coin.changes &&
+              Array.isArray(coin.changes) &&
+              coin.changes.length > 0
+            ) {
+              coin.changes.forEach((change) => {
+                // 检查必要的属性
+                if (!change) {
+                  console.warn(`币种 ${index} 的变化数据不存在`);
+                  return;
+                }
+
+                const valueRatio = change.value_ratio;
+                const interestValue = change.open_interest_value;
+                const formattedInterestValue =
+                  change.open_interest_value_formatted;
+                let valueRatioClass = "";
+                let valueRatioText = "N/A";
+
+                if (valueRatio !== null && valueRatio !== undefined) {
+                  valueRatioText =
+                    (valueRatio > 0 ? "+" : "") + valueRatio.toFixed(2) + "%";
+                  valueRatioClass =
+                    valueRatio > 0
+                      ? "positive"
+                      : valueRatio < 0
+                      ? "negative"
+                      : "";
+                }
+
+                html += `
                                 <td class="change-cell">
                                     <div class="value-ratio-section ${valueRatioClass}">${valueRatioText}</div>
                                     <div class="value-section">
-                                        <span class="formatted-value" title="${interestValue ? interestValue.toLocaleString() : 'N/A'}">
-                                            ${formattedInterestValue ? formattedInterestValue : 'N/A'}
+                                        <span class="formatted-value" title="${
+                                          interestValue
+                                            ? interestValue.toLocaleString()
+                                            : "N/A"
+                                        }">
+                                            ${
+                                              formattedInterestValue
+                                                ? formattedInterestValue
+                                                : "N/A"
+                                            }
                                         </span>
                                     </div>
                                 </td>
                             `;
-                        });
-                    } else {
-                        // 如果没有变化数据，填充空单元格
-                        intervals.forEach(() => {
-                            html += '<td>N/A</td>';
-                        });
-                    }
-                    
-                    html += `
+              });
+            } else {
+              // 如果没有变化数据，填充空单元格
+              intervals.forEach(() => {
+                html += "<td>N/A</td>";
+              });
+            }
+
+            html += `
                         </tr>
                     `;
-                });
-                
+
+            // 第三行：展示价格和价格波动数据
+            html += `
+                        <tr>
+                            <td>价格</td>
+                            <td>
+                                <span class="formatted-value" title="${
+                                  coin.current_price
+                                    ? coin.current_price.toLocaleString()
+                                    : "N/A"
+                                }">
+                                    ${
+                                      coin.current_price_formatted
+                                        ? coin.current_price_formatted
+                                        : "N/A"
+                                    }
+                                </span>
+                            </td>
+                    `;
+
+            // 添加每个时间间隔的价格和价格波动数据
+            if (
+              coin.changes &&
+              Array.isArray(coin.changes) &&
+              coin.changes.length > 0
+            ) {
+              coin.changes.forEach((change) => {
+                // 检查必要的属性
+                if (!change) {
+                  console.warn(`币种 ${index} 的变化数据不存在`);
+                  return;
+                }
+
+                const currentPrice = change.current_price;
+                const currentPriceFormatted = change.current_price_formatted;
+                const priceChangePercent = change.price_change_percent;
+                let priceChangeClass = "";
+                let priceChangeText = "N/A";
+
+                if (
+                  priceChangePercent !== null &&
+                  priceChangePercent !== undefined
+                ) {
+                  priceChangeText =
+                    (priceChangePercent > 0 ? "+" : "") +
+                    priceChangePercent.toFixed(2) +
+                    "%";
+                  priceChangeClass =
+                    priceChangePercent > 0
+                      ? "positive"
+                      : priceChangePercent < 0
+                      ? "negative"
+                      : "";
+                }
+
                 html += `
+                                <td class="change-cell">
+                                    <div class="value-ratio-section ${priceChangeClass}">${priceChangeText}</div>
+                                    <div class="value-section">
+                                        <span class="formatted-value" title="${
+                                          currentPrice
+                                            ? currentPrice.toLocaleString()
+                                            : "N/A"
+                                        }">
+                                            ${
+                                              currentPriceFormatted
+                                                ? currentPriceFormatted
+                                                : "N/A"
+                                            }
+                                        </span>
+                                    </div>
+                                </td>
+                            `;
+              });
+            } else {
+              // 如果没有变化数据，填充空单元格
+              intervals.forEach(() => {
+                html += "<td>N/A</td>";
+              });
+            }
+
+            html += `
+                        </tr>
+                    `;
+          });
+
+          html += `
                         </tbody>
                     </table>
                 `;
-                
-                console.log('生成的HTML:', html);
-                container.innerHTML = html;
-                console.log('数据渲染完成');
-            } catch (error) {
-                console.error('渲染数据时出错:', error);
-                container.innerHTML = `<div class="error">渲染数据时出错: ${error.message}</div>`;
-            }
+
+          console.log("生成的HTML:", html);
+          container.innerHTML = html;
+          console.log("数据渲染完成");
+        } catch (error) {
+          console.error("渲染数据时出错:", error);
+          container.innerHTML = `<div class="error">渲染数据时出错: ${error.message}</div>`;
         }
-        
-        // 打开币种配置弹窗
-        function openCoinsConfig() {
-            // 获取弹窗
-            var modal = document.getElementById("coinsConfigModal");
-            // 显示弹窗
-            modal.style.display = "block";
-            // 加载币种配置数据
-            loadCoinsConfigModal();
-        }
-        
-        // 获取币种配置（弹窗内）
-        function loadCoinsConfigModal() {
-            console.log('开始获取币种配置...');
-            fetch('/api/coins-config')
-                .then(response => {
-                    console.log('API响应:', response);
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('返回数据:', data);
-                    if (data.status === 'success') {
-                        console.log('数据获取成功:', data.data);
-                        allCoins = data.data;
-                        renderTransferListsModal(allCoins);
-                    } else {
-                        console.log('数据获取失败:', data.message);
-                        showMessageModal(data.message, 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('获取币种配置时出错:', error);
-                    showMessageModal('获取币种配置失败: ' + error.message, 'error');
-                });
-        }
-        
-        // 渲染穿梭框列表（弹窗内）
-        function renderTransferListsModal(coins) {
-            console.log('开始渲染穿梭框列表:', coins);
-            const allCoinsList = document.getElementById('modalAllCoinsList');
-            const trackedCoinsList = document.getElementById('modalTrackedCoinsList');
-            
-            // 检查容器元素是否存在
-            if (!allCoinsList || !trackedCoinsList) {
-                console.error('无法找到列表容器元素');
-                return;
+      }
+
+      // 打开币种配置弹窗
+      function openCoinsConfig() {
+        // 获取弹窗
+        var modal = document.getElementById("coinsConfigModal");
+        // 显示弹窗
+        modal.style.display = "block";
+        // 加载币种配置数据
+        loadCoinsConfigModal();
+      }
+
+      // 获取币种配置（弹窗内）
+      function loadCoinsConfigModal() {
+        console.log("开始获取币种配置...");
+        fetch("/api/coins-config")
+          .then((response) => {
+            console.log("API响应:", response);
+            return response.json();
+          })
+          .then((data) => {
+            console.log("返回数据:", data);
+            if (data.status === "success") {
+              console.log("数据获取成功:", data.data);
+              allCoins = data.data;
+              renderTransferListsModal(allCoins);
+            } else {
+              console.log("数据获取失败:", data.message);
+              showMessageModal(data.message, "error");
             }
-            
-            const coinEntries = Object.entries(coins);
-            console.log('币种条目:', coinEntries);
-            
-            if (!coinEntries || coinEntries.length === 0) {
-                console.log('无币种数据');
-                allCoinsList.innerHTML = '<p>暂无币种配置</p>';
-                trackedCoinsList.innerHTML = '<p>暂无币种配置</p>';
-                return;
-            }
-            
-            // 分离所有币种和跟踪币种
-            const allCoinsArray = [];
-            const trackedCoinsArray = [];
-            
-            coinEntries.forEach(([symbol, tracked]) => {
-                allCoinsArray.push(symbol);
-                if (tracked) {
-                    trackedCoinsArray.push(symbol);
-                }
-            });
-            
-            console.log('所有币种:', allCoinsArray);
-            console.log('跟踪的币种:', trackedCoinsArray);
-            
-            // 渲染所有币种列表
-            renderCoinListModal(allCoinsList, allCoinsArray, 'all');
-            
-            // 渲染跟踪币种列表
-            renderCoinListModal(trackedCoinsList, trackedCoinsArray, 'tracked');
-            
-            // 更新按钮状态
-            updateTransferButtonsModal();
+          })
+          .catch((error) => {
+            console.error("获取币种配置时出错:", error);
+            showMessageModal("获取币种配置失败: " + error.message, "error");
+          });
+      }
+
+      // 渲染穿梭框列表（弹窗内）
+      function renderTransferListsModal(coins) {
+        console.log("开始渲染穿梭框列表:", coins);
+        const allCoinsList = document.getElementById("modalAllCoinsList");
+        const trackedCoinsList = document.getElementById(
+          "modalTrackedCoinsList"
+        );
+
+        // 检查容器元素是否存在
+        if (!allCoinsList || !trackedCoinsList) {
+          console.error("无法找到列表容器元素");
+          return;
         }
-        
-        // 渲染币种列表（弹窗内）
-        function renderCoinListModal(container, coins, type) {
-            console.log('渲染币种列表:', {container, coins, type});
-            // 按字母顺序排序
-            coins.sort();
-            
-            if (coins.length === 0) {
-                container.innerHTML = '<p>暂无币种</p>';
-                return;
-            }
-            
-            let html = '';
-            coins.forEach(symbol => {
-                const isSelected = type === 'all' ? selectedAllCoins.has(symbol) : selectedTrackedCoins.has(symbol);
-                html += `
-                    <div class="transfer-item ${isSelected ? 'selected-item' : ''}" 
+
+        const coinEntries = Object.entries(coins);
+        console.log("币种条目:", coinEntries);
+
+        if (!coinEntries || coinEntries.length === 0) {
+          console.log("无币种数据");
+          allCoinsList.innerHTML = "<p>暂无币种配置</p>";
+          trackedCoinsList.innerHTML = "<p>暂无币种配置</p>";
+          return;
+        }
+
+        // 分离所有币种和跟踪币种
+        const allCoinsArray = [];
+        const trackedCoinsArray = [];
+
+        coinEntries.forEach(([symbol, tracked]) => {
+          allCoinsArray.push(symbol);
+          if (tracked) {
+            trackedCoinsArray.push(symbol);
+          }
+        });
+
+        console.log("所有币种:", allCoinsArray);
+        console.log("跟踪的币种:", trackedCoinsArray);
+
+        // 渲染所有币种列表
+        renderCoinListModal(allCoinsList, allCoinsArray, "all");
+
+        // 渲染跟踪币种列表
+        renderCoinListModal(trackedCoinsList, trackedCoinsArray, "tracked");
+
+        // 更新按钮状态
+        updateTransferButtonsModal();
+      }
+
+      // 渲染币种列表（弹窗内）
+      function renderCoinListModal(container, coins, type) {
+        console.log("渲染币种列表:", { container, coins, type });
+        // 按字母顺序排序
+        coins.sort();
+
+        if (coins.length === 0) {
+          container.innerHTML = "<p>暂无币种</p>";
+          return;
+        }
+
+        let html = "";
+        coins.forEach((symbol) => {
+          const isSelected =
+            type === "all"
+              ? selectedAllCoins.has(symbol)
+              : selectedTrackedCoins.has(symbol);
+          html += `
+                    <div class="transfer-item ${
+                      isSelected ? "selected-item" : ""
+                    }" 
                          data-symbol="${symbol}" 
                          onclick="toggleSelectionModal('${symbol}', '${type}')">
                         ${symbol}
                     </div>
                 `;
-            });
-            
-            container.innerHTML = html;
-            console.log('列表渲染完成');
-        }
-        
-        // 切换选中状态（弹窗内）
-        function toggleSelectionModal(symbol, type) {
-            const item = document.querySelector(`#coinsConfigModal .transfer-item[data-symbol="${symbol}"]`);
-            
-            if (type === 'all') {
-                if (selectedAllCoins.has(symbol)) {
-                    selectedAllCoins.delete(symbol);
-                    item.classList.remove('selected-item');
-                } else {
-                    selectedAllCoins.add(symbol);
-                    item.classList.add('selected-item');
-                }
-            } else {
-                if (selectedTrackedCoins.has(symbol)) {
-                    selectedTrackedCoins.delete(symbol);
-                    item.classList.remove('selected-item');
-                } else {
-                    selectedTrackedCoins.add(symbol);
-                    item.classList.add('selected-item');
-                }
-            }
-            
-            updateTransferButtonsModal();
-        }
-        
-        // 更新穿梭按钮状态（弹窗内）
-        function updateTransferButtonsModal() {
-            const addBtn = document.getElementById('modalAddBtn');
-            const removeBtn = document.getElementById('modalRemoveBtn');
-            
-            if (addBtn) addBtn.disabled = selectedAllCoins.size === 0;
-            if (removeBtn) removeBtn.disabled = selectedTrackedCoins.size === 0;
-        }
-        
-        // 添加到跟踪列表（弹窗内）
-        function addToTrackedModal() {
-            if (selectedAllCoins.size === 0) return;
-            
-            // 批量更新选中的币种为跟踪状态
-            const updates = Array.from(selectedAllCoins).map(symbol => ({
-                symbol: symbol,
-                tracked: true
-            }));
-            
-            updateCoinsTrackingModal(updates, () => {
-                // 清空选中状态
-                selectedAllCoins.clear();
-                // 重新加载列表
-                loadCoinsConfigModal();
-            });
-        }
-        
-        // 从跟踪列表移除（弹窗内）
-        function removeFromTrackedModal() {
-            if (selectedTrackedCoins.size === 0) return;
-            
-            // 批量更新选中的币种为非跟踪状态
-            const updates = Array.from(selectedTrackedCoins).map(symbol => ({
-                symbol: symbol,
-                tracked: false
-            }));
-            
-            updateCoinsTrackingModal(updates, () => {
-                // 清空选中状态
-                selectedTrackedCoins.clear();
-                // 重新加载列表
-                loadCoinsConfigModal();
-            });
-        }
-        
-        // 更新币种跟踪状态（弹窗内）
-        function updateCoinsTrackingModal(updates, callback) {
-            let successCount = 0;
-            let failCount = 0;
-            
-            Promise.all(updates.map(update => {
-                return fetch('/api/coins-config/track', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(update)
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        successCount++;
-                        // 更新本地状态
-                        allCoins[update.symbol] = update.tracked;
-                    } else {
-                        failCount++;
-                    }
-                })
-                .catch(error => {
-                    failCount++;
-                    console.error('Error updating', update.symbol, error);
-                });
-            }))
-            .then(() => {
-                if (failCount === 0) {
-                    showMessageModal(`成功更新 ${successCount} 个币种的跟踪状态`, 'success');
-                } else {
-                    showMessageModal(`更新完成: ${successCount} 个成功, ${failCount} 个失败`, 
-                              failCount > 0 ? 'error' : 'success');
-                }
-                if (callback) callback();
-            });
-        }
-        
-        // 筛选所有币种（弹窗内）
-        function filterAllCoinsModal() {
-            const filterValue = document.getElementById('modalAllCoinsFilter').value.toLowerCase();
-            const items = document.querySelectorAll('#modalAllCoinsList .transfer-item');
-            
-            items.forEach(item => {
-                const symbol = item.getAttribute('data-symbol').toLowerCase();
-                if (symbol.includes(filterValue)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        }
-        
-        // 筛选跟踪币种（弹窗内）
-        function filterTrackedCoinsModal() {
-            const filterValue = document.getElementById('modalTrackedCoinsFilter').value.toLowerCase();
-            const items = document.querySelectorAll('#modalTrackedCoinsList .transfer-item');
-            
-            items.forEach(item => {
-                const symbol = item.getAttribute('data-symbol').toLowerCase();
-                if (symbol.includes(filterValue)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        }
-        
-        // 从币安更新币种配置（弹窗内）
-        function updateFromBinanceModal() {
-            if (!confirm('确定要从币安更新币种配置吗？这将添加新的交易对并保留现有配置。')) {
-                return;
-            }
-            
-            showMessageModal('正在从币安更新币种配置...', 'info');
-            
-            fetch('/api/coins-config/update-from-binance')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        showMessageModal(data.message, 'success');
-                        loadCoinsConfigModal();
-                    } else {
-                        showMessageModal(data.message, 'error');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showMessageModal('更新币种配置失败', 'error');
-                });
-        }
-        
-        // 保存跟踪状态（弹窗内）
-        function saveTrackingStatusModal() {
-            // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
-            showMessageModal('跟踪配置已保存', 'success');
-        }
-        
-        // 显示消息（弹窗内）
-        function showMessageModal(message, type) {
-            // 这里可以实现弹窗内的消息显示，或者使用页面上的消息区域
-            alert(message);
-        }
-        
-        // 关闭弹窗
-        window.addEventListener('click', function(event) {
-            var modal = document.getElementById("coinsConfigModal");
-            var span = document.querySelector("#coinsConfigModal .close");
-            
-            // 只有点击关闭按钮时才关闭弹窗，点击空白区域不关闭
-            if (event.target == span) {
-                modal.style.display = "none";
-            }
         });
+
+        container.innerHTML = html;
+        console.log("列表渲染完成");
+      }
+
+      // 切换选中状态（弹窗内）
+      function toggleSelectionModal(symbol, type) {
+        const item = document.querySelector(
+          `#coinsConfigModal .transfer-item[data-symbol="${symbol}"]`
+        );
+
+        if (type === "all") {
+          if (selectedAllCoins.has(symbol)) {
+            selectedAllCoins.delete(symbol);
+            item.classList.remove("selected-item");
+          } else {
+            selectedAllCoins.add(symbol);
+            item.classList.add("selected-item");
+          }
+        } else {
+          if (selectedTrackedCoins.has(symbol)) {
+            selectedTrackedCoins.delete(symbol);
+            item.classList.remove("selected-item");
+          } else {
+            selectedTrackedCoins.add(symbol);
+            item.classList.add("selected-item");
+          }
+        }
+
+        updateTransferButtonsModal();
+      }
+
+      // 更新穿梭按钮状态（弹窗内）
+      function updateTransferButtonsModal() {
+        const addBtn = document.getElementById("modalAddBtn");
+        const removeBtn = document.getElementById("modalRemoveBtn");
+
+        if (addBtn) addBtn.disabled = selectedAllCoins.size === 0;
+        if (removeBtn) removeBtn.disabled = selectedTrackedCoins.size === 0;
+      }
+
+      // 添加到跟踪列表（弹窗内）
+      function addToTrackedModal() {
+        if (selectedAllCoins.size === 0) return;
+
+        // 批量更新选中的币种为跟踪状态
+        const updates = Array.from(selectedAllCoins).map((symbol) => ({
+          symbol: symbol,
+          tracked: true,
+        }));
+
+        updateCoinsTrackingModal(updates, () => {
+          // 清空选中状态
+          selectedAllCoins.clear();
+          // 重新加载列表
+          loadCoinsConfigModal();
+        });
+      }
+
+      // 从跟踪列表移除（弹窗内）
+      function removeFromTrackedModal() {
+        if (selectedTrackedCoins.size === 0) return;
+
+        // 批量更新选中的币种为非跟踪状态
+        const updates = Array.from(selectedTrackedCoins).map((symbol) => ({
+          symbol: symbol,
+          tracked: false,
+        }));
+
+        updateCoinsTrackingModal(updates, () => {
+          // 清空选中状态
+          selectedTrackedCoins.clear();
+          // 重新加载列表
+          loadCoinsConfigModal();
+        });
+      }
+
+      // 更新币种跟踪状态（弹窗内）
+      function updateCoinsTrackingModal(updates, callback) {
+        let successCount = 0;
+        let failCount = 0;
+
+        Promise.all(
+          updates.map((update) => {
+            return fetch("/api/coins-config/track", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(update),
+            })
+              .then((response) => response.json())
+              .then((data) => {
+                if (data.status === "success") {
+                  successCount++;
+                  // 更新本地状态
+                  allCoins[update.symbol] = update.tracked;
+                } else {
+                  failCount++;
+                }
+              })
+              .catch((error) => {
+                failCount++;
+                console.error("Error updating", update.symbol, error);
+              });
+          })
+        ).then(() => {
+          if (failCount === 0) {
+            showMessageModal(
+              `成功更新 ${successCount} 个币种的跟踪状态`,
+              "success"
+            );
+          } else {
+            showMessageModal(
+              `更新完成: ${successCount} 个成功, ${failCount} 个失败`,
+              failCount > 0 ? "error" : "success"
+            );
+          }
+          if (callback) callback();
+        });
+      }
+
+      // 筛选所有币种（弹窗内）
+      function filterAllCoinsModal() {
+        const filterValue = document
+          .getElementById("modalAllCoinsFilter")
+          .value.toLowerCase();
+        const items = document.querySelectorAll(
+          "#modalAllCoinsList .transfer-item"
+        );
+
+        items.forEach((item) => {
+          const symbol = item.getAttribute("data-symbol").toLowerCase();
+          if (symbol.includes(filterValue)) {
+            item.style.display = "";
+          } else {
+            item.style.display = "none";
+          }
+        });
+      }
+
+      // 筛选跟踪币种（弹窗内）
+      function filterTrackedCoinsModal() {
+        const filterValue = document
+          .getElementById("modalTrackedCoinsFilter")
+          .value.toLowerCase();
+        const items = document.querySelectorAll(
+          "#modalTrackedCoinsList .transfer-item"
+        );
+
+        items.forEach((item) => {
+          const symbol = item.getAttribute("data-symbol").toLowerCase();
+          if (symbol.includes(filterValue)) {
+            item.style.display = "";
+          } else {
+            item.style.display = "none";
+          }
+        });
+      }
+
+      // 从币安更新币种配置（弹窗内）
+      function updateFromBinanceModal() {
+        if (
+          !confirm(
+            "确定要从币安更新币种配置吗？这将添加新的交易对并保留现有配置。"
+          )
+        ) {
+          return;
+        }
+
+        showMessageModal("正在从币安更新币种配置...", "info");
+
+        fetch("/api/coins-config/update-from-binance")
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              showMessageModal(data.message, "success");
+              loadCoinsConfigModal();
+            } else {
+              showMessageModal(data.message, "error");
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+            showMessageModal("更新币种配置失败", "error");
+          });
+      }
+
+      // 保存跟踪状态（弹窗内）
+      function saveTrackingStatusModal() {
+        // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
+        showMessageModal("跟踪配置已保存", "success");
+      }
+
+      // 显示消息（弹窗内）
+      function showMessageModal(message, type) {
+        // 这里可以实现弹窗内的消息显示，或者使用页面上的消息区域
+        alert(message);
+      }
+
+      // 关闭弹窗
+      window.addEventListener("click", function (event) {
+        var modal = document.getElementById("coinsConfigModal");
+        var span = document.querySelector("#coinsConfigModal .close");
+
+        // 只有点击关闭按钮时才关闭弹窗，点击空白区域不关闭
+        if (event.target == span) {
+          modal.style.display = "none";
+        }
+      });
     </script>
-</body>
+  </body>
 </html>
