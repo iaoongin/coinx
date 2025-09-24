@@ -1,476 +1,585 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>币种配置管理</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
     <style>
-        .config-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        font-size: 14px;
+        color: #333;
+      }
+      .config-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background-color: rgba(255, 255, 255, 0.95);
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 25px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #ecf0f1;
+      }
+      .header h1 {
+        margin: 0;
+        color: #2c3e50;
+        font-size: 28px;
+        font-weight: 600;
+      }
+      .header-buttons {
+        display: flex;
+        gap: 12px;
+      }
+      .btn {
+        background: linear-gradient(135deg, #3498db, #2980b9);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 25px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 14px;
+        font-weight: 600;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+      }
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        background: linear-gradient(135deg, #2980b9, #3498db);
+      }
+      .btn:active {
+        transform: translateY(0);
+      }
+      .btn-home {
+        background: linear-gradient(135deg, #95a5a6, #7f8c8d);
+      }
+      .btn-home:hover {
+        background: linear-gradient(135deg, #7f8c8d, #95a5a6);
+      }
+      .transfer-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 25px 0;
+      }
+      .transfer-box {
+        width: 45%;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 20px;
+        background: #f8f9fa;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+      }
+      .transfer-box h3 {
+        margin-top: 0;
+        text-align: center;
+        font-size: 20px;
+        color: #2c3e50;
+        font-weight: 600;
+      }
+      .transfer-list {
+        max-height: 320px;
+        overflow-y: auto;
+        min-height: 200px;
+        background: white;
+        border-radius: 8px;
+        border: 1px solid #eee;
+      }
+      .transfer-item {
+        padding: 12px 15px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s ease;
+      }
+      .transfer-item:hover {
+        background: #e3f2fd;
+      }
+      .transfer-actions {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        width: 10%;
+      }
+      .transfer-btn {
+        margin: 8px 0;
+        padding: 10px 18px;
+        background: linear-gradient(135deg, #3498db, #2980b9);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+      }
+      .transfer-btn:hover {
+        background: linear-gradient(135deg, #2980b9, #3498db);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
+      }
+      .transfer-btn:disabled {
+        background: #bdc3c7;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+      .actions {
+        margin: 25px 0;
+        text-align: center;
+      }
+      .btn-success {
+        background: linear-gradient(135deg, #27ae60, #2ecc71);
+      }
+      .btn-success:hover {
+        background: linear-gradient(135deg, #2ecc71, #27ae60);
+      }
+      .btn-warning {
+        background: linear-gradient(135deg, #f39c12, #e67e22);
+        color: white;
+      }
+      .btn-warning:hover {
+        background: linear-gradient(135deg, #e67e22, #f39c12);
+      }
+      .message {
+        padding: 12px;
+        border-radius: 8px;
+        margin: 12px 0;
+        font-size: 14px;
+        animation: slideIn 0.3s ease;
+      }
+      .message.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .message.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      .loading {
+        text-align: center;
+        padding: 20px;
+        font-size: 14px;
+      }
+      .filter-input {
+        margin-bottom: 15px;
+      }
+      .filter-input input {
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        width: 100%;
+        font-size: 14px;
+        box-sizing: border-box;
+        transition: border-color 0.3s ease;
+      }
+      .filter-input input:focus {
+        outline: none;
+        border-color: #3498db;
+        box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+      }
+      .selected-item {
+        background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+        font-weight: 600;
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateY(-10px);
+          opacity: 0;
         }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #ddd;
+        to {
+          transform: translateY(0);
+          opacity: 1;
         }
-        .header h1 {
-            margin: 0;
-            color: #333;
-        }
-        .header-buttons {
-            display: flex;
-            gap: 10px;
-        }
-        .btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 14px;
-        }
-        .btn:hover {
-            background: #0056b3;
-        }
-        .btn-home {
-            background: #6c757d;
-        }
-        .btn-home:hover {
-            background: #5a6268;
-        }
-        .transfer-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 20px 0;
-        }
-        .transfer-box {
-            width: 45%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 10px;
-            background: white;
-        }
-        .transfer-box h3 {
-            margin-top: 0;
-            text-align: center;
-        }
-        .transfer-list {
-            max-height: 300px;
-            overflow-y: auto;
-            min-height: 200px;
-        }
-        .transfer-item {
-            padding: 8px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-        }
-        .transfer-item:hover {
-            background: #f0f0f0;
-        }
-        .transfer-actions {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            width: 10%;
-        }
-        .transfer-btn {
-            margin: 5px 0;
-            padding: 5px 10px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .transfer-btn:hover {
-            background: #0056b3;
-        }
-        .transfer-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .actions {
-            margin: 20px 0;
-            text-align: center;
-        }
-        .btn-success {
-            background: #28a745;
-        }
-        .btn-success:hover {
-            background: #218838;
-        }
-        .btn-warning {
-            background: #ffc107;
-            color: #212529;
-        }
-        .btn-warning:hover {
-            background: #e0a800;
-        }
-        .message {
-            padding: 10px;
-            border-radius: 4px;
-            margin: 10px 0;
-        }
-        .message.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .message.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .loading {
-            text-align: center;
-            padding: 20px;
-        }
-        .filter-input {
-            margin-bottom: 15px;
-        }
-        .filter-input input {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 300px;
-        }
-        .selected-item {
-            background: #e7f3ff;
-        }
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="config-container">
-        <div class="header">
-            <h1>币种配置管理</h1>
-            <div class="header-buttons">
-                <a href="/" class="btn btn-home">← 返回主页</a>
-            </div>
+      <div class="header">
+        <h1>币种配置管理</h1>
+        <div class="header-buttons">
+          <a href="/" class="btn btn-home">← 返回主页</a>
         </div>
-        
-        <div id="message" class="message" style="display: none;"></div>
-        
-        <div class="actions">
-            <button class="btn btn-success" onclick="updateFromBinance()">从币安更新</button>
-            <button class="btn btn-warning" onclick="saveTrackingStatus()">保存配置</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-success" onclick="updateFromBinance()">
+          从币安更新
+        </button>
+        <button class="btn btn-warning" onclick="saveTrackingStatus()">
+          保存配置
+        </button>
+      </div>
+
+      <div class="transfer-container">
+        <div class="transfer-box">
+          <h3>所有币种</h3>
+          <div class="filter-input">
+            <input
+              type="text"
+              id="allCoinsFilter"
+              placeholder="搜索币种..."
+              onkeyup="filterAllCoins()"
+            />
+          </div>
+          <div id="allCoinsList" class="transfer-list">
+            <div class="loading">加载中...</div>
+          </div>
         </div>
-        
-        <div class="transfer-container">
-            <div class="transfer-box">
-                <h3>所有币种</h3>
-                <div class="filter-input">
-                    <input type="text" id="allCoinsFilter" placeholder="搜索币种..." onkeyup="filterAllCoins()">
-                </div>
-                <div id="allCoinsList" class="transfer-list">
-                    <div class="loading">加载中...</div>
-                </div>
-            </div>
-            
-            <div class="transfer-actions">
-                <button class="transfer-btn" id="addBtn" onclick="addToTracked()" disabled>>></button>
-                <button class="transfer-btn" id="removeBtn" onclick="removeFromTracked()" disabled><<</button>
-            </div>
-            
-            <div class="transfer-box">
-                <h3>跟踪的币种</h3>
-                <div class="filter-input">
-                    <input type="text" id="trackedCoinsFilter" placeholder="搜索币种..." onkeyup="filterTrackedCoins()">
-                </div>
-                <div id="trackedCoinsList" class="transfer-list">
-                    <div class="loading">加载中...</div>
-                </div>
-            </div>
+
+        <div class="transfer-actions">
+          <button
+            class="transfer-btn"
+            id="addBtn"
+            onclick="addToTracked()"
+            disabled
+          >
+            >>
+          </button>
+          <button
+            class="transfer-btn"
+            id="removeBtn"
+            onclick="removeFromTracked()"
+            disabled
+          >
+            <<
+          </button>
         </div>
+
+        <div class="transfer-box">
+          <h3>跟踪的币种</h3>
+          <div class="filter-input">
+            <input
+              type="text"
+              id="trackedCoinsFilter"
+              placeholder="搜索币种..."
+              onkeyup="filterTrackedCoins()"
+            />
+          </div>
+          <div id="trackedCoinsList" class="transfer-list">
+            <div class="loading">加载中...</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-        let allCoins = {}; // 存储所有币种及其跟踪状态
-        let selectedAllCoins = new Set(); // 选中的所有币种
-        let selectedTrackedCoins = new Set(); // 选中的跟踪币种
-        
-        // 页面加载完成后获取币种配置
-        document.addEventListener('DOMContentLoaded', function() {
-            loadCoinsConfig();
+      let allCoins = {}; // 存储所有币种及其跟踪状态
+      let selectedAllCoins = new Set(); // 选中的所有币种
+      let selectedTrackedCoins = new Set(); // 选中的跟踪币种
+
+      // 页面加载完成后获取币种配置
+      document.addEventListener("DOMContentLoaded", function () {
+        loadCoinsConfig();
+      });
+
+      // 获取币种配置
+      function loadCoinsConfig() {
+        console.log("开始获取币种配置...");
+        fetch("/api/coins-config")
+          .then((response) => {
+            console.log("API响应:", response);
+            return response.json();
+          })
+          .then((data) => {
+            console.log("返回数据:", data);
+            if (data.status === "success") {
+              console.log("数据获取成功:", data.data);
+              allCoins = data.data;
+              renderTransferLists(allCoins);
+            } else {
+              console.log("数据获取失败:", data.message);
+              // 移除消息显示
+            }
+          })
+          .catch((error) => {
+            console.error("获取币种配置时出错:", error);
+            // 移除消息显示
+          });
+      }
+
+      // 渲染穿梭框列表
+      function renderTransferLists(coins) {
+        console.log("开始渲染穿梭框列表:", coins);
+        const allCoinsList = document.getElementById("allCoinsList");
+        const trackedCoinsList = document.getElementById("trackedCoinsList");
+
+        // 检查容器元素是否存在
+        if (!allCoinsList || !trackedCoinsList) {
+          console.error("无法找到列表容器元素");
+          return;
+        }
+
+        const coinEntries = Object.entries(coins);
+        console.log("币种条目:", coinEntries);
+
+        if (!coinEntries || coinEntries.length === 0) {
+          console.log("无币种数据");
+          allCoinsList.innerHTML = "<p>暂无币种配置</p>";
+          trackedCoinsList.innerHTML = "<p>暂无币种配置</p>";
+          return;
+        }
+
+        // 分离所有币种和跟踪币种
+        const allCoinsArray = [];
+        const trackedCoinsArray = [];
+
+        coinEntries.forEach(([symbol, tracked]) => {
+          allCoinsArray.push(symbol);
+          if (tracked) {
+            trackedCoinsArray.push(symbol);
+          }
         });
-        
-        // 获取币种配置
-        function loadCoinsConfig() {
-            console.log('开始获取币种配置...');
-            fetch('/api/coins-config')
-                .then(response => {
-                    console.log('API响应:', response);
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('返回数据:', data);
-                    if (data.status === 'success') {
-                        console.log('数据获取成功:', data.data);
-                        allCoins = data.data;
-                        renderTransferLists(allCoins);
-                    } else {
-                        console.log('数据获取失败:', data.message);
-                        // 移除消息显示
-                    }
-                })
-                .catch(error => {
-                    console.error('获取币种配置时出错:', error);
-                    // 移除消息显示
-                });
+
+        console.log("所有币种:", allCoinsArray);
+        console.log("跟踪的币种:", trackedCoinsArray);
+
+        // 渲染所有币种列表
+        renderCoinList(allCoinsList, allCoinsArray, "all");
+
+        // 渲染跟踪币种列表
+        renderCoinList(trackedCoinsList, trackedCoinsArray, "tracked");
+
+        // 更新按钮状态
+        updateTransferButtons();
+      }
+
+      // 渲染币种列表
+      function renderCoinList(container, coins, type) {
+        console.log("渲染币种列表:", { container, coins, type });
+        // 按字母顺序排序
+        coins.sort();
+
+        if (coins.length === 0) {
+          container.innerHTML = "<p>暂无币种</p>";
+          return;
         }
-        
-        // 渲染穿梭框列表
-        function renderTransferLists(coins) {
-            console.log('开始渲染穿梭框列表:', coins);
-            const allCoinsList = document.getElementById('allCoinsList');
-            const trackedCoinsList = document.getElementById('trackedCoinsList');
-            
-            // 检查容器元素是否存在
-            if (!allCoinsList || !trackedCoinsList) {
-                console.error('无法找到列表容器元素');
-                return;
-            }
-            
-            const coinEntries = Object.entries(coins);
-            console.log('币种条目:', coinEntries);
-            
-            if (!coinEntries || coinEntries.length === 0) {
-                console.log('无币种数据');
-                allCoinsList.innerHTML = '<p>暂无币种配置</p>';
-                trackedCoinsList.innerHTML = '<p>暂无币种配置</p>';
-                return;
-            }
-            
-            // 分离所有币种和跟踪币种
-            const allCoinsArray = [];
-            const trackedCoinsArray = [];
-            
-            coinEntries.forEach(([symbol, tracked]) => {
-                allCoinsArray.push(symbol);
-                if (tracked) {
-                    trackedCoinsArray.push(symbol);
-                }
-            });
-            
-            console.log('所有币种:', allCoinsArray);
-            console.log('跟踪的币种:', trackedCoinsArray);
-            
-            // 渲染所有币种列表
-            renderCoinList(allCoinsList, allCoinsArray, 'all');
-            
-            // 渲染跟踪币种列表
-            renderCoinList(trackedCoinsList, trackedCoinsArray, 'tracked');
-            
-            // 更新按钮状态
-            updateTransferButtons();
-        }
-        
-        // 渲染币种列表
-        function renderCoinList(container, coins, type) {
-            console.log('渲染币种列表:', {container, coins, type});
-            // 按字母顺序排序
-            coins.sort();
-            
-            if (coins.length === 0) {
-                container.innerHTML = '<p>暂无币种</p>';
-                return;
-            }
-            
-            let html = '';
-            coins.forEach(symbol => {
-                const isSelected = type === 'all' ? selectedAllCoins.has(symbol) : selectedTrackedCoins.has(symbol);
-                html += `
-                    <div class="transfer-item ${isSelected ? 'selected-item' : ''}" 
+
+        let html = "";
+        coins.forEach((symbol) => {
+          const isSelected =
+            type === "all"
+              ? selectedAllCoins.has(symbol)
+              : selectedTrackedCoins.has(symbol);
+          html += `
+                    <div class="transfer-item ${
+                      isSelected ? "selected-item" : ""
+                    }" 
                          data-symbol="${symbol}" 
                          onclick="toggleSelection('${symbol}', '${type}')">
                         ${symbol}
                     </div>
                 `;
-            });
-            
-            container.innerHTML = html;
-            console.log('列表渲染完成');
+        });
+
+        container.innerHTML = html;
+        console.log("列表渲染完成");
+      }
+
+      // 切换选中状态
+      function toggleSelection(symbol, type) {
+        const item = document.querySelector(
+          `.transfer-item[data-symbol="${symbol}"]`
+        );
+
+        if (type === "all") {
+          if (selectedAllCoins.has(symbol)) {
+            selectedAllCoins.delete(symbol);
+            item.classList.remove("selected-item");
+          } else {
+            selectedAllCoins.add(symbol);
+            item.classList.add("selected-item");
+          }
+        } else {
+          if (selectedTrackedCoins.has(symbol)) {
+            selectedTrackedCoins.delete(symbol);
+            item.classList.remove("selected-item");
+          } else {
+            selectedTrackedCoins.add(symbol);
+            item.classList.add("selected-item");
+          }
         }
-        
-        // 切换选中状态
-        function toggleSelection(symbol, type) {
-            const item = document.querySelector(`.transfer-item[data-symbol="${symbol}"]`);
-            
-            if (type === 'all') {
-                if (selectedAllCoins.has(symbol)) {
-                    selectedAllCoins.delete(symbol);
-                    item.classList.remove('selected-item');
+
+        updateTransferButtons();
+      }
+
+      // 更新穿梭按钮状态
+      function updateTransferButtons() {
+        document.getElementById("addBtn").disabled =
+          selectedAllCoins.size === 0;
+        document.getElementById("removeBtn").disabled =
+          selectedTrackedCoins.size === 0;
+      }
+
+      // 添加到跟踪列表
+      function addToTracked() {
+        if (selectedAllCoins.size === 0) return;
+
+        // 批量更新选中的币种为跟踪状态
+        const updates = Array.from(selectedAllCoins).map((symbol) => ({
+          symbol: symbol,
+          tracked: true,
+        }));
+
+        updateCoinsTracking(updates, () => {
+          // 清空选中状态
+          selectedAllCoins.clear();
+          // 重新加载列表
+          loadCoinsConfig();
+        });
+      }
+
+      // 从跟踪列表移除
+      function removeFromTracked() {
+        if (selectedTrackedCoins.size === 0) return;
+
+        // 批量更新选中的币种为非跟踪状态
+        const updates = Array.from(selectedTrackedCoins).map((symbol) => ({
+          symbol: symbol,
+          tracked: false,
+        }));
+
+        updateCoinsTracking(updates, () => {
+          // 清空选中状态
+          selectedTrackedCoins.clear();
+          // 重新加载列表
+          loadCoinsConfig();
+        });
+      }
+
+      // 更新币种跟踪状态
+      function updateCoinsTracking(updates, callback) {
+        let successCount = 0;
+        let failCount = 0;
+
+        Promise.all(
+          updates.map((update) => {
+            return fetch("/api/coins-config/track", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(update),
+            })
+              .then((response) => response.json())
+              .then((data) => {
+                if (data.status === "success") {
+                  successCount++;
+                  // 更新本地状态
+                  allCoins[update.symbol] = update.tracked;
                 } else {
-                    selectedAllCoins.add(symbol);
-                    item.classList.add('selected-item');
+                  failCount++;
                 }
+              })
+              .catch((error) => {
+                failCount++;
+                console.error("Error updating", update.symbol, error);
+              });
+          })
+        ).then(() => {
+          // 直接自动保存，不显示任何消息
+          if (callback) callback();
+        });
+      }
+
+      // 筛选所有币种
+      function filterAllCoins() {
+        const filterValue = document
+          .getElementById("allCoinsFilter")
+          .value.toLowerCase();
+        const items = document.querySelectorAll("#allCoinsList .transfer-item");
+
+        items.forEach((item) => {
+          const symbol = item.getAttribute("data-symbol").toLowerCase();
+          if (symbol.includes(filterValue)) {
+            item.style.display = "";
+          } else {
+            item.style.display = "none";
+          }
+        });
+      }
+
+      // 筛选跟踪币种
+      function filterTrackedCoins() {
+        const filterValue = document
+          .getElementById("trackedCoinsFilter")
+          .value.toLowerCase();
+        const items = document.querySelectorAll(
+          "#trackedCoinsList .transfer-item"
+        );
+
+        items.forEach((item) => {
+          const symbol = item.getAttribute("data-symbol").toLowerCase();
+          if (symbol.includes(filterValue)) {
+            item.style.display = "";
+          } else {
+            item.style.display = "none";
+          }
+        });
+      }
+
+      // 从币安更新币种配置
+      function updateFromBinance() {
+        if (
+          !confirm(
+            "确定要从币安更新币种配置吗？这将添加新的交易对并保留现有配置。"
+          )
+        ) {
+          return;
+        }
+
+        // 调用从币安更新币种配置的API
+        fetch("/api/coins-config/update-from-binance", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              // 重新加载币种配置
+              loadCoinsConfig();
             } else {
-                if (selectedTrackedCoins.has(symbol)) {
-                    selectedTrackedCoins.delete(symbol);
-                    item.classList.remove('selected-item');
-                } else {
-                    selectedTrackedCoins.add(symbol);
-                    item.classList.add('selected-item');
-                }
+              // 不显示错误消息
             }
-            
-            updateTransferButtons();
-        }
-        
-        // 更新穿梭按钮状态
-        function updateTransferButtons() {
-            document.getElementById('addBtn').disabled = selectedAllCoins.size === 0;
-            document.getElementById('removeBtn').disabled = selectedTrackedCoins.size === 0;
-        }
-        
-        // 添加到跟踪列表
-        function addToTracked() {
-            if (selectedAllCoins.size === 0) return;
-            
-            // 批量更新选中的币种为跟踪状态
-            const updates = Array.from(selectedAllCoins).map(symbol => ({
-                symbol: symbol,
-                tracked: true
-            }));
-            
-            updateCoinsTracking(updates, () => {
-                // 清空选中状态
-                selectedAllCoins.clear();
-                // 重新加载列表
-                loadCoinsConfig();
-            });
-        }
-        
-        // 从跟踪列表移除
-        function removeFromTracked() {
-            if (selectedTrackedCoins.size === 0) return;
-            
-            // 批量更新选中的币种为非跟踪状态
-            const updates = Array.from(selectedTrackedCoins).map(symbol => ({
-                symbol: symbol,
-                tracked: false
-            }));
-            
-            updateCoinsTracking(updates, () => {
-                // 清空选中状态
-                selectedTrackedCoins.clear();
-                // 重新加载列表
-                loadCoinsConfig();
-            });
-        }
-        
-        // 更新币种跟踪状态
-        function updateCoinsTracking(updates, callback) {
-            let successCount = 0;
-            let failCount = 0;
-            
-            Promise.all(updates.map(update => {
-                return fetch('/api/coins-config/track', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(update)
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        successCount++;
-                        // 更新本地状态
-                        allCoins[update.symbol] = update.tracked;
-                    } else {
-                        failCount++;
-                    }
-                })
-                .catch(error => {
-                    failCount++;
-                    console.error('Error updating', update.symbol, error);
-                });
-            }))
-            .then(() => {
-                // 直接自动保存，不显示任何消息
-                if (callback) callback();
-            });
-        }
-        
-        // 筛选所有币种
-        function filterAllCoins() {
-            const filterValue = document.getElementById('allCoinsFilter').value.toLowerCase();
-            const items = document.querySelectorAll('#allCoinsList .transfer-item');
-            
-            items.forEach(item => {
-                const symbol = item.getAttribute('data-symbol').toLowerCase();
-                if (symbol.includes(filterValue)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        }
-        
-        // 筛选跟踪币种
-        function filterTrackedCoins() {
-            const filterValue = document.getElementById('trackedCoinsFilter').value.toLowerCase();
-            const items = document.querySelectorAll('#trackedCoinsList .transfer-item');
-            
-            items.forEach(item => {
-                const symbol = item.getAttribute('data-symbol').toLowerCase();
-                if (symbol.includes(filterValue)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        }
-        
-        // 从币安更新币种配置
-        function updateFromBinance() {
-            if (!confirm('确定要从币安更新币种配置吗？这将添加新的交易对并保留现有配置。')) {
-                return;
-            }
-            
-            // 调用从币安更新币种配置的API
-            fetch('/api/coins-config/update-from-binance', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    // 重新加载币种配置
-                    loadCoinsConfig();
-                } else {
-                    // 不显示错误消息
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                // 不显示错误消息
-            });
-        }
-        
-        // 保存跟踪状态
-        function saveTrackingStatus() {
-            // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
-            // 不显示任何消息
-        }
-        
-        // 显示消息（保留函数但不执行任何操作）
-        function showMessage(message, type) {
-            // 移除所有消息显示功能
-        }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+            // 不显示错误消息
+          });
+      }
+
+      // 保存跟踪状态
+      function saveTrackingStatus() {
+        // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
+        // 不显示任何消息
+      }
+
+      // 显示消息（保留函数但不执行任何操作）
+      function showMessage(message, type) {
+        // 移除所有消息显示功能
+      }
     </script>
-</body>
+  </body>
 </html>

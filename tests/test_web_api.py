@@ -19,9 +19,45 @@ class TestWebAPI:
             {
                 'symbol': 'BTCUSDT',
                 'current_open_interest': 150000.0,
+                'current_open_interest_formatted': '150,000.00',
+                'current_open_interest_value': 150000000.0,
+                'current_open_interest_value_formatted': '$150,000,000.00',
+                'current_price': 30000.0,
+                'current_price_formatted': '$30,000.00',
+                'price_change': 1500.0,
+                'price_change_percent': 5.23,
+                'price_change_formatted': '$1,500.00',
                 'changes': {
-                    '1h': 15.38,
-                    '24h': -5.23
+                    '1h': {
+                        'ratio': 15.38,
+                        'value_ratio': 16.21,
+                        'open_interest': 130000.0,
+                        'open_interest_formatted': '130,000.00',
+                        'open_interest_value': 130000000.0,
+                        'open_interest_value_formatted': '$130,000,000.00',
+                        'price_change': 1500.0,
+                        'price_change_percent': 5.23,
+                        'price_change_formatted': '$1,500.00',
+                        'current_price': 30000.0,
+                        'past_price': 28500.0,
+                        'current_price_formatted': '$30,000.00',
+                        'past_price_formatted': '$28,500.00'
+                    },
+                    '24h': {
+                        'ratio': -5.23,
+                        'value_ratio': -4.87,
+                        'open_interest': 158000.0,
+                        'open_interest_formatted': '158,000.00',
+                        'open_interest_value': 158000000.0,
+                        'open_interest_value_formatted': '$158,000,000.00',
+                        'price_change': -1200.0,
+                        'price_change_percent': -3.87,
+                        'price_change_formatted': '$-1,200.00',
+                        'current_price': 30000.0,
+                        'past_price': 31200.0,
+                        'current_price_formatted': '$30,000.00',
+                        'past_price_formatted': '$31,200.00'
+                    }
                 }
             }
         ]
@@ -30,10 +66,11 @@ class TestWebAPI:
         data = json.loads(response.data)
         
         assert response.status_code == 200
-        assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]['symbol'] == 'BTCUSDT'
-        assert data[0]['current_open_interest'] == 150000.0
+        assert data['status'] == 'success'
+        assert isinstance(data['data'], list)
+        assert len(data['data']) == 1
+        assert data['data'][0]['symbol'] == 'BTCUSDT'
+        assert data['data'][0]['current_open_interest'] == 150000.0
     
     @patch('web.app.get_all_coins_data')
     def test_coins_api_empty_result(self, mock_get_all_coins_data):
@@ -44,8 +81,9 @@ class TestWebAPI:
         data = json.loads(response.data)
         
         assert response.status_code == 200
-        assert isinstance(data, list)
-        assert len(data) == 0
+        assert data['status'] == 'success'
+        assert isinstance(data['data'], list)
+        assert len(data['data']) == 0
     
     @patch('web.app.get_all_coins_data')
     def test_coins_api_with_symbol_filter(self, mock_get_all_coins_data):
@@ -55,6 +93,14 @@ class TestWebAPI:
             {
                 'symbol': 'BTCUSDT',
                 'current_open_interest': 150000.0,
+                'current_open_interest_formatted': '150,000.00',
+                'current_open_interest_value': 150000000.0,
+                'current_open_interest_value_formatted': '$150,000,000.00',
+                'current_price': 30000.0,
+                'current_price_formatted': '$30,000.00',
+                'price_change': 1500.0,
+                'price_change_percent': 5.23,
+                'price_change_formatted': '$1,500.00',
                 'changes': {}
             }
         ]
@@ -63,6 +109,7 @@ class TestWebAPI:
         data = json.loads(response.data)
         
         assert response.status_code == 200
+        assert data['status'] == 'success'
         # 过滤逻辑在get_all_coins_data中实现，这里只是测试API能接收参数
         mock_get_all_coins_data.assert_called_once()
     
@@ -91,6 +138,7 @@ class TestWebAPI:
         assert response.status_code == 200
         assert data['status'] == 'error'
         assert 'message' in data
+        assert 'Update failed' in data['message']
     
     def test_index_page(self):
         """测试主页访问"""
