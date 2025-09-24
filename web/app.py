@@ -175,8 +175,8 @@ def update_coins_config():
         
         if not symbol:
             error_response = {
-                'success': False,
-                'error': '缺少symbol参数'
+                'status': 'error',
+                'message': '缺少symbol参数'
             }
             logger.error("更新币种配置失败: 缺少symbol参数")
             return jsonify(error_response), 400
@@ -184,15 +184,15 @@ def update_coins_config():
         set_coin_tracking(symbol, tracked)
         
         response_data = {
-            'success': True,
+            'status': 'success',
             'message': '配置更新成功'
         }
         logger.info(f"配置更新响应: {response_data}")
         return jsonify(response_data)
     except Exception as e:
         error_response = {
-            'success': False,
-            'error': str(e)
+            'status': 'error',
+            'message': str(e)
         }
         logger.error(f"更新币种配置失败: {e}")
         return jsonify(error_response), 500
@@ -208,8 +208,8 @@ def add_coin_api():
         
         if not symbol:
             error_response = {
-                'success': False,
-                'error': '缺少symbol参数'
+                'status': 'error',
+                'message': '缺少symbol参数'
             }
             logger.error("添加币种失败: 缺少symbol参数")
             return jsonify(error_response), 400
@@ -217,15 +217,15 @@ def add_coin_api():
         add_coin(symbol)
         
         response_data = {
-            'success': True,
+            'status': 'success',
             'message': '币种添加成功'
         }
         logger.info(f"添加币种响应: {response_data}")
         return jsonify(response_data)
     except Exception as e:
         error_response = {
-            'success': False,
-            'error': str(e)
+            'status': 'error',
+            'message': str(e)
         }
         logger.error(f"添加币种失败: {e}")
         return jsonify(error_response), 500
@@ -241,8 +241,8 @@ def delete_coin():
         
         if not symbol:
             error_response = {
-                'success': False,
-                'error': '缺少symbol参数'
+                'status': 'error',
+                'message': '缺少symbol参数'
             }
             logger.error("删除币种失败: 缺少symbol参数")
             return jsonify(error_response), 400
@@ -250,15 +250,15 @@ def delete_coin():
         remove_coin(symbol)
         
         response_data = {
-            'success': True,
+            'status': 'success',
             'message': '币种删除成功'
         }
         logger.info(f"删除币种响应: {response_data}")
         return jsonify(response_data)
     except Exception as e:
         error_response = {
-            'success': False,
-            'error': str(e)
+            'status': 'error',
+            'message': str(e)
         }
         logger.error(f"删除币种失败: {e}")
         return jsonify(error_response), 500
@@ -275,8 +275,8 @@ def set_coin_track():
         
         if not symbol:
             error_response = {
-                'success': False,
-                'error': '缺少symbol参数'
+                'status': 'error',
+                'message': '缺少symbol参数'
             }
             logger.error("设置币种跟踪状态失败: 缺少symbol参数")
             return jsonify(error_response), 400
@@ -284,15 +284,15 @@ def set_coin_track():
         set_coin_tracking(symbol, tracked)
         
         response_data = {
-            'success': True,
+            'status': 'success',
             'message': '跟踪状态设置成功'
         }
         logger.info(f"设置跟踪状态响应: {response_data}")
         return jsonify(response_data)
     except Exception as e:
         error_response = {
-            'success': False,
-            'error': str(e)
+            'status': 'error',
+            'message': str(e)
         }
         logger.error(f"设置币种跟踪状态失败: {e}")
         return jsonify(error_response), 500
