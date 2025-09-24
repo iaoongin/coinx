@@ -18,15 +18,40 @@ def setup_logger():
     os.makedirs(LOGS_DIR, exist_ok=True)
     
     log_file = os.path.join(LOGS_DIR, 'app.log')
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s %(levelname)s %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
+    
+    # 创建日志记录器
     logger = logging.getLogger(__name__)
+    
+    # 如果记录器已经有处理器，先清除
+    if logger.handlers:
+        logger.handlers.clear()
+    
+    # 设置日志级别
+    logger.setLevel(logging.INFO)
+    
+    # 创建格式化器
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    
+    # 文件处理器（轮转日志）
+    from logging.handlers import RotatingFileHandler
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    
+    # 控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # 添加处理器
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
     logger.info(f"日志系统已初始化，日志文件路径: {log_file}")
     return logger
 
@@ -97,10 +122,13 @@ def save_all_coins_data(data):
             # 清理临时文件
             if os.path.exists(temp_filepath):
                 os.remove(temp_filepath)
-            raise e
+            # 记录错误而不是抛出异常
+            logger.error(f"保存数据时出错: {e}")
+            logger.exception(e)
             
     except Exception as e:
         logger.error(f"保存所有币种数据失败: {e}")
+        logger.exception(e)
 
 def load_all_coins_data():
     """从本地文件加载所有币种数据"""

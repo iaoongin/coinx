@@ -179,18 +179,22 @@ class FlaskAppManager:
         for pid in processes_to_kill:
             try:
                 proc = psutil.Process(pid)
+                # 先尝试优雅关闭
                 proc.terminate()
                 try:
                     proc.wait(timeout=10)
                     print(f"进程 {pid} 已停止")
                     stopped = True
                 except psutil.TimeoutExpired:
+                    # 如果优雅关闭超时，则强制杀死进程
                     proc.kill()
                     proc.wait()
                     print(f"进程 {pid} 已被强制停止")
                     stopped = True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+                # 进程可能已经退出
+                print(f"进程 {pid} 可能已经退出")
+                stopped = True
 
         # 删除PID文件
         if self.pid_file.exists():
