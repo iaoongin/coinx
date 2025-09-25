@@ -56,7 +56,7 @@ def get_all_coins_from_binance():
         for symbol_info in data["symbols"]:
             if (
                 symbol_info["quoteAsset"] == "USDT"
-                and symbol_info["status"] == "TRACING"
+                and symbol_info["status"] == "TRADING"
             ):
                 usdt_pairs.append(
                     {
