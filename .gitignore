@@ -165,3 +165,6 @@ logs/
 
 # Data
 data/
+
+# idea folder
+.idea
