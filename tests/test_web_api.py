@@ -9,7 +9,7 @@ class TestWebAPI:
     def setup_method(self):
         """测试前准备"""
         self.app = app.test_client()
-        self.app.testing = True
+        # self.app.testing = True  # 删除这行，因为它会导致类型错误
     
     @patch('web.app.get_all_coins_data')
     def test_coins_api_success(self, mock_get_all_coins_data):
@@ -113,9 +113,12 @@ class TestWebAPI:
         # 过滤逻辑在get_all_coins_data中实现，这里只是测试API能接收参数
         mock_get_all_coins_data.assert_called_once()
     
-    @patch('web.app.update_all_data')
-    def test_update_api_success(self, mock_update_all_data):
+    @patch('src.binance_api.should_update_cache')
+    @patch('src.binance_api.update_all_data')
+    def test_update_api_success(self, mock_update_all_data, mock_should_update_cache):
         """测试手动更新数据API成功"""
+        # 模拟should_update_cache返回True，表示需要更新
+        mock_should_update_cache.return_value = True
         # 模拟更新函数返回空列表（表示成功）
         mock_update_all_data.return_value = []
         
@@ -126,9 +129,12 @@ class TestWebAPI:
         assert data['status'] == 'success'
         assert 'message' in data
     
-    @patch('web.app.update_all_data')
-    def test_update_api_exception(self, mock_update_all_data):
+    @patch('src.binance_api.should_update_cache')
+    @patch('src.binance_api.update_all_data')
+    def test_update_api_exception(self, mock_update_all_data, mock_should_update_cache):
         """测试手动更新数据API异常处理"""
+        # 模拟should_update_cache返回True，表示需要更新
+        mock_should_update_cache.return_value = True
         # 模拟更新函数抛出异常
         mock_update_all_data.side_effect = Exception('Update failed')
         

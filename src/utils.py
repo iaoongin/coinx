@@ -185,7 +185,6 @@ def get_cache_update_time():
     try:
         import os
         import json
-        from datetime import datetime
         
         # 缓存文件路径
         CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'open_interest_cache.json')
@@ -201,14 +200,19 @@ def get_cache_update_time():
                 timestamps = sorted(cache_data.keys(), key=int)
                 latest_timestamp = int(timestamps[-1])
                 logger.info(f"找到缓存数据，最新时间戳: {latest_timestamp}")
-                return latest_timestamp * 1000  # 转换为毫秒
+                # 返回毫秒时间戳
+                return latest_timestamp * 1000
             else:
                 logger.info("缓存文件存在但无数据")
+                # 返回当前时间作为默认值
+                return int(datetime.now().timestamp() * 1000)
         else:
             logger.info("缓存文件不存在")
+            # 返回当前时间作为默认值
+            return int(datetime.now().timestamp() * 1000)
         
-        return None
     except Exception as e:
         logger.error(f"获取缓存更新时间失败: {e}")
         logger.exception(e)
-        return None
+        # 出错时返回当前时间
+        return int(datetime.now().timestamp() * 1000)

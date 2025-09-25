@@ -460,66 +460,17 @@
     </div>
 
     <script>
-      let countdownInterval;
-      let lastUpdateTime = 0;
       let allCoins = {}; // 存储所有币种及其跟踪状态
       let selectedAllCoins = new Set(); // 选中的所有币种
       let selectedTrackedCoins = new Set(); // 选中的跟踪币种
+      let isWaitingForUpdate = false; // 添加标志来跟踪是否正在等待更新
 
       // 页面加载完成后获取数据
       document.addEventListener("DOMContentLoaded", function () {
         loadData();
+        // 注意：不要在这里设置定时器，避免与script.js中的定时器重复
+        // setInterval(loadCoinsData, 300000);
       });
-
-      // 基于缓存更新时间计算倒计时
-      function updateCountdownBasedOnCache() {
-        const countdownElement = document.getElementById("countdown");
-
-        // 计算下次刷新时间（下一个5分钟时间点）
-        const now = new Date();
-        const nextRefreshTime = new Date(lastUpdateTime);
-        nextRefreshTime.setMinutes(
-          Math.ceil(nextRefreshTime.getMinutes() / 5) * 5
-        );
-        nextRefreshTime.setSeconds(0);
-        nextRefreshTime.setMilliseconds(0);
-
-        // 如果计算出的时间已经过去，则加上5分钟
-        if (nextRefreshTime <= now) {
-          nextRefreshTime.setTime(nextRefreshTime.getTime() + 5 * 60 * 1000);
-        }
-
-        // 更新倒计时
-        function updateCountdown() {
-          const now = new Date();
-          const timeDiff = nextRefreshTime - now;
-
-          if (timeDiff <= 0) {
-            // 时间到了，只获取最新数据而不强制更新
-            loadCoinsData();
-            // 重新计算下次刷新时间
-            nextRefreshTime.setTime(nextRefreshTime.getTime() + 5 * 60 * 1000);
-            return;
-          }
-
-          // 计算剩余时间
-          const seconds = Math.floor(timeDiff / 1000);
-          const minutes = Math.floor(seconds / 60);
-          const secs = seconds % 60;
-          countdownElement.textContent = `${minutes}:${secs
-            .toString()
-            .padStart(2, "0")}`;
-        }
-
-        // 立即更新一次
-        updateCountdown();
-
-        // 每秒更新倒计时
-        if (countdownInterval) {
-          clearInterval(countdownInterval);
-        }
-        countdownInterval = setInterval(updateCountdown, 1000);
-      }
 
       // 只获取币种数据，不触发更新
       function loadCoinsData() {
@@ -554,57 +505,10 @@
       // 加载数据（包含更新和获取数据）
       function loadData() {
         const container = document.getElementById("data-container");
-        const lastUpdateElement = document.getElementById("last-update-time");
-        const countdownElement = document.getElementById("countdown");
 
-        // 不再显示加载提示，保留现有数据展示
-        // container.innerHTML = '<div class="loading">正在获取最新数据...</div>';
-
-        // 先调用更新接口获取最新数据
+        // 直接获取币种数据，不主动触发更新
         console.log("开始获取数据...");
-        fetch("/api/update")
-          .then((response) => {
-            console.log("更新接口响应:", response);
-            return response.json();
-          })
-          .then((updateResult) => {
-            console.log("更新结果:", updateResult);
-            if (updateResult.status === "success") {
-              // 更新成功后获取数据
-              console.log("更新成功，开始获取币种数据...");
-              return fetch("/api/coins");
-            } else {
-              // 更新失败时也尝试获取现有数据
-              console.log("更新失败，但仍尝试获取币种数据...");
-              return fetch("/api/coins");
-            }
-          })
-          .then((response) => {
-            console.log("币种数据接口响应:", response);
-            return response.json();
-          })
-          .then((result) => {
-            console.log("币种数据结果:", result);
-            if (result.status === "success") {
-              console.log("数据获取成功，开始渲染数据...");
-
-              // 更新最后更新时间和倒计时
-              if (result.cache_update_time) {
-                updateLastUpdateTime(result.cache_update_time);
-              }
-
-              renderData(result.data);
-            } else {
-              console.log("数据获取失败:", result.message);
-              // 只在确实失败时才显示错误信息
-              // container.innerHTML = `<div class="error">加载失败: ${result.message}</div>`;
-            }
-          })
-          .catch((error) => {
-            console.error("加载数据时出错:", error);
-            // 只在确实失败时才显示错误信息
-            // container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
-          });
+        loadCoinsData();
       }
 
       // 更新最后更新时间和倒计时
@@ -615,20 +519,87 @@
         // 更新最后更新时间
         const updateTime = new Date(cacheUpdateTime);
         lastUpdateElement.textContent = updateTime.toLocaleString("zh-CN");
-        lastUpdateTime = cacheUpdateTime;
 
-        // 开始倒计时（基于缓存更新时间计算下次刷新时间）
-        updateCountdownBasedOnCache();
+        // 更新倒计时显示
+        updateCountdownDisplay(cacheUpdateTime);
       }
 
-      // 更新倒计时显示（保持原有函数以兼容其他地方的调用）
-      function updateCountdown(seconds) {
+      // 更新倒计时显示
+      function updateCountdownDisplay(cacheUpdateTime) {
         const countdownElement = document.getElementById("countdown");
-        const minutes = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        countdownElement.textContent = `${minutes}:${secs
-          .toString()
-          .padStart(2, "0")}`;
+        
+        // 如果没有更新时间，不显示倒计时
+        if (!cacheUpdateTime) {
+          countdownElement.textContent = "--";
+          return;
+        }
+
+        // 计算下次刷新时间（下一个5分钟时间点）
+        const now = new Date();
+        const lastUpdate = new Date(cacheUpdateTime);
+        
+        // 计算基于最后更新时间的下一个5分钟刷新点
+        const nextRefreshTime = new Date(lastUpdate);
+        nextRefreshTime.setMinutes(Math.floor(lastUpdate.getMinutes() / 5) * 5);
+        nextRefreshTime.setSeconds(0);
+        nextRefreshTime.setMilliseconds(0);
+        // 加上5分钟得到下次刷新时间
+        nextRefreshTime.setTime(nextRefreshTime.getTime() + 5 * 60 * 1000);
+
+        // 如果计算出的时间已经过去，则重新计算
+        if (nextRefreshTime <= now) {
+          const minutesSinceLastUpdate = Math.floor((now - lastUpdate) / (60 * 1000));
+          const cycles = Math.ceil(minutesSinceLastUpdate / 5);
+          nextRefreshTime.setTime(lastUpdate.getTime() + cycles * 5 * 60 * 1000);
+        }
+
+        // 更新倒计时
+        function updateCountdown() {
+          const now = new Date();
+          const timeDiff = nextRefreshTime - now;
+
+          if (timeDiff <= 0) {
+            // 如果已经在等待更新，则不重复触发
+            if (isWaitingForUpdate) {
+              return;
+            }
+            
+            // 设置等待标志
+            isWaitingForUpdate = true;
+            
+            // 时间到了，显示加载中状态
+            countdownElement.textContent = "加载中...";
+            
+            // 获取最新数据
+            loadCoinsData();
+            
+            // 设置一个最大等待时间，避免无限等待
+            setTimeout(() => {
+              if (isWaitingForUpdate) {
+                isWaitingForUpdate = false;
+                // 重新计算倒计时
+                updateCountdownDisplay(cacheUpdateTime);
+              }
+            }, 30000); // 最多等待30秒
+            
+            return;
+          }
+
+          // 计算剩余时间
+          const seconds = Math.floor(timeDiff / 1000);
+          const minutes = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          countdownElement.textContent = `${minutes}:${secs.toString().padStart(2, "0")}`;
+        }
+
+        // 立即更新一次
+        updateCountdown();
+
+        // 每秒更新倒计时
+        if (window.countdownInterval) {
+          clearInterval(window.countdownInterval);
+        }
+        window.countdownInterval = setInterval(updateCountdown, 1000);
       }
 
       // 渲染数据

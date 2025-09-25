@@ -168,6 +168,9 @@ def get_coins_config():
     logger.info("获取币种配置")
     try:
         config = load_coins_config_dict()
+        # 确保config是一个字典
+        if config is None:
+            config = {}
         logger.info(f"获取到 {len(config)} 个币种配置")
         
         response_data = {
