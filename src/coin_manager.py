@@ -13,52 +13,88 @@ from src.config import DATA_DIR, BINANCE_BASE_URL, USE_PROXY, PROXY_URL, HTTPS_P
 from src.utils import logger
 
 # 币种配置文件路径
-COINS_CONFIG_FILE = os.path.join(DATA_DIR, 'coins_config.json')
+COINS_CONFIG_FILE = os.path.join(DATA_DIR, "coins_config.json")
+
 
 def get_session():
     """创建带代理配置的会话"""
     session = requests.Session()
-    
+
     if USE_PROXY:
-        proxies = {
-            'http': PROXY_URL,
-            'https': HTTPS_PROXY_URL
-        }
+        proxies = {"http": PROXY_URL, "https": HTTPS_PROXY_URL}
         session.proxies.update(proxies)
         logger.info(f"使用代理: {PROXY_URL}")
-    
+
     return session
+
 
 def get_all_coins_from_binance():
     """
     从币安获取所有交易对列表
     :return: USDT交易对列表
     """
+    response = None  # 初始化response变量
     try:
         url = f"{BINANCE_BASE_URL}/fapi/v1/exchangeInfo"
-        
+
         # 使用会话
         session = get_session()
-        response = session.get(url, timeout=10)
+        response = session.get(url, timeout=15)  # 增加超时时间
         response.raise_for_status()
+
+        # 检查响应内容类型
+        content_type = response.headers.get("content-type", "")
+        if "application/json" not in content_type:
+            logger.error(f"币安API返回非JSON响应，内容类型: {content_type}")
+            logger.error(f"响应内容预览: {response.text[:500]}")
+            return None
+
         data = response.json()
-        
+
         # 筛选出USDT交易对
         usdt_pairs = []
-        for symbol_info in data['symbols']:
-            if symbol_info['quoteAsset'] == 'USDT' and symbol_info['status'] == 'TRADING':
-                usdt_pairs.append({
-                    'symbol': symbol_info['symbol'],
-                    'baseAsset': symbol_info['baseAsset'],
-                    'quoteAsset': symbol_info['quoteAsset']
-                })
-        
+        for symbol_info in data["symbols"]:
+            if (
+                symbol_info["quoteAsset"] == "USDT"
+                and symbol_info["status"] == "TRACING"
+            ):
+                usdt_pairs.append(
+                    {
+                        "symbol": symbol_info["symbol"],
+                        "baseAsset": symbol_info["baseAsset"],
+                        "quoteAsset": symbol_info["quoteAsset"],
+                    }
+                )
+
         logger.info(f"从币安获取到 {len(usdt_pairs)} 个USDT交易对")
         return usdt_pairs
+    except requests.exceptions.RequestException as e:
+        logger.error(f"币安API请求失败: {e}")
+        if hasattr(e, "response") and e.response is not None:
+            logger.error(f"错误响应状态码: {e.response.status_code}")
+            # 安全地访问响应内容
+            try:
+                response_text = (
+                    e.response.text[:500] if len(e.response.text) > 0 else "空响应"
+                )
+                logger.error(f"错误响应内容: {response_text}")
+            except:
+                logger.error("无法获取错误响应内容")
+        return None
+    except ValueError as e:  # JSON解析错误
+        logger.error(f"币安API响应JSON解析失败: {e}")
+        # 安全地访问响应内容
+        response_text = "无响应内容"
+        if response is not None and hasattr(response, "text"):
+            response_text = response.text[:500] if len(response.text) > 0 else "空响应"
+        logger.error(f"响应内容: {response_text}")
+        return None
     except Exception as e:
         logger.error(f"从币安获取交易对列表失败: {e}")
+        logger.exception(e)
         # 返回None而不是空列表，以便调用方能区分是错误还是空结果
         return None
+
 
 def load_coins_config():
     """
@@ -67,31 +103,34 @@ def load_coins_config():
     """
     try:
         if os.path.exists(COINS_CONFIG_FILE):
-            with open(COINS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(COINS_CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 # 如果是旧格式，转换为新格式
                 if isinstance(config, list):
                     # 转换旧格式为新格式
                     new_config = {
-                        'updated_time': datetime.now().isoformat(),
-                        'coins': {coin: True for coin in config}  # 默认都启用跟踪
+                        "updated_time": datetime.now().isoformat(),
+                        "coins": {coin: True for coin in config},  # 默认都启用跟踪
                     }
-                    save_coins_config_dict(new_config['coins'])
-                    return list(new_config['coins'].keys())
-                elif isinstance(config, dict) and 'coins' in config:
+                    save_coins_config_dict(new_config["coins"])
+                    return list(new_config["coins"].keys())
+                elif isinstance(config, dict) and "coins" in config:
                     # 新格式：返回启用跟踪的币种
-                    tracked_coins = [coin for coin, tracked in config['coins'].items() if tracked]
+                    tracked_coins = [
+                        coin for coin, tracked in config["coins"].items() if tracked
+                    ]
                     return tracked_coins
                 else:
                     return []
         else:
             # 如果配置文件不存在，创建默认配置
-            default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
+            default_coins = {"BTCUSDT": True, "ETHUSDT": True, "BNBUSDT": True}
             save_coins_config_dict(default_coins)
             return list(default_coins.keys())
     except Exception as e:
         logger.error(f"加载币种配置失败: {e}")
-        return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+        return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+
 
 def load_coins_config_dict():
     """
@@ -100,36 +139,41 @@ def load_coins_config_dict():
     """
     try:
         if os.path.exists(COINS_CONFIG_FILE):
-            with open(COINS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(COINS_CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 # 如果是旧格式，转换为新格式
-                if isinstance(config, dict) and 'coins' in config:
-                    coins_data = config['coins']
+                if isinstance(config, dict) and "coins" in config:
+                    coins_data = config["coins"]
                     if isinstance(coins_data, list):
                         # 转换旧格式为新格式
                         new_config = {
-                            'updated_time': config.get('updated_time', datetime.now().isoformat()),
-                            'coins': {coin: True for coin in coins_data}  # 默认都启用跟踪
+                            "updated_time": config.get(
+                                "updated_time", datetime.now().isoformat()
+                            ),
+                            "coins": {
+                                coin: True for coin in coins_data
+                            },  # 默认都启用跟踪
                         }
-                        save_coins_config_dict(new_config['coins'])
-                        return new_config['coins']
+                        save_coins_config_dict(new_config["coins"])
+                        return new_config["coins"]
                     elif isinstance(coins_data, dict):
                         return coins_data
                 else:
                     # 如果格式不正确，创建默认配置
-                    default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
+                    default_coins = {"BTCUSDT": True, "ETHUSDT": True, "BNBUSDT": True}
                     save_coins_config_dict(default_coins)
                     return default_coins
         else:
             # 如果配置文件不存在，创建默认配置
-            default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
+            default_coins = {"BTCUSDT": True, "ETHUSDT": True, "BNBUSDT": True}
             save_coins_config_dict(default_coins)
             return default_coins
     except Exception as e:
         logger.error(f"加载币种配置字典失败: {e}")
         # 出错时返回默认配置
-        default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
+        default_coins = {"BTCUSDT": True, "ETHUSDT": True, "BNBUSDT": True}
         return default_coins
+
 
 def save_coins_config_dict(coins_dict):
     """
@@ -137,17 +181,15 @@ def save_coins_config_dict(coins_dict):
     :param coins_dict: 币种配置字典 {symbol: tracked}
     """
     try:
-        config = {
-            'updated_time': datetime.now().isoformat(),
-            'coins': coins_dict
-        }
-        
-        with open(COINS_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        config = {"updated_time": datetime.now().isoformat(), "coins": coins_dict}
+
+        with open(COINS_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        
+
         logger.info(f"币种配置已保存: {len(coins_dict)} 个币种")
     except Exception as e:
         logger.error(f"保存币种配置失败: {e}")
+
 
 def update_coins_config():
     """
@@ -155,13 +197,13 @@ def update_coins_config():
     """
     try:
         logger.info("开始更新币种配置...")
-        
+
         # 从币安获取所有USDT交易对
         all_coins = get_all_coins_from_binance()
-        
+
         # 加载现有配置
         current_config = load_coins_config_dict()
-        
+
         # 检查是否获取到了币种数据
         if all_coins is None:
             # 网络请求失败
@@ -174,22 +216,27 @@ def update_coins_config():
             return True
         else:
             # 提取交易对名称
-            coin_symbols = [coin['symbol'] for coin in all_coins]
-            
+            coin_symbols = [coin["symbol"] for coin in all_coins]
+
             # 更新配置：保留现有币种的跟踪状态，添加新币种（默认不跟踪）
+            # 确保current_config不是None
+            if current_config is None:
+                current_config = {}
             updated_config = current_config.copy()
             for symbol in coin_symbols:
                 if symbol not in updated_config:
                     updated_config[symbol] = False  # 新币种默认不跟踪
-            
+
             # 保存更新后的配置
             save_coins_config_dict(updated_config)
-            
+
             logger.info(f"币种配置更新完成，共 {len(updated_config)} 个币种")
             return True
     except Exception as e:
         logger.error(f"更新币种配置失败: {e}")
+        logger.exception(e)
         return False
+
 
 def get_active_coins(filter_symbols=None):
     """
@@ -199,14 +246,15 @@ def get_active_coins(filter_symbols=None):
     """
     # 加载启用跟踪的币种配置
     tracked_coins = load_coins_config()
-    
+
     # 如果提供了筛选列表，则只返回筛选后的币种
     if filter_symbols:
         # 确保筛选的币种在配置列表中且启用跟踪
         filtered_coins = [coin for coin in tracked_coins if coin in filter_symbols]
         return filtered_coins
-    
+
     return tracked_coins
+
 
 def get_all_coins_list():
     """
@@ -216,13 +264,14 @@ def get_all_coins_list():
     try:
         all_coins = get_all_coins_from_binance()
         if all_coins:
-            return [coin['symbol'] for coin in all_coins]
+            return [coin["symbol"] for coin in all_coins]
         else:
             # 如果无法从币安获取，返回空列表
             return []
     except Exception as e:
         logger.error(f"获取所有币种列表失败: {e}")
         return []
+
 
 def set_coin_tracking(symbol, tracked):
     """
@@ -233,18 +282,24 @@ def set_coin_tracking(symbol, tracked):
     try:
         # 加载现有配置
         coins_config = load_coins_config_dict()
-        
+
+        # 确保coins_config不是None
+        if coins_config is None:
+            coins_config = {}
+
         # 更新币种跟踪状态
         coins_config[symbol] = tracked
-        
+
         # 保存配置
         save_coins_config_dict(coins_config)
-        
+
         logger.info(f"币种 {symbol} 跟踪状态已更新为: {tracked}")
         return True
     except Exception as e:
         logger.error(f"更新币种跟踪状态失败: {e}")
+        logger.exception(e)
         return False
+
 
 def add_coin(symbol, tracked=True):
     """
@@ -255,18 +310,24 @@ def add_coin(symbol, tracked=True):
     try:
         # 加载现有配置
         coins_config = load_coins_config_dict()
-        
+
+        # 确保coins_config不是None
+        if coins_config is None:
+            coins_config = {}
+
         # 添加币种
         coins_config[symbol] = tracked
-        
+
         # 保存配置
         save_coins_config_dict(coins_config)
-        
+
         logger.info(f"币种 {symbol} 已添加到配置，跟踪状态: {tracked}")
         return True
     except Exception as e:
         logger.error(f"添加币种失败: {e}")
+        logger.exception(e)
         return False
+
 
 def remove_coin(symbol):
     """
@@ -276,14 +337,18 @@ def remove_coin(symbol):
     try:
         # 加载现有配置
         coins_config = load_coins_config_dict()
-        
+
+        # 确保coins_config不是None
+        if coins_config is None:
+            coins_config = {}
+
         # 移除币种
         if symbol in coins_config:
             del coins_config[symbol]
-            
+
             # 保存配置
             save_coins_config_dict(coins_config)
-            
+
             logger.info(f"币种 {symbol} 已从配置中移除")
             return True
         else:
@@ -291,15 +356,17 @@ def remove_coin(symbol):
             return False
     except Exception as e:
         logger.error(f"移除币种失败: {e}")
+        logger.exception(e)
         return False
+
 
 if __name__ == "__main__":
     # 测试功能
     print("测试币种管理功能...")
-    
+
     # 更新币种配置
     update_coins_config()
-    
+
     # 获取活跃币种
     active_coins = get_active_coins()
     print(f"活跃币种数量: {len(active_coins)}")
