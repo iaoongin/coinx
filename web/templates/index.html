@@ -96,36 +96,134 @@
         padding: 25px;
         font-size: 16px;
       }
+      /* ==================== 表格容器 ==================== */
+      .table-wrapper {
+        margin-top: 25px;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        background: white;
+      }
+
       table {
         width: 100%;
-        border-collapse: collapse;
-        background-color: white;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-        border-radius: 8px;
-        overflow: hidden;
+        border-collapse: separate;
+        border-spacing: 0;
+        background-color: transparent;
+        /* 强制创建合成层，启用GPU加速 */
+        transform: translateZ(0);
+        will-change: contents;
+      }
+
+      /* ==================== 表头设计 ==================== */
+      thead {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+
+      th {
+        padding: 16px 14px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #ffffff;
+        border: none;
+        white-space: nowrap;
+      }
+
+      th:first-child {
+        text-align: left;
+        padding-left: 20px;
+      }
+
+      /* ==================== 单元格设计 ==================== */
+      td {
+        padding: 14px;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 400;
+        color: #4b5563;
+        border-bottom: 1px solid #f3f4f6;
+      }
+
+      /* 币种名称列（带 rowspan） */
+      td[rowspan] {
+        text-align: left;
+        padding-left: 20px;
+        font-weight: 600;
+        font-size: 14px;
+        color: #1f2937;
+        vertical-align: middle;
+        border-right: 2px solid #e5e7eb;
+      }
+
+      /* 类型列（持仓量/持仓价值/价格） */
+      /* 第一行的类型列（在币种名称之后） */
+      tbody tr td:nth-child(2):not([rowspan]),
+      /* 第二、三行的类型列（第一列，因为币种跨行） */
+      tbody tr td:first-child:not([rowspan]) {
+        text-align: center;
+        font-weight: 400;
+        color: #6b7280;
+        font-size: 14px;
+        min-width: 80px;
+      }
+
+      /* 当前值列 */
+      /* 第一行的当前值（第3列） */
+      tbody tr td:nth-child(3),
+      /* 第二、三行的当前值（第2列） */
+      tbody tr td:nth-child(2):not(:first-child):not([rowspan]) {
+        text-align: center;
+        font-weight: 400;
+        color: #1f2937;
         font-size: 14px;
       }
-      th,
-      td {
-        padding: 10px 12px;
-        text-align: center;
-        border-bottom: 1px solid #ecf0f1;
+
+      /* ==================== 表格行设计 ==================== */
+      tbody tr {
+        background-color: white;
+        /* 强制启用硬件加速，消除闪烁 */
+        transform: translateZ(0);
+        backface-visibility: hidden;
+        perspective: 1000px;
       }
-      th {
-        background: linear-gradient(135deg, #3498db, #2c3e50);
-        color: white;
-        font-weight: 600;
-        padding: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+
+      /* 斑马纹 */
+      tbody tr:nth-child(6n+2),
+      tbody tr:nth-child(6n+3),
+      tbody tr:nth-child(6n+4) {
+        background-color: white;
       }
-      tr:nth-child(even) {
-        background-color: #f8f9fa;
+
+      tbody tr:nth-child(6n+5),
+      tbody tr:nth-child(6n+6),
+      tbody tr:nth-child(6n+1):not(:first-child) {
+        background-color: #f9fafb;
       }
-      tr:hover {
-        background-color: #e3f2fd;
-        transform: scale(1.01);
-        transition: all 0.2s ease;
+
+      /* ==================== 悬停效果（零抖动、零闪烁） ==================== */
+      tbody tr:hover {
+        background-color: #eef2ff !important;
+      }
+
+      tbody tr:hover td {
+        color: #1f2937;
+      }
+
+      tbody tr:hover td[rowspan] {
+        color: #667eea;
+      }
+
+      /* 币种组分隔 */
+      tr.coin-group-last td {
+        border-bottom: 3px solid #e5e7eb;
+      }
+
+      /* 最后一行处理 */
+      tbody tr:last-child td {
+        border-bottom: none;
       }
       .positive {
         color: #27ae60;
@@ -536,9 +634,11 @@
             if (result.status === "success") {
               console.log("数据获取成功，开始渲染数据...");
 
-              // 更新最后更新时间和倒计时
+              // 只更新显示时间，不重启倒计时
               if (result.cache_update_time) {
-                updateLastUpdateTime(result.cache_update_time);
+                const lastUpdateElement = document.getElementById("last-update-time");
+                const updateTime = new Date(result.cache_update_time);
+                lastUpdateElement.textContent = updateTime.toLocaleString("zh-CN");
               }
 
               renderData(result.data);
@@ -652,6 +752,7 @@
 
           // 构建表格HTML
           let html = `
+                    <div class="table-wrapper">
                     <table>
                         <thead>
                             <tr>
@@ -842,7 +943,7 @@
 
             // 第三行：展示价格和价格波动数据
             html += `
-                        <tr>
+                        <tr class="coin-group-last">
                             <td>价格</td>
                             <td>
                                 <span class="formatted-value" title="${
@@ -928,6 +1029,7 @@
           html += `
                         </tbody>
                     </table>
+                    </div>
                 `;
 
           console.log("生成的HTML:", html);
@@ -1221,7 +1323,12 @@
 
         showMessageModal("正在从币安更新币种配置...", "info");
 
-        fetch("/api/coins-config/update-from-binance")
+        fetch("/api/coins-config/update-from-binance", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
           .then((response) => response.json())
           .then((data) => {
             if (data.status === "success") {

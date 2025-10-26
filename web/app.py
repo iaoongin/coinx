@@ -8,7 +8,15 @@ project_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
 
 from src.data_processor import get_all_coins_data
-from src.coin_manager import get_active_coins, load_coins_config_dict, save_coins_config_dict, add_coin, remove_coin, set_coin_tracking, update_coins_config
+from src.coin_manager import (
+    get_active_coins, 
+    load_coins_config_dict, 
+    save_coins_config_dict, 
+    add_coin, 
+    remove_coin, 
+    set_coin_tracking, 
+    update_coins_config as update_coins_from_binance
+)
 from src.utils import logger, get_cache_update_time
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -19,7 +27,12 @@ def log_request_info():
     logger.info(f"请求: {request.method} {request.url}")
     if request.data:
         try:
-            logger.info(f"请求数据: {request.get_json()}")
+            # 使用 force=True 避免Content-Type检查，silent=True 避免解析失败时抛出异常
+            json_data = request.get_json(force=True, silent=True)
+            if json_data:
+                logger.info(f"请求数据: {json_data}")
+            else:
+                logger.info(f"请求数据: {request.data}")
         except:
             logger.info(f"请求数据: {request.data}")
 
@@ -325,7 +338,7 @@ def update_coins_config_api():
     logger.info("从币安更新币种配置")
     try:
         # 调用币种管理模块的更新函数
-        success = update_coins_config()
+        success = update_coins_from_binance()
         
         if success:
             response_data = {
