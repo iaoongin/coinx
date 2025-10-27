@@ -224,10 +224,7 @@
 
       <div class="actions">
         <button class="btn btn-success" onclick="updateFromBinance()">
-          从币安更新
-        </button>
-        <button class="btn btn-warning" onclick="saveTrackingStatus()">
-          保存配置
+          从币安更新币种
         </button>
       </div>
 
@@ -467,7 +464,7 @@
         });
       }
 
-      // 更新币种跟踪状态
+      // 实时更新币种跟踪状态（无需手动保存）
       function updateCoinsTracking(updates, callback) {
         let successCount = 0;
         let failCount = 0;
@@ -497,7 +494,7 @@
               });
           })
         ).then(() => {
-          // 直接自动保存，不显示任何消息
+          // 所有更新完成后执行回调
           if (callback) callback();
         });
       }
@@ -542,7 +539,7 @@
       function updateFromBinance() {
         if (
           !confirm(
-            "确定要从币安更新币种配置吗？这将添加新的交易对并保留现有配置。"
+            "确定要从币安获取最新币种列表吗？\n\n这将添加新上线的交易对到左侧列表（默认不跟踪），现有配置不受影响。"
           )
         ) {
           return;
@@ -570,16 +567,6 @@
           });
       }
 
-      // 保存跟踪状态
-      function saveTrackingStatus() {
-        // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
-        // 不显示任何消息
-      }
-
-      // 显示消息（保留函数但不执行任何操作）
-      function showMessage(message, type) {
-        // 移除所有消息显示功能
-      }
     </script>
   </body>
 </html>

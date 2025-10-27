@@ -488,18 +488,7 @@
               onclick="updateFromBinanceModal()"
               style="padding: 10px 20px; margin: 0 10px"
             >
-              从币安更新
-            </button>
-            <button
-              class="btn transfer-btn"
-              onclick="saveTrackingStatusModal()"
-              style="
-                padding: 10px 20px;
-                margin: 0 10px;
-                background: linear-gradient(135deg, #27ae60, #2ecc71);
-              "
-            >
-              保存配置
+              从币安更新币种
             </button>
           </div>
 
@@ -1315,13 +1304,13 @@
       function updateFromBinanceModal() {
         if (
           !confirm(
-            "确定要从币安更新币种配置吗？这将添加新的交易对并保留现有配置。"
+            "确定要从币安获取最新币种列表吗？\n\n这将添加新上线的交易对到左侧列表（默认不跟踪），现有配置不受影响。"
           )
         ) {
           return;
         }
 
-        showMessageModal("正在从币安更新币种配置...", "info");
+        showMessageModal("正在从币安获取最新币种列表...", "info");
 
         fetch("/api/coins-config/update-from-binance", {
           method: "POST",
@@ -1345,12 +1334,6 @@
               "error"
             );
           });
-      }
-
-      // 保存跟踪状态（弹窗内）
-      function saveTrackingStatusModal() {
-        // 在穿梭框模式下，更改会实时应用，这里可以作为确认保存的按钮
-        showMessageModal("跟踪配置已保存", "success");
       }
 
       // 显示消息（弹窗内）
