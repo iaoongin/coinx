@@ -449,10 +449,14 @@ def update_all_data(symbols=None, force_update=False):
         logger.info("当前5分钟周期内已有缓存数据，跳过更新")
         return None
     
-    # 如果没有提供币种列表，则获取所有币种
+    # 如果没有提供币种列表，则仅获取启用跟踪/订阅的币种
     if symbols is None:
-        symbols = get_all_coins_list()
-        logger.info(f"获取到 {len(symbols)} 个币种进行数据更新")
+        try:
+            symbols = get_active_coins()
+            logger.info(f"使用订阅币种进行数据更新，共 {len(symbols)} 个")
+        except Exception as e:
+            logger.error(f"获取订阅币种失败，回退到空列表: {e}")
+            symbols = []
     
     logger.info(f"开始更新数据，共 {len(symbols)} 个币种...")
     

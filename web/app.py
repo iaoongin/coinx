@@ -148,6 +148,7 @@ def update_data():
     try:
         # 检查是否需要更新（基于自然5分钟间隔）
         from src.binance_api import should_update_cache, update_all_data
+        from src.coin_manager import get_active_coins
         import threading
         
         # 如果不需要更新，直接返回成功消息
@@ -159,8 +160,16 @@ def update_data():
             logger.info("数据已是最新，无需更新")
             return jsonify(response_data)
         
-        # 在后台线程中执行数据更新，不阻塞Web请求
-        update_thread = threading.Thread(target=update_all_data, kwargs={'force_update': True})
+        # 在后台线程中执行数据更新，不阻塞Web请求（仅更新订阅币种）
+        symbols = []
+        try:
+            symbols = get_active_coins()
+            logger.info(f"手动更新仅针对订阅币种: {symbols}")
+        except Exception as e:
+            logger.error(f"获取订阅币种失败，将使用空列表: {e}")
+            symbols = []
+
+        update_thread = threading.Thread(target=update_all_data, kwargs={'symbols': symbols, 'force_update': True})
         update_thread.daemon = True
         update_thread.start()
         
