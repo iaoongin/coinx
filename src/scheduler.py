@@ -22,9 +22,9 @@ def scheduled_update():
             logger.info("当前5分钟周期内已有缓存数据，跳过定时更新")
             return
         
-        # 更新所有币种数据（内部会根据缓存策略决定是否真正更新）
+        # 更新已启用跟踪的币种数据（仅限活跃币种）
         from .binance_api import update_all_data
-        update_all_data()
+        update_all_data(symbols=symbols)
         logger.info("定时数据更新任务执行完成")
     except Exception as e:
         logger.error(f"定时任务执行失败: {e}")

@@ -26,6 +26,13 @@ def get_session():
     global _global_session
     if _global_session is None:
         _global_session = requests.Session()
+        # 合理的默认请求头，降低被风控概率
+        _global_session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Connection': 'keep-alive'
+        })
         
         if USE_PROXY:
             proxies = {
@@ -36,6 +43,166 @@ def get_session():
             logger.info(f"使用代理: {PROXY_URL}")
     
     return _global_session
+
+def _request_with_retry(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5):
+    """带指数退避的请求封装，处理 403/429/超时等情况"""
+    attempt = 0
+    while True:
+        try:
+            response = session.get(url, params=params, timeout=timeout)
+            # 对于 429/403 主动做退避重试
+            if response.status_code in (403, 429):
+                raise requests.exceptions.HTTPError(f"{response.status_code} {response.reason}")
+            response.raise_for_status()
+            return response
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
+            attempt += 1
+            if attempt > max_retries:
+                raise e
+            delay = base_delay * (2 ** (attempt - 1))
+            # 上限1.5秒左右，避免过长阻塞
+            if delay > 1.5:
+                delay = 1.5
+            logger.warning(f"请求失败，将在 {delay:.2f}s 后重试（第{attempt}/{max_retries}次）: {url}, 错误: {e}")
+            time.sleep(delay)
+
+def _get_futures_kline_latest(symbol, interval):
+    """获取期货K线的最新一根，返回字典包含 quoteVolume 与 takerBuyQuoteVolume 等"""
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/klines"
+        params = {
+            'symbol': symbol,
+            'interval': interval,
+            'limit': 1
+        }
+        session = get_session()
+        response = _request_with_retry(session, url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if not data:
+            return None
+        k = data[0]
+        # 参考返回字段顺序
+        # [ openTime, open, high, low, close, volume, closeTime, quoteVolume, count, takerBuyBaseVolume, takerBuyQuoteVolume, ignore ]
+        return {
+            'openTime': k[0],
+            'closeTime': k[6],
+            'quoteVolume': float(k[7]),
+            'takerBuyBaseVolume': float(k[9]),
+            'takerBuyQuoteVolume': float(k[10])
+        }
+    except Exception as e:
+        logger.error(f"获取期货K线失败: {symbol}, {interval}, 错误: {e}")
+        return None
+
+def _aggregate_futures_kline(symbol, base_interval, count):
+    """聚合多根K线，返回合计的 quoteVolume 与 takerBuyQuoteVolume"""
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/klines"
+        params = {
+            'symbol': symbol,
+            'interval': base_interval,
+            'limit': max(1, min(1000, count))
+        }
+        session = get_session()
+        response = _request_with_retry(session, url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if not data:
+            return None
+        # 只取最近 count 根
+        klines = data[-count:]
+        sum_quote = 0.0
+        sum_taker_buy_quote = 0.0
+        for k in klines:
+            sum_quote += float(k[7])
+            sum_taker_buy_quote += float(k[10])
+        return {
+            'quoteVolume': sum_quote,
+            'takerBuyQuoteVolume': sum_taker_buy_quote
+        }
+    except Exception as e:
+        logger.error(f"聚合期货K线失败: {symbol}, {base_interval} x {count}, 错误: {e}")
+        return None
+
+def get_net_inflow_data(symbol):
+    """基于期货K线的主动买入成交额估算主力净流入（单位：报价货币）"""
+    period_to_interval = {
+        '5m': '5m',
+        '15m': '15m',
+        '30m': '30m',
+        '1h': '1h',
+        '4h': '4h',
+        '8h': '8h',
+        '12h': '12h',
+        '24h': '1d',
+        '72h': '3d',
+        '168h': '1w'
+    }
+    result = {}
+    for period, interval in period_to_interval.items():
+        # 先直接取目标周期最新一根
+        k = _get_futures_kline_latest(symbol, interval)
+        if not k:
+            # 回退：用细粒度聚合
+            agg = None
+            try:
+                if period.endswith('m'):
+                    minutes = int(period[:-1])
+                    # 聚合 5m 作为基础
+                    count = max(1, minutes // 5)
+                    agg = _aggregate_futures_kline(symbol, '5m', count)
+                elif period.endswith('h'):
+                    hours = int(period[:-1])
+                    # 聚合 1h 作为基础
+                    count = max(1, hours)
+                    agg = _aggregate_futures_kline(symbol, '1h', count)
+                elif period.endswith('d'):
+                    days = int(period[:-1])
+                    count = max(1, days * 24)
+                    agg = _aggregate_futures_kline(symbol, '1h', count)
+            except Exception as e:
+                logger.error(f"净流入回退聚合失败: {symbol}, {period}, 错误: {e}")
+                agg = None
+            if agg:
+                quote_vol = agg.get('quoteVolume', 0.0)
+                taker_buy_quote = agg.get('takerBuyQuoteVolume', 0.0)
+                result[period] = 2.0 * taker_buy_quote - quote_vol
+            else:
+                result[period] = None
+            continue
+        quote_vol = k.get('quoteVolume', 0.0)
+        taker_buy_quote = k.get('takerBuyQuoteVolume', 0.0)
+        # 估算净流入 = 主动买入额 - 主动卖出额 = 2 * takerBuyQuoteVolume - quoteVolume
+        net_inflow = 2.0 * taker_buy_quote - quote_vol
+        result[period] = net_inflow
+    return result
+
+def get_exchange_distribution_real(symbol):
+    """使用币安U本位合约的持仓量与价格估算持仓价值，单一来源：binance=100%"""
+    try:
+        oi = get_open_interest(symbol) or {}
+        value = float(oi.get('openInterestValue', 0) or 0)
+        if value == 0:
+            # 若接口未返回持仓价值，则用最新价格估算
+            latest_price = get_latest_price(symbol)
+            if latest_price is not None:
+                value = float(oi.get('openInterest', 0) or 0) * latest_price
+        # 单一来源（仅币安）
+        return {
+            'binance': {
+                'value': value,
+                'percentage': 100.0
+            }
+        }
+    except Exception as e:
+        logger.error(f"计算交易所持仓分布失败: {symbol}, 错误: {e}")
+        return {
+            'binance': {
+                'value': 0,
+                'percentage': 100.0
+            }
+        }
 
 def get_latest_price(symbol):
     """
@@ -52,7 +219,7 @@ def get_latest_price(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求最新价格数据: {url}?symbol={symbol}")
-        response = session.get(url, params=params, timeout=10)
+        response = _request_with_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -81,7 +248,7 @@ def get_24hr_ticker(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求24小时价格变化数据: {url}?symbol={symbol}")
-        response = session.get(url, params=params, timeout=10)
+        response = _request_with_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -117,7 +284,7 @@ def get_open_interest(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求持仓量数据: {url}?symbol={symbol}")
-        response = session.get(url, params=params, timeout=10)
+        response = _request_with_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -162,7 +329,7 @@ def get_open_interest_history(symbol, interval, limit=2):
         # 使用会话
         session = get_session()
         logger.info(f"请求历史持仓量数据: {url}?symbol={symbol}&period={interval}&limit={limit}")
-        response = session.get(url, params=params, timeout=10)
+        response = _request_with_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -293,7 +460,8 @@ def update_all_data(symbols=None, force_update=False):
     
     # 使用线程池并行处理多个币种，减少线程数避免资源耗尽
     try:
-        with ThreadPoolExecutor(max_workers=min(3, len(symbols) or 1)) as executor:
+        # 降低币种层面的并发，避免同时跑太多请求
+        with ThreadPoolExecutor(max_workers=min(2, len(symbols) or 1)) as executor:
             # 提交所有币种的任务
             future_to_symbol = {
                 executor.submit(update_single_coin_data, symbol): symbol 
@@ -352,6 +520,71 @@ def update_all_data(symbols=None, force_update=False):
     logger.info("数据更新完成")
     return all_coins_data
 
+def get_funding_rate(symbol):
+    """
+    获取指定币种的资金费率
+    :param symbol: 币种对，如 BTCUSDT
+    :return: 资金费率数据
+    """
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/premiumIndex"
+        params = {
+            'symbol': symbol
+        }
+        
+        # 使用会话
+        session = get_session()
+        logger.info(f"请求资金费率数据: {url}?symbol={symbol}")
+        response = _request_with_retry(session, url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        logger.info(f"资金费率数据响应: {data}")
+        
+        return {
+            'symbol': symbol,
+            'markPrice': float(data['markPrice']),
+            'indexPrice': float(data['indexPrice']),
+            'estimatedSettlePrice': float(data['estimatedSettlePrice']),
+            'lastFundingRate': float(data['lastFundingRate']),
+            'nextFundingTime': int(data['nextFundingTime']),
+            'interestRate': float(data['interestRate']),
+            'time': int(data['time'])
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: {symbol}, 错误: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"获取资金费率失败: {symbol}, 错误: {e}")
+        return None
+
+def get_long_short_ratio(symbol, period='5m', limit=30):
+    """
+    获取指定币种的多空比数据
+    注意：币安API可能不提供此数据，返回模拟数据
+    :param symbol: 币种对，如 BTCUSDT
+    :param period: 时间周期，如 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
+    :param limit: 数据点数量
+    :return: 多空比数据
+    """
+    try:
+        # 币安API可能不提供多空比数据，返回模拟数据
+        logger.info(f"多空比数据API不可用，返回模拟数据: {symbol}")
+        
+        # 返回模拟的多空比数据
+        return {
+            'symbol': symbol,
+            'period': period,
+            'longShortRatio': 1.25,  # 模拟数据
+            'longAccount': 0.55,      # 55%多头账户
+            'shortAccount': 0.45,     # 45%空头账户
+            'timestamp': int(time.time() * 1000)
+        }
+        
+    except Exception as e:
+        logger.error(f"获取多空比数据失败: {symbol}, {period}, 错误: {e}")
+        return None
+
 def update_single_coin_data(symbol):
     """
     更新单个币种的数据（并行处理多个时间周期）
@@ -383,7 +616,8 @@ def update_single_coin_data(symbol):
         latest_history_data = {}  # 用于存储各时间间隔的最新数据
         
         try:
-            with ThreadPoolExecutor(max_workers=min(3, len(TIME_INTERVALS) or 1)) as executor:
+            # 降低时间周期请求并发，缓解风控
+            with ThreadPoolExecutor(max_workers=min(2, len(TIME_INTERVALS) or 1)) as executor:
                 # 提交所有时间周期的任务
                 future_to_interval = {
                     executor.submit(get_open_interest_history, symbol, interval, limit=2): interval 

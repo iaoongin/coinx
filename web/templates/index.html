@@ -80,6 +80,38 @@
         color: #2c3e50;
         border-left: 4px solid #2196f3;
       }
+      .net-inflow-card {
+        margin-top: 10px;
+        margin-bottom: 16px;
+        background: #fff;
+        border-radius: 10px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        padding: 14px 16px;
+      }
+      .net-inflow-title {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+        color: #2c3e50;
+        font-weight: 600;
+      }
+      .net-inflow-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px 14px;
+      }
+      .net-inflow-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: #f9fafb;
+      }
+      .net-inflow-item .symbol { font-weight: 600; color: #1f2937; }
+      .net-inflow-item .value { font-weight: 600; }
+      .net-inflow-item .value.positive { color: #27ae60; }
+      .net-inflow-item .value.negative { color: #e74c3c; }
       .error {
         background-color: #ffebee;
         color: #c62828;
@@ -732,6 +764,7 @@
         }
 
         try {
+
           // 获取所有时间间隔
           let intervals = [];
           if (coinsData[0] && coinsData[0].changes) {
@@ -774,7 +807,7 @@
             // 第一行：展示币种和持仓量数据
             html += `
                         <tr>
-                            <td rowspan="3"><strong>${coin.symbol}</strong></td>
+                            <td rowspan="4"><strong><a href="/coin-detail?symbol=${coin.symbol}" style="color: #667eea; text-decoration: none;">${coin.symbol}</a></strong></td>
                             <td>持仓量</td>
                             <td>
                                 <span class="formatted-value" title="${
@@ -932,7 +965,7 @@
 
             // 第三行：展示价格和价格波动数据
             html += `
-                        <tr class="coin-group-last">
+                        <tr>
                             <td>价格</td>
                             <td>
                                 <span class="formatted-value" title="${
@@ -1005,6 +1038,57 @@
               });
             } else {
               // 如果没有变化数据，填充空单元格
+              intervals.forEach(() => {
+                html += "<td>N/A</td>";
+              });
+            }
+
+            html += `
+                        </tr>
+                    `;
+
+            // 第四行：主力净流入（多时间间隔）
+            html += `
+                        <tr class="coin-group-last">
+                            <td>主力净流入</td>
+                            <td>
+                                ${(() => {
+                                  const v = coin.net_inflow && typeof coin.net_inflow['5m'] === 'number' ? coin.net_inflow['5m'] : null;
+                                  if (v === null) return '<span class="formatted-value">N/A</span>';
+                                  const tooltip = v.toLocaleString();
+                                  const cls = v > 0 ? 'positive' : v < 0 ? 'negative' : '';
+                                  const formatted = Math.abs(v) >= 1_000_000
+                                        ? (v/1_000_000).toFixed(2) + 'M'
+                                        : Math.abs(v) >= 1_000
+                                          ? (v/1_000).toFixed(2) + 'K'
+                                          : v.toFixed(0);
+                                  return `<span class="formatted-value ${cls}" title="${tooltip}">${formatted}</span>`;
+                                })()}
+                            </td>
+                    `;
+
+            if (intervals && Array.isArray(intervals) && intervals.length > 0) {
+              intervals.forEach((interval) => {
+                const val = coin.net_inflow ? coin.net_inflow[interval] : undefined;
+                let cls = '';
+                let txt = 'N/A';
+                let tooltip = '';
+                if (typeof val === 'number') {
+                  cls = val > 0 ? 'positive' : val < 0 ? 'negative' : '';
+                  tooltip = val.toLocaleString();
+                  txt = Math.abs(val) >= 1_000_000
+                    ? (val/1_000_000).toFixed(2) + 'M'
+                    : Math.abs(val) >= 1_000
+                      ? (val/1_000).toFixed(2) + 'K'
+                      : val.toFixed(0);
+                }
+                html += `
+                                <td class="change-cell">
+                                    <div class="net-value ${cls}" title="${tooltip}">${txt}</div>
+                                </td>
+                            `;
+              });
+            } else {
               intervals.forEach(() => {
                 html += "<td>N/A</td>";
               });

@@ -66,6 +66,8 @@ def get_coins():
         
         # 处理数据格式，使其更适合前端展示
         formatted_data = []
+        from src.binance_api import get_net_inflow_data as get_net_inflow_data_real
+
         for coin in coins_data:
             formatted_coin = {
                 'symbol': coin['symbol'],
@@ -79,6 +81,13 @@ def get_coins():
                 'price_change_percent': coin['price_change_percent'],
                 'price_change_formatted': coin['price_change_formatted']
             }
+
+            # 主力净流入（多时间间隔）
+            try:
+                net_inflow_map = get_net_inflow_data_real(coin['symbol']) or {}
+                formatted_coin['net_inflow'] = net_inflow_map
+            except Exception as _:
+                formatted_coin['net_inflow'] = {}
             
             # 处理变化数据，转换为数组格式
             changes = []
@@ -174,6 +183,12 @@ def coins_config():
     """币种配置页面"""
     logger.info("访问币种配置页面")
     return render_template('coins_config.html')
+
+@app.route('/coin-detail')
+def coin_detail():
+    """币种详情页面"""
+    logger.info("访问币种详情页面")
+    return render_template('coin_detail.html')
 
 @app.route('/api/coins-config')
 def get_coins_config():
@@ -361,6 +376,65 @@ def update_coins_config_api():
         }
         logger.error(f"更新币种配置失败: {e}")
         return jsonify(error_response), 500
+
+@app.route('/api/coin-detail/<symbol>')
+def get_coin_detail(symbol):
+    """获取指定币种的详细数据"""
+    logger.info(f"获取币种详情: {symbol}")
+    try:
+        from src.binance_api import (
+            get_latest_price, 
+            get_24hr_ticker, 
+            get_open_interest,
+            get_funding_rate,
+            get_long_short_ratio
+        )
+        
+        # 获取基础数据
+        latest_price = get_latest_price(symbol)
+        ticker_data = get_24hr_ticker(symbol)
+        open_interest_data = get_open_interest(symbol)
+        funding_rate = get_funding_rate(symbol)
+        long_short_ratio = get_long_short_ratio(symbol)
+        
+        # 组装响应数据
+        from src.binance_api import get_exchange_distribution_real, get_net_inflow_data as get_net_inflow_data_real
+
+        detail_data = {
+            'symbol': symbol,
+            'latest_price': latest_price,
+            'funding_rate': funding_rate,
+            'ticker_data': ticker_data,
+            'open_interest_data': open_interest_data,
+            'long_short_ratio': long_short_ratio,
+            'exchange_distribution': get_exchange_distribution_real(symbol),
+            'net_inflow_data': get_net_inflow_data_real(symbol)
+        }
+        
+        response_data = {
+            'status': 'success',
+            'message': '获取币种详情成功',
+            'data': detail_data
+        }
+        logger.info(f"返回 {symbol} 详情数据")
+        return jsonify(response_data)
+    except Exception as e:
+        error_response = {
+            'status': 'error',
+            'message': f'获取币种详情失败: {str(e)}'
+        }
+        logger.error(f"获取币种详情失败: {e}")
+        return jsonify(error_response), 500
+
+def get_exchange_distribution(symbol):
+    # 兼容旧路由（如有其他地方调用），转发到真实数据实现
+    from src.binance_api import get_exchange_distribution_real
+    return get_exchange_distribution_real(symbol)
+
+def get_net_inflow_data(symbol):
+    # 兼容旧路由，转发到真实数据实现
+    from src.binance_api import get_net_inflow_data as get_net_inflow_data_real
+    return get_net_inflow_data_real(symbol)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

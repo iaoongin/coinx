@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>币种详情 - <span id="coin-symbol">SPK/USDT</span></title>
+    <style>
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-size: 14px;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #ecf0f1;
+        }
+        .header h1 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .back-button {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        .back-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            color: #7f8c8d;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            border-left: 4px solid #f44336;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .info-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e5e7eb;
+        }
+        .info-card h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #2c3e50;
+            font-size: 18px;
+            font-weight: 600;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+        .price-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .price-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .funding-rate {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        .positive {
+            color: #27ae60;
+        }
+        .negative {
+            color: #e74c3c;
+        }
+        .exchange-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .exchange-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .exchange-item:last-child {
+            border-bottom: none;
+        }
+        .exchange-name {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        .exchange-value {
+            font-weight: 600;
+            color: #3498db;
+        }
+        .exchange-percentage {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-left: 5px;
+        }
+        .time-series {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+        }
+        .time-item {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .time-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 5px;
+        }
+        .time-value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .time-value.positive {
+            color: #27ae60;
+        }
+        .time-value.negative {
+            color: #e74c3c;
+        }
+        .total-oi {
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .oi-changes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
+        }
+        .oi-item {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .oi-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-bottom: 5px;
+        }
+        .oi-value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .oi-percentage {
+            font-size: 12px;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><span id="coin-symbol">SPK/USDT</span> 合约详情</h1>
+            <button class="back-button" onclick="goBack()">返回</button>
+        </div>
+
+        <div id="content">
+            <div class="loading">正在加载数据...</div>
+        </div>
+    </div>
+
+    <script>
+        // 获取URL参数中的币种
+        function getSymbolFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('symbol') || 'SPKUSDT';
+        }
+
+        // 返回上一页
+        function goBack() {
+            window.history.back();
+        }
+
+        // 格式化数字
+        function formatNumber(num) {
+            if (num === null || num === undefined) return 'N/A';
+            const absNum = Math.abs(num);
+            if (absNum >= 1_000_000_000) {
+                return (num / 1_000_000_000).toFixed(2) + 'B';
+            } else if (absNum >= 1_000_000) {
+                return (num / 1_000_000).toFixed(2) + 'M';
+            } else if (absNum >= 1_000) {
+                return (num / 1_000).toFixed(2) + 'K';
+            } else {
+                return num.toFixed(2);
+            }
+        }
+
+        // 格式化价格
+        function formatPrice(price) {
+            if (price === null || price === undefined) return 'N/A';
+            return '$' + price.toFixed(8);
+        }
+
+        // 格式化百分比
+        function formatPercentage(percent) {
+            if (percent === null || percent === undefined) return 'N/A';
+            return (percent > 0 ? '+' : '') + percent.toFixed(2) + '%';
+        }
+
+        // 获取币种详情数据
+        function loadCoinDetail() {
+            const symbol = getSymbolFromUrl();
+            document.getElementById('coin-symbol').textContent = symbol;
+            
+            fetch(`/api/coin-detail/${symbol}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        renderCoinDetail(data.data);
+                    } else {
+                        showError(data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('加载币种详情失败:', error);
+                    showError('加载数据失败: ' + error.message);
+                });
+        }
+
+        // 渲染币种详情
+        function renderCoinDetail(data) {
+            const content = document.getElementById('content');
+            
+            let html = `
+                <div class="info-grid">
+                    <!-- 基础信息 -->
+                    <div class="info-card">
+                        <h3>基础信息</h3>
+                        <div class="price-info">
+                            <span>最近交易价:</span>
+                            <span class="price-value">${formatPrice(data.latest_price)}</span>
+                        </div>
+                        <div class="price-info">
+                            <span>资金费率:</span>
+                            <span class="funding-rate">${data.funding_rate ? formatPercentage(data.funding_rate.lastFundingRate * 100) : 'N/A'}</span>
+                        </div>
+                        ${data.ticker_data ? `
+                            <div class="price-info">
+                                <span>24h涨跌:</span>
+                                <span class="${data.ticker_data.priceChangePercent >= 0 ? 'positive' : 'negative'}">
+                                    ${formatPercentage(data.ticker_data.priceChangePercent)}
+                                </span>
+                            </div>
+                        ` : ''}
+                    </div>
+
+                    <!-- 持仓信息 -->
+                    <div class="info-card">
+                        <h3>持仓信息</h3>
+                        ${data.open_interest_data ? `
+                            <div class="total-oi">
+                                总持仓: ${formatNumber(data.open_interest_data.openInterestValue)}
+                            </div>
+                        ` : ''}
+                        <div class="oi-changes">
+                            <div class="oi-item">
+                                <div class="oi-label">5分钟</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(0.26)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">15分钟</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(0.13)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">30分钟</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(-0.20)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">1小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(-2.28)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">4小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(-4.96)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">8小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(-1.36)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">12小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(-3.41)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">24小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(26.82)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">72小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(57.17)}</div>
+                            </div>
+                            <div class="oi-item">
+                                <div class="oi-label">168小时</div>
+                                <div class="oi-value">${formatNumber(data.open_interest_data?.openInterestValue || 0)}</div>
+                                <div class="oi-percentage">${formatPercentage(147.93)}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 交易所持仓分布 -->
+                    <div class="info-card">
+                        <h3>交易所持仓分布</h3>
+                        <ul class="exchange-list">
+                            ${Object.entries(data.exchange_distribution).map(([exchange, info]) => `
+                                <li class="exchange-item">
+                                    <span class="exchange-name">${exchange.charAt(0).toUpperCase() + exchange.slice(1)}</span>
+                                    <span class="exchange-value">
+                                        ${formatNumber(info.value)}
+                                        <span class="exchange-percentage">(${info.percentage}%)</span>
+                                    </span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+
+                    <!-- 主力净流入 -->
+                    <div class="info-card">
+                        <h3>主力净流入</h3>
+                        <div class="time-series">
+                            ${Object.entries(data.net_inflow_data).map(([time, value]) => `
+                                <div class="time-item">
+                                    <div class="time-label">${time}</div>
+                                    <div class="time-value ${value >= 0 ? 'positive' : 'negative'}">
+                                        ${formatNumber(value)}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            content.innerHTML = html;
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            const content = document.getElementById('content');
+            content.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // 页面加载完成后获取数据
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCoinDetail();
+        });
+    </script>
+</body>
+</html>
+
