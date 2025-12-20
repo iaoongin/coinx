@@ -672,6 +672,7 @@ def update_single_coin_data(symbol):
             'current': current_data,
             'intervals': intervals_data,
             'price_change': price_change_data,  # 添加价格变化数据
+            'net_inflow': get_net_inflow_data(symbol),  # 添加主力净流入数据
             'update_time': int(time.time() * 1000)
         }
         

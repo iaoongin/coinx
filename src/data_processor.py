@@ -90,6 +90,7 @@ def get_coin_data(symbol='BTCUSDT'):
         'price_change': price_change,
         'price_change_percent': price_change_percent,
         'price_change_formatted': format_number(price_change) if price_change is not None else "N/A",
+        'net_inflow': symbol_data.get('net_inflow', {}),
         'changes': {}
     }
     
@@ -202,6 +203,7 @@ def get_all_coins_data(symbols=None):
                     'price_change': coin_data.get('price_change', {}).get('priceChange') if coin_data.get('price_change') else None,
                     'price_change_percent': coin_data.get('price_change', {}).get('priceChangePercent') if coin_data.get('price_change') else None,
                     'price_change_formatted': format_number(coin_data.get('price_change', {}).get('priceChange')) if coin_data.get('price_change', {}).get('priceChange') is not None else "N/A",
+                    'net_inflow': coin_data.get('net_inflow', {}),
                     'changes': {}
                 }
                 

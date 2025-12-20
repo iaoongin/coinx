@@ -66,7 +66,6 @@ def get_coins():
         
         # 处理数据格式，使其更适合前端展示
         formatted_data = []
-        from src.binance_api import get_net_inflow_data as get_net_inflow_data_real
 
         for coin in coins_data:
             formatted_coin = {
@@ -83,11 +82,7 @@ def get_coins():
             }
 
             # 主力净流入（多时间间隔）
-            try:
-                net_inflow_map = get_net_inflow_data_real(coin['symbol']) or {}
-                formatted_coin['net_inflow'] = net_inflow_map
-            except Exception as _:
-                formatted_coin['net_inflow'] = {}
+            formatted_coin['net_inflow'] = coin.get('net_inflow', {})
             
             # 处理变化数据，转换为数组格式
             changes = []
