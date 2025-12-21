@@ -1,0 +1,11 @@
+services:
+  app:
+    image: python:3.10-slim
+    container_name: coinx
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -c "pip install -r requirements.txt && python main.py"
+    restart: always
+    ports:
+      - "5000:5000"
