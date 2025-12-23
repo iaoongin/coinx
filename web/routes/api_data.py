@@ -106,8 +106,11 @@ def update_data():
     """手动更新数据"""
     logger.info("手动更新数据")
     try:
-        # 如果不需要更新，直接返回成功消息
-        if not should_update_cache():
+        # Check for force parameter
+        force = request.args.get('force', 'false').lower() == 'true'
+        
+        # 如果不需要更新，且不是强制更新，直接返回成功消息
+        if not force and not should_update_cache():
             response_data = {
                 'status': 'success',
                 'message': '数据已是最新，无需更新'
