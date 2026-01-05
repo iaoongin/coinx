@@ -5,8 +5,8 @@ import os
 project_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
 
-from src.utils import load_all_coins_data, logger
-from src.config import TIME_INTERVALS
+from coinx.utils import load_all_coins_data, logger
+from coinx.config import TIME_INTERVALS
 
 def format_number(num):
     """
@@ -181,7 +181,7 @@ def get_all_coins_data(symbols=None):
     
     # 检查是否有数据
     if not all_coins_data:
-        from src.utils import logger
+        from coinx.utils import logger
         logger.warning("未加载到任何币种数据")
         return []
     

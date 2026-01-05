@@ -1,10 +1,10 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.config import TIME_INTERVALS
-from src.utils import save_all_coins_data, logger
+from coinx.config import TIME_INTERVALS
+from coinx.utils import save_all_coins_data, logger
 # 避免循环引用，如果是从外部导入 binance_api，而 coin_manager 可能也导入 binance_api
 # 但是 coin_manager 的 get_all_coins_from_binance 似乎没有依赖 binance_api 的核心逻辑
-from src.coin_manager import get_active_coins, get_all_coins_from_binance
+from coinx.coin_manager import get_active_coins, get_all_coins_from_binance
 from .market import (
     get_open_interest,
     get_latest_price,
@@ -215,7 +215,7 @@ def update_drop_list_data(force_update=False):
         
         logger.info("开始更新跌幅榜数据...")
         
-        from src.binance.market import get_all_24hr_tickers
+        from coinx.collector.binance.market import get_all_24hr_tickers
         
         # 1. 获取当前所有处于 TRADING 状态的 USDT 合约
         valid_coins_list = get_all_coins_from_binance()

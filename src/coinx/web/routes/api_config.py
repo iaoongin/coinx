@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
-from src.utils import logger
-from src.coin_manager import (
+from coinx.utils import logger
+from coinx.coin_manager import (
     load_coins_config_dict, 
     add_coin, 
     remove_coin, 

@@ -1,13 +1,14 @@
 from flask import Blueprint, jsonify, request
 import threading
-from src.utils import logger, get_cache_update_time
-from src.data_processor import get_all_coins_data
-from src.coin_manager import get_active_coins
-from src.binance_api import (
-    should_update_cache, update_all_data,
+from coinx.utils import logger
+from coinx.data_processor import get_all_coins_data
+from coinx.coin_manager import get_active_coins
+from coinx.collector import (
+    should_update_cache, update_all_data, update_drop_list_data,
     get_latest_price, get_24hr_ticker, get_all_24hr_tickers, get_open_interest,
     get_funding_rate, get_long_short_ratio,
-    get_exchange_distribution_real, get_net_inflow_data as get_net_inflow_data_real
+    get_exchange_distribution_real, get_net_inflow_data as get_net_inflow_data_real,
+    get_cache_update_time
 )
 
 api_data_bp = Blueprint('api_data', __name__)
@@ -182,15 +183,13 @@ def get_coin_detail(symbol):
         }
         logger.error(f"获取币种详情失败: {e}")
         return jsonify(error_response), 500
-        return jsonify(error_response), 500
 
-@api_data_bp.route('/api/drop-list')
 @api_data_bp.route('/api/drop-list')
 def get_drop_list():
     """获取跌幅榜数据"""
     logger.info("获取跌幅榜数据")
     try:
-        from src.binance_api import update_drop_list_data
+
         
         # Check for force parameter
         force = request.args.get('force', 'false').lower() == 'true'
@@ -208,13 +207,6 @@ def get_drop_list():
             'data': data
         }
         return jsonify(response_data)
-    except Exception as e:
-        error_response = {
-            'status': 'error',
-            'message': f'获取跌幅榜数据失败: {str(e)}'
-        }
-        logger.error(f"获取跌幅榜数据失败: {e}")
-        return jsonify(error_response), 500
     except Exception as e:
         error_response = {
             'status': 'error',

@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template
-from src.utils import logger
+from coinx.utils import logger
 
 pages_bp = Blueprint('pages', __name__)
 

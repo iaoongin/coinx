@@ -16,8 +16,9 @@ setup(
     description="币种数据监控系统 - 从币安交易所获取币种数据并在Web页面展示",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/coinx",
-    packages=find_packages(),
+    url="https://github.com/iaoongin/coinx",
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -34,7 +35,7 @@ setup(
     install_requires=requirements,
     entry_points={
         'console_scripts': [
-            'coinx=main:main',
+            'coinx=coinx.main:main',
         ],
     },
 )

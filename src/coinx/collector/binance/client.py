@@ -1,7 +1,7 @@
 import requests
 import time
-from src.config import USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
-from src.utils import logger
+from coinx.config import USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
+from coinx.utils import logger
 
 # 创建一个全局会话对象，用于复用连接
 _global_session = None

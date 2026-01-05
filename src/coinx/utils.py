@@ -9,7 +9,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from src.config import DATA_DIR, LOGS_DIR
+from coinx.config import DATA_DIR, LOGS_DIR
 
 # 配置日志
 def setup_logger():
@@ -33,7 +33,7 @@ def setup_logger():
     # %(levelname)-8s: Log级别左对齐，占8位
     # %(filename)20s: 文件名右对齐，占20位
     # %(lineno)4d: 行号右对齐，占4位
-    formatter = logging.Formatter('%(asctime)s %(levelname)-8s [%(filename)20s:%(lineno)4d] - %(message)s')
+    formatter = logging.Formatter('%(asctime)s %(levelname)-8s [%(filename)15s:%(lineno)4d] - %(message)s')
     
     # 文件处理器（轮转日志）
     from logging.handlers import RotatingFileHandler
@@ -201,7 +201,7 @@ def get_cache_update_time():
         from datetime import datetime
         
         # 缓存文件路径
-        CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'open_interest_cache.json')
+        CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'open_interest_cache.json')
         
         logger.info(f"尝试获取缓存更新时间，缓存文件路径: {CACHE_FILE}")
         

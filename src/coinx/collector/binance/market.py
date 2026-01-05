@@ -1,7 +1,7 @@
 import time
 import requests
-from src.config import BINANCE_BASE_URL
-from src.utils import logger
+from coinx.config import BINANCE_BASE_URL
+from coinx.utils import logger
 from .client import get_session, request_with_retry
 
 def get_futures_kline_latest(symbol, interval):

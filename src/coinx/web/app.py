@@ -3,19 +3,20 @@ import os
 from flask import Flask, request
 
 # 添加项目根目录到路径
-project_root = os.path.dirname(os.path.dirname(__file__))
+# 添加项目根目录到路径 (src目录)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.utils import logger
+from coinx.utils import logger
 
 # Import blueprints
 # 注意：必须在添加项目根目录到sys.path之后导入
 # 使用 try-except 块来处理可能的导入路径问题
 try:
-    from web.routes.pages import pages_bp
-    from web.routes.api_data import api_data_bp
-    from web.routes.api_config import api_config_bp
+    from coinx.web.routes.pages import pages_bp
+    from coinx.web.routes.api_data import api_data_bp
+    from coinx.web.routes.api_config import api_config_bp
 except ImportError:
     #如果在当前目录运行，可能需要 adjustments
     from routes.pages import pages_bp

@@ -11,16 +11,16 @@ import signal
 import psutil
 from pathlib import Path
 
-# 添加项目根目录到Python路径
+# 添加项目根目录的src到Python路径
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "src"))
 
-from src.utils import logger
+from coinx.utils import logger
 
 
 class FlaskAppManager:
     def __init__(self):
-        self.app_path = project_root / "main.py"  # 改为使用main.py启动应用
+        self.app_path = project_root / "src" / "coinx" / "main.py"  # 改为使用main.py启动应用
         self.pid_file = project_root / "data" / "app.pid"
         self.log_file = project_root / "logs" / "app_service.log"
 
@@ -107,11 +107,20 @@ class FlaskAppManager:
             cmd = [sys.executable, str(self.app_path)]
             logger.info(f"启动命令: {' '.join(cmd)}")
             
+            # 设置环境变量，添加src到PYTHONPATH
+            env = os.environ.copy()
+            src_path = str(project_root / "src")
+            if "PYTHONPATH" in env:
+                env["PYTHONPATH"] = src_path + os.pathsep + env["PYTHONPATH"]
+            else:
+                env["PYTHONPATH"] = src_path
+            
             if daemon:
                 # 后台模式：使用PIPE捕获输出，不阻塞
                 process = subprocess.Popen(
                     cmd,
                     cwd=str(project_root),
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -142,6 +151,7 @@ class FlaskAppManager:
                 process = subprocess.Popen(
                     cmd,
                     cwd=str(project_root),
+                    env=env,
                     stdout=None,  # 继承标准输出
                     stderr=None,  # 继承标准错误
                 )

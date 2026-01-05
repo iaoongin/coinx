@@ -2,15 +2,16 @@ import os
 import json
 import time
 from datetime import datetime
-from src.utils import logger
+from coinx.utils import logger
 
 # 缓存文件路径
-# __file__ -> src/binance/cache.py
-# dirname -> src/binance
+# __file__ -> src/coinx/collector/binance/cache.py
+# dirname -> src/coinx/collector/binance
+# dirname -> src/coinx
 # dirname -> src
 # dirname -> project_root
-CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'open_interest_cache.json')
-DROP_LIST_CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'drop_list_cache.json')
+CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), 'data', 'open_interest_cache.json')
+DROP_LIST_CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), 'data', 'drop_list_cache.json')
 
 def get_cache_key():
     """获取当前自然5分钟的时间戳作为缓存键"""
@@ -102,5 +103,31 @@ def should_update_drop_list_cache():
     cache_key = get_cache_key()
     cache_data = load_drop_list_cache()
     needs_update = str(cache_key) not in cache_data
-    logger.info(f"检查跌幅榜缓存更新: 当前缓存键={cache_key}, 需要更新={needs_update}")
-    return needs_update
+def get_cache_update_time():
+    """获取缓存更新时间"""
+    try:
+        import os
+        import json
+        
+        logger.info(f"尝试获取缓存更新时间，缓存文件路径: {CACHE_FILE}")
+        
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+            
+            # 获取最新的缓存时间戳
+            if cache_data:
+                timestamps = sorted(cache_data.keys(), key=int)
+                latest_timestamp = int(timestamps[-1])
+                logger.info(f"找到缓存数据，最新时间戳: {latest_timestamp}")
+                return latest_timestamp * 1000  # 转换为毫秒
+            else:
+                logger.info("缓存文件存在但无数据")
+        else:
+            logger.info("缓存文件不存在")
+        
+        return None
+    except Exception as e:
+        logger.error(f"获取缓存更新时间失败: {e}")
+        logger.exception(e)
+        return None

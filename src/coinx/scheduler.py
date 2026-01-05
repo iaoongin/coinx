@@ -1,5 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from .binance_api import update_all_data
+from .collector import update_all_data, should_update_cache, update_drop_list_data
 from .coin_manager import update_coins_config
 from .utils import logger
 from .config import UPDATE_INTERVAL
@@ -17,13 +17,11 @@ def scheduled_update():
         symbols = get_active_coins()
         
         # 检查是否需要更新缓存（基于自然5分钟间隔）
-        from .binance_api import should_update_cache
         if not should_update_cache():
             logger.info("当前5分钟周期内已有缓存数据，跳过定时更新")
             return
         
         # 更新已启用跟踪的币种数据（仅限活跃币种）
-        from .binance_api import update_all_data, update_drop_list_data
         update_all_data(symbols=symbols)
         
         # 更新跌幅榜数据

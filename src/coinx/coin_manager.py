@@ -9,8 +9,8 @@ import requests
 import json
 import logging
 from datetime import datetime, timedelta
-from src.config import DATA_DIR, BINANCE_BASE_URL, USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
-from src.utils import logger
+from coinx.config import DATA_DIR, BINANCE_BASE_URL, USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
+from coinx.utils import logger
 
 # 币种配置文件路径
 COINS_CONFIG_FILE = os.path.join(DATA_DIR, 'coins_config.json')

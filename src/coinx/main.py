@@ -6,9 +6,9 @@ import sys
 import time
 import signal
 import threading
-from src.scheduler import start_scheduler, scheduler
-from web.app import app
-from src.utils import logger
+from coinx.scheduler import start_scheduler, scheduler
+from coinx.web.app import app
+from coinx.utils import logger
 
 def signal_handler(sig, frame):
     """信号处理函数，用于优雅地关闭应用"""

@@ -1,4 +1,4 @@
-from src.utils import logger
+from coinx.utils import logger
 from .market import (
     get_futures_kline_latest,
     aggregate_futures_kline,

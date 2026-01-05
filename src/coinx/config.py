@@ -8,8 +8,9 @@ def _get_bool_env(key, default):
     return val.strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
 # 数据存储路径
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+# 数据存储路径
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data')
+LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs')
 
 # 确保目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
