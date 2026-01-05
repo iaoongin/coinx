@@ -339,3 +339,36 @@ def get_long_short_ratio(symbol, period='5m', limit=30):
     except Exception as e:
         logger.error(f"获取多空比数据失败: {symbol}, {period}, 错误: {e}")
         return None
+def get_exchange_info():
+    """
+    获取交易所的所有交易对信息 (Exchange Info)
+    :return: 交易对列表
+    """
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/exchangeInfo"
+        
+        # 使用会话
+        session = get_session()
+        logger.info(f"请求交易所信息: {url}")
+        response = request_with_retry(session, url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        # 筛选出USDT交易对
+        usdt_pairs = []
+        for symbol_info in data['symbols']:
+            if symbol_info['quoteAsset'] == 'USDT' and symbol_info['status'] == 'TRADING':
+                usdt_pairs.append({
+                    'symbol': symbol_info['symbol'],
+                    'baseAsset': symbol_info['baseAsset'],
+                    'quoteAsset': symbol_info['quoteAsset']
+                })
+        
+        logger.info(f"获取到 {len(usdt_pairs)} 个USDT交易对")
+        return usdt_pairs
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: 获取交易所信息, 错误: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"获取交易所信息失败: {e}")
+        return None

@@ -16,7 +16,8 @@ from coinx.collector.binance.market import (
     get_open_interest,
     get_open_interest_history,
     get_funding_rate,
-    get_long_short_ratio
+    get_long_short_ratio,
+    get_exchange_info
 )
 
 from coinx.collector.binance.indicators import (

@@ -4,12 +4,13 @@ from coinx.config import TIME_INTERVALS
 from coinx.utils import save_all_coins_data, logger
 # 避免循环引用，如果是从外部导入 binance_api，而 coin_manager 可能也导入 binance_api
 # 但是 coin_manager 的 get_all_coins_from_binance 似乎没有依赖 binance_api 的核心逻辑
-from coinx.coin_manager import get_active_coins, get_all_coins_from_binance
+from coinx.coin_manager import get_active_coins
 from .market import (
     get_open_interest,
     get_latest_price,
     get_24hr_ticker,
-    get_open_interest_history
+    get_open_interest_history,
+    get_exchange_info
 )
 from .indicators import get_net_inflow_data
 from .cache import should_update_cache, save_cached_data, get_cache_key, save_drop_list_cache, should_update_drop_list_cache, load_drop_list_cache
@@ -17,7 +18,7 @@ from .cache import should_update_cache, save_cached_data, get_cache_key, save_dr
 def get_all_coins_list():
     """获取所有币种列表"""
     try:
-        all_coins = get_all_coins_from_binance()
+        all_coins = get_exchange_info()
         if all_coins:
             return [coin['symbol'] for coin in all_coins]
         else:
@@ -218,7 +219,7 @@ def update_drop_list_data(force_update=False):
         from coinx.collector.binance.market import get_all_24hr_tickers
         
         # 1. 获取当前所有处于 TRADING 状态的 USDT 合约
-        valid_coins_list = get_all_coins_from_binance()
+        valid_coins_list = get_exchange_info()
         valid_symbols = set()
         if valid_coins_list:
              valid_symbols = {c['symbol'] for c in valid_coins_list}

@@ -29,36 +29,7 @@ def get_session():
     
     return session
 
-def get_all_coins_from_binance():
-    """
-    从币安获取所有交易对列表
-    :return: USDT交易对列表
-    """
-    try:
-        url = f"{BINANCE_BASE_URL}/fapi/v1/exchangeInfo"
-        
-        # 使用会话
-        session = get_session()
-        response = session.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        # 筛选出USDT交易对
-        usdt_pairs = []
-        for symbol_info in data['symbols']:
-            if symbol_info['quoteAsset'] == 'USDT' and symbol_info['status'] == 'TRADING':
-                usdt_pairs.append({
-                    'symbol': symbol_info['symbol'],
-                    'baseAsset': symbol_info['baseAsset'],
-                    'quoteAsset': symbol_info['quoteAsset']
-                })
-        
-        logger.info(f"从币安获取到 {len(usdt_pairs)} 个USDT交易对")
-        return usdt_pairs
-    except Exception as e:
-        logger.error(f"从币安获取交易对列表失败: {e}")
-        # 返回None而不是空列表，以便调用方能区分是错误还是空结果
-        return None
+
 
 def load_coins_config():
     """
@@ -157,7 +128,8 @@ def update_coins_config():
         logger.info("开始更新币种配置...")
         
         # 从币安获取所有USDT交易对
-        all_coins = get_all_coins_from_binance()
+        from coinx.collector import get_exchange_info
+        all_coins = get_exchange_info()
         
         # 加载现有配置
         current_config = load_coins_config_dict()
@@ -214,7 +186,8 @@ def get_all_coins_list():
     :return: 所有币种列表
     """
     try:
-        all_coins = get_all_coins_from_binance()
+        from coinx.collector import get_exchange_info
+        all_coins = get_exchange_info()
         if all_coins:
             return [coin['symbol'] for coin in all_coins]
         else:
