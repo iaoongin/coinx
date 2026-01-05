@@ -91,9 +91,10 @@ class FlaskAppManager:
             self.pid_file.unlink()
         return False
 
-    def start(self):
+    def start(self, daemon=True):
         """启动应用"""
-        print("开始启动应用...")
+        mode = "后台" if daemon else "前台"
+        print(f"开始{mode}启动应用...")
         if self.is_app_running():
             print("应用已经在运行中")
             return False
@@ -105,46 +106,66 @@ class FlaskAppManager:
             # 启动应用
             cmd = [sys.executable, str(self.app_path)]
             print(f"启动命令: {' '.join(cmd)}")
-            process = subprocess.Popen(
-                cmd,
-                cwd=str(project_root),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+            
+            if daemon:
+                # 后台模式：使用PIPE捕获输出，不阻塞
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=str(project_root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                
+                # 等待一小段时间确保进程启动
+                time.sleep(3)
 
-            # 等待一小段时间确保进程启动
-            time.sleep(3)
+                # 检查进程是否仍在运行
+                if process.poll() is not None:
+                    # 进程已经结束，获取错误输出
+                    stdout, stderr = process.communicate()
+                    print(f"应用启动失败，退出码: {process.returncode}")
+                    print(f"标准输出: {stdout}")
+                    print(f"错误输出: {stderr}")
+                    return False
 
-            # 检查进程是否仍在运行
-            if process.poll() is not None:
-                # 进程已经结束，获取错误输出
-                stdout, stderr = process.communicate()
-                print(f"应用启动失败，退出码: {process.returncode}")
-                print(f"标准输出: {stdout}")
-                print(f"错误输出: {stderr}")
-                # 尝试删除PID文件
-                if self.pid_file.exists():
-                    self.pid_file.unlink()
-                return False
+                # 保存PID
+                print(f"进程PID: {process.pid}")
+                with open(self.pid_file, "w") as f:
+                    f.write(str(process.pid))
 
-            # 保存PID
-            print(f"进程PID: {process.pid}")
-            with open(self.pid_file, "w") as f:
-                f.write(str(process.pid))
-
-            # 验证PID文件是否创建成功
-            if self.pid_file.exists():
-                print(f"PID文件已创建: {self.pid_file}")
-                with open(self.pid_file, "r") as f:
-                    saved_pid = f.read().strip()
-                print(f"保存的PID: {saved_pid}")
+                print(f"应用已后台启动，PID: {process.pid}")
+                print("访问地址: http://127.0.0.1:5000")
+                return True
             else:
-                print("警告: PID文件未创建")
-
-            print(f"应用已启动，PID: {process.pid}")
-            print("访问地址: http://127.0.0.1:5000")
-            return True
+                # 前台模式：直接显示输出，阻塞直到退出
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=str(project_root),
+                    stdout=None,  # 继承标准输出
+                    stderr=None,  # 继承标准错误
+                )
+                
+                # 保存PID
+                print(f"进程PID: {process.pid}")
+                with open(self.pid_file, "w") as f:
+                    f.write(str(process.pid))
+                
+                print(f"应用已前台启动，按 Ctrl+C 停止")
+                print("访问地址: http://127.0.0.1:5000")
+                
+                try:
+                    process.wait()
+                except KeyboardInterrupt:
+                    print("\n接收到停止信号，正在停止...")
+                    process.terminate()
+                    process.wait()
+                finally:
+                    # 清理PID文件
+                    if self.pid_file.exists():
+                        self.pid_file.unlink()
+                        print("PID文件已清理")
+                return True
 
         except Exception as e:
             print(f"启动应用失败: {e}")
@@ -290,8 +311,10 @@ def main():
     manager = FlaskAppManager()
     action = sys.argv[1].lower()
 
-    if action == "start":
-        manager.start()
+    if action == "run":
+        manager.start(daemon=False)
+    elif action == "start":
+        manager.start(daemon=True)
     elif action == "stop":
         manager.stop()
     elif action == "restart":
@@ -299,7 +322,7 @@ def main():
     elif action == "status":
         manager.status()
     else:
-        print("未知命令，请使用: start, stop, restart, status")
+        print("未知命令，请使用: run (前台), start (后台), stop, restart, status")
 
 
 if __name__ == "__main__":
