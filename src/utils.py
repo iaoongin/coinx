@@ -19,18 +19,21 @@ def setup_logger():
     
     log_file = os.path.join(LOGS_DIR, 'app.log')
     
-    # 创建日志记录器
-    logger = logging.getLogger(__name__)
+    # 获取根日志记录器
+    root_logger = logging.getLogger()
     
-    # 如果记录器已经有处理器，先清除
-    if logger.handlers:
-        logger.handlers.clear()
+    # 清除现有的处理器
+    if root_logger.handlers:
+        root_logger.handlers.clear()
     
-    # 设置日志级别
-    logger.setLevel(logging.INFO)
+    # 设置根日志级别
+    root_logger.setLevel(logging.INFO)
     
-    # 创建格式化器
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    # 创建格式化器 - 类似Java的日志格式，使用固定宽度对齐
+    # %(levelname)-8s: Log级别左对齐，占8位
+    # %(filename)20s: 文件名右对齐，占20位
+    # %(lineno)4d: 行号右对齐，占4位
+    formatter = logging.Formatter('%(asctime)s %(levelname)-8s [%(filename)20s:%(lineno)4d] - %(message)s')
     
     # 文件处理器（轮转日志）
     from logging.handlers import RotatingFileHandler
@@ -48,12 +51,22 @@ def setup_logger():
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     
-    # 添加处理器
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    # 添加处理器到根记录器
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
     
-    logger.info(f"日志系统已初始化，日志文件路径: {log_file}")
-    return logger
+    # 配置其他特定库的日志
+    loggers_to_configure = ['werkzeug', 'apscheduler', 'urllib3']
+    for logger_name in loggers_to_configure:
+        try:
+            lib_logger = logging.getLogger(logger_name)
+            lib_logger.handlers = []  # 清除默认处理器
+            lib_logger.propagate = True  # 让其传播到根记录器
+        except Exception as e:
+            root_logger.warning(f"配置 {logger_name} 日志失败: {e}")
+
+    root_logger.info(f"日志系统已初始化，日志文件路径: {log_file}")
+    return root_logger
 
 logger = setup_logger()
 

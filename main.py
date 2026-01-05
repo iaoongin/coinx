@@ -26,8 +26,8 @@ def signal_handler(sig, frame):
 
 def main():
     """主函数"""
-    print("币种数据监控系统")
-    print("启动Web服务和数据更新服务...")
+    logger.info("币种数据监控系统")
+    logger.info("启动Web服务和数据更新服务...")
     
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
