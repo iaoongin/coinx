@@ -23,8 +23,12 @@ def scheduled_update():
             return
         
         # 更新已启用跟踪的币种数据（仅限活跃币种）
-        from .binance_api import update_all_data
+        from .binance_api import update_all_data, update_drop_list_data
         update_all_data(symbols=symbols)
+        
+        # 更新跌幅榜数据
+        update_drop_list_data()
+        
         logger.info("定时数据更新任务执行完成")
     except Exception as e:
         logger.error(f"定时任务执行失败: {e}")

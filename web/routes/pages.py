@@ -19,3 +19,9 @@ def coin_detail():
     """币种详情页面"""
     logger.info("访问币种详情页面")
     return render_template('coin_detail.html')
+
+@pages_bp.route('/drop-list')
+def drop_list():
+    """跌幅榜页面"""
+    logger.info("访问跌幅榜页面")
+    return render_template('drop_list.html')

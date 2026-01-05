@@ -128,6 +128,48 @@ def get_24hr_ticker(symbol):
         logger.error(f"获取24小时价格变化数据失败: {symbol}, 错误: {e}")
         return None
 
+def get_all_24hr_tickers():
+    """
+    获取所有币种的24小时价格变化数据
+    :return: 所有币种24小时价格变化数据列表
+    """
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/ticker/24hr"
+        
+        # 使用会话
+        session = get_session()
+        logger.info(f"请求所有币种24小时价格变化数据: {url}")
+        response = request_with_retry(session, url, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        
+        # 转换数据格式
+        result = []
+        for item in data:
+            # 过滤掉非USDT合约，或者根据需求保留
+            if not item['symbol'].endswith('USDT'):
+                continue
+                
+            result.append({
+                'symbol': item['symbol'],
+                'priceChange': float(item['priceChange']),
+                'priceChangePercent': float(item['priceChangePercent']),
+                'lastPrice': float(item['lastPrice']),
+                'highPrice': float(item['highPrice']),
+                'lowPrice': float(item['lowPrice']),
+                'volume': float(item['volume']),
+                'quoteVolume': float(item['quoteVolume'])
+            })
+            
+        logger.info(f"获取到 {len(result)} 个币种的24小时数据")
+        return result
+    except requests.exceptions.RequestException as e:
+        logger.error(f"网络请求失败: 获取所有币种24小时数据, 错误: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"获取所有币种24小时数据失败: {e}")
+        return []
+
 def get_open_interest(symbol):
     """
     获取指定币种的当前持仓量数据

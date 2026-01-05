@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>币种数据监控</title>
+  <title>币种跌幅榜</title>
   <style>
     body {
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
@@ -587,17 +587,17 @@
 
 <body>
   <div class="container">
-    <h1>币种数据监控</h1>
+    <h1>币种跌幅榜</h1>
 
     <div class="header-row">
       <div>
-        <button class="btn config-button" onclick="openCoinsConfig()">
+        <a href="/" class="btn config-button"
+          style="text-decoration: none; display: inline-block; line-height: normal;">
+          返回首页
+        </a>
+        <button class="btn config-button" onclick="openCoinsConfig()" style="margin-left: 10px;">
           币种配置
         </button>
-        <a href="/drop-list" class="btn config-button"
-          style="text-decoration: none; display: inline-block; line-height: normal; margin-left: 10px;">
-          跌幅榜
-        </a>
       </div>
       <div class="right-header-section">
         <div class="time-info">
@@ -732,8 +732,8 @@
     function loadCoinsData() {
       const container = document.getElementById("data-container");
 
-      // 获取币种数据
-      fetch("/api/coins")
+      // 获取跌幅榜数据
+      fetch("/api/drop-list")
         .then((response) => {
           console.log("币种数据接口响应:", response);
           return response.json();
@@ -771,7 +771,7 @@
 
       // 先调用更新接口获取最新数据
       console.log("开始获取数据...");
-      const url = force ? "/api/update?force=true" : "/api/update";
+      const url = "/api/drop-list";
       fetch(url)
         .then((response) => {
           console.log("更新接口响应:", response);
@@ -786,7 +786,7 @@
           } else {
             // 更新失败时也尝试获取现有数据
             console.log("更新失败，但仍尝试获取币种数据...");
-            return fetch("/api/coins");
+            return fetch("/api/drop-list");
           }
         })
         .then((response) => {
@@ -843,7 +843,7 @@
 
     // 渲染数据
     function renderData(coinsData) {
-      console.log("开始渲染数据:", coinsData);
+      console.log("开始渲染跌幅榜数据:", coinsData);
       const container = document.getElementById("data-container");
 
       if (!coinsData || !Array.isArray(coinsData) || coinsData.length === 0) {
@@ -852,343 +852,70 @@
         return;
       }
 
-      try {
+      // 构建表格HTML - 简化的跌幅榜表格
+      let html = `
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th style="padding-left: 20px; text-align: left;">排名</th>
+                <th style="text-align: left;">币种</th>
+                <th>当前价格 (USDT)</th>
+                <th>24h 涨跌幅</th>
+                <th>24h 成交金额 (USDT)</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
 
-        // 获取所有时间间隔
-        let intervals = [];
-        if (coinsData[0] && coinsData[0].changes) {
-          intervals = coinsData[0].changes.map((change) => change.interval);
+      // 添加数据行
+      coinsData.forEach((coin, index) => {
+        // 涨跌幅样式
+        const changePercent = coin.price_change_percent;
+        const changeClass = changePercent > 0 ? "positive" : changePercent < 0 ? "negative" : "";
+        const changeSign = changePercent > 0 ? "+" : "";
+
+        // 格式化成交额
+        const quoteVolume = coin.quote_volume;
+        let formattedVolume = "0";
+        if (quoteVolume >= 100000000) {
+          formattedVolume = (quoteVolume / 100000000).toFixed(2) + "亿";
+        } else if (quoteVolume >= 10000) {
+          formattedVolume = (quoteVolume / 10000).toFixed(2) + "万";
+        } else {
+          formattedVolume = parseFloat(quoteVolume).toFixed(2);
         }
-        console.log("时间间隔:", intervals);
-
-        // 构建表格HTML
-        let html = `
-                    <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>币种</th>
-                                <th>类型</th>
-                                <th>当前</th>
-                `;
-
-        // 添加时间间隔列
-        intervals.forEach((interval) => {
-          html += `<th>${interval}</th>`;
-        });
 
         html += `
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
+          <tr>
+            <td style="padding-left: 20px; text-align: left; width: 60px;">
+                <span style="display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; border-radius: 50%; background-color: ${index < 3 ? '#e74c3c' : '#bdc3c7'}; color: white; font-weight: bold; font-size: 12px;">
+                    ${index + 1}
+                </span>
+            </td>
+            <td style="text-align: left;">
+                <strong><a href="/coin-detail?symbol=${coin.symbol}" style="color: #2c3e50; text-decoration: none;">${coin.symbol}</a></strong>
+            </td>
+            <td>
+                <span style="font-weight: 600;">${parseFloat(coin.current_price).toFixed(coin.current_price < 1 ? 6 : 2)}</span>
+            </td>
+            <td>
+                <span class="${changeClass}" style="font-weight: 600;">${changeSign}${parseFloat(changePercent).toFixed(2)}%</span>
+            </td>
+            <td>
+                <span style="color: #7f8c8d;">${formattedVolume}</span>
+            </td>
+          </tr>
+        `;
+      });
 
-        // 添加数据行
-        coinsData.forEach((coin, index) => {
-          console.log(`渲染币种 ${index}:`, coin);
+      html += `
+            </tbody>
+          </table>
+        </div>
+      `;
 
-          // 检查必要的属性
-          if (!coin || !coin.symbol) {
-            console.warn(`币种 ${index} 数据不完整:`, coin);
-            return;
-          }
-
-          // 第一行：展示币种和持仓量数据
-          html += `
-                        <tr>
-                            <td rowspan="4"><strong><a href="/coin-detail?symbol=${coin.symbol}" style="color: #667eea; text-decoration: none;">${coin.symbol}</a></strong></td>
-                            <td>持仓量</td>
-                            <td>
-                                <span class="formatted-value" title="${coin.current_open_interest
-              ? coin.current_open_interest.toLocaleString()
-              : "N/A"
-            }">
-                                    ${coin.current_open_interest_formatted
-              ? coin.current_open_interest_formatted
-              : "N/A"
-            }
-                                </span>
-                            </td>
-                    `;
-
-          // 添加每个时间间隔的持仓量数据
-          if (
-            coin.changes &&
-            Array.isArray(coin.changes) &&
-            coin.changes.length > 0
-          ) {
-            coin.changes.forEach((change, changeIndex) => {
-              console.log(`币种 ${index} 的变化数据 ${changeIndex}:`, change);
-
-              // 检查必要的属性
-              if (!change) {
-                console.warn(
-                  `币种 ${index} 的变化数据 ${changeIndex} 不存在`
-                );
-                return;
-              }
-
-              const ratio = change.ratio;
-              const interest = change.open_interest;
-              const formattedInterest = change.open_interest_formatted;
-              let ratioClass = "";
-              let ratioText = "N/A";
-
-              if (ratio !== null && ratio !== undefined) {
-                ratioText = (ratio > 0 ? "+" : "") + ratio.toFixed(2) + "%";
-                ratioClass =
-                  ratio > 0 ? "positive" : ratio < 0 ? "negative" : "";
-              }
-
-              html += `
-                                <td class="change-cell">
-                                    <div class="ratio-section ${ratioClass}">${ratioText}</div>
-                                    <div class="interest-section">
-                                        <span class="formatted-value" title="${interest
-                  ? interest.toLocaleString()
-                  : "N/A"
-                }">
-                                            ${formattedInterest
-                  ? formattedInterest
-                  : "N/A"
-                }
-                                        </span>
-                                    </div>
-                                </td>
-                            `;
-            });
-          } else {
-            // 如果没有变化数据，填充空单元格
-            intervals.forEach(() => {
-              html += "<td>N/A</td>";
-            });
-          }
-
-          html += `
-                        </tr>
-                    `;
-
-          // 第二行：展示持仓价值数据
-          html += `
-                        <tr>
-                            <td>持仓价值</td>
-                            <td>
-                                <span class="formatted-value" title="${coin.current_open_interest_value
-              ? coin.current_open_interest_value.toLocaleString()
-              : "N/A"
-            }">
-                                    ${coin.current_open_interest_value_formatted
-              ? coin.current_open_interest_value_formatted
-              : "N/A"
-            }
-                                </span>
-                            </td>
-                    `;
-
-          // 添加每个时间间隔的持仓价值数据
-          if (
-            coin.changes &&
-            Array.isArray(coin.changes) &&
-            coin.changes.length > 0
-          ) {
-            coin.changes.forEach((change) => {
-              // 检查必要的属性
-              if (!change) {
-                console.warn(`币种 ${index} 的变化数据不存在`);
-                return;
-              }
-
-              const valueRatio = change.value_ratio;
-              const interestValue = change.open_interest_value;
-              const formattedInterestValue =
-                change.open_interest_value_formatted;
-              let valueRatioClass = "";
-              let valueRatioText = "N/A";
-
-              if (valueRatio !== null && valueRatio !== undefined) {
-                valueRatioText =
-                  (valueRatio > 0 ? "+" : "") + valueRatio.toFixed(2) + "%";
-                valueRatioClass =
-                  valueRatio > 0
-                    ? "positive"
-                    : valueRatio < 0
-                      ? "negative"
-                      : "";
-              }
-
-              html += `
-                                <td class="change-cell">
-                                    <div class="value-ratio-section ${valueRatioClass}">${valueRatioText}</div>
-                                    <div class="value-section">
-                                        <span class="formatted-value" title="${interestValue
-                  ? interestValue.toLocaleString()
-                  : "N/A"
-                }">
-                                            ${formattedInterestValue
-                  ? formattedInterestValue
-                  : "N/A"
-                }
-                                        </span>
-                                    </div>
-                                </td>
-                            `;
-            });
-          } else {
-            // 如果没有变化数据，填充空单元格
-            intervals.forEach(() => {
-              html += "<td>N/A</td>";
-            });
-          }
-
-          html += `
-                        </tr>
-                    `;
-
-          // 第三行：展示价格和价格波动数据
-          html += `
-                        <tr>
-                            <td>价格</td>
-                            <td>
-                                <span class="formatted-value" title="${coin.current_price
-              ? coin.current_price.toLocaleString()
-              : "N/A"
-            }">
-                                    ${coin.current_price_formatted
-              ? coin.current_price_formatted
-              : "N/A"
-            }
-                                </span>
-                            </td>
-                    `;
-
-          // 添加每个时间间隔的价格和价格波动数据
-          if (
-            coin.changes &&
-            Array.isArray(coin.changes) &&
-            coin.changes.length > 0
-          ) {
-            coin.changes.forEach((change) => {
-              // 检查必要的属性
-              if (!change) {
-                console.warn(`币种 ${index} 的变化数据不存在`);
-                return;
-              }
-
-              const currentPrice = change.current_price;
-              const currentPriceFormatted = change.current_price_formatted;
-              const priceChangePercent = change.price_change_percent;
-              let priceChangeClass = "";
-              let priceChangeText = "N/A";
-
-              if (
-                priceChangePercent !== null &&
-                priceChangePercent !== undefined
-              ) {
-                priceChangeText =
-                  (priceChangePercent > 0 ? "+" : "") +
-                  priceChangePercent.toFixed(2) +
-                  "%";
-                priceChangeClass =
-                  priceChangePercent > 0
-                    ? "positive"
-                    : priceChangePercent < 0
-                      ? "negative"
-                      : "";
-              }
-
-              html += `
-                                <td class="change-cell">
-                                    <div class="value-ratio-section ${priceChangeClass}">${priceChangeText}</div>
-                                    <div class="value-section">
-                                        <span class="formatted-value" title="${currentPrice
-                  ? currentPrice.toLocaleString()
-                  : "N/A"
-                }">
-                                            ${currentPriceFormatted
-                  ? currentPriceFormatted
-                  : "N/A"
-                }
-                                        </span>
-                                    </div>
-                                </td>
-                            `;
-            });
-          } else {
-            // 如果没有变化数据，填充空单元格
-            intervals.forEach(() => {
-              html += "<td>N/A</td>";
-            });
-          }
-
-          html += `
-                        </tr>
-                    `;
-
-          // 第四行：主力净流入（多时间间隔）
-          html += `
-                        <tr class="coin-group-last">
-                            <td>主力净流入</td>
-                            <td>
-                                ${(() => {
-              const v = coin.net_inflow && typeof coin.net_inflow['5m'] === 'number' ? coin.net_inflow['5m'] : null;
-              if (v === null) return '<span class="formatted-value">N/A</span>';
-              const tooltip = v.toLocaleString();
-              const cls = v > 0 ? 'positive' : v < 0 ? 'negative' : '';
-              const formatted = Math.abs(v) >= 1_000_000
-                ? (v / 1_000_000).toFixed(2) + 'M'
-                : Math.abs(v) >= 1_000
-                  ? (v / 1_000).toFixed(2) + 'K'
-                  : v.toFixed(0);
-              return `<span class="formatted-value ${cls}" title="${tooltip}">${formatted}</span>`;
-            })()}
-                            </td>
-                    `;
-
-          if (intervals && Array.isArray(intervals) && intervals.length > 0) {
-            intervals.forEach((interval) => {
-              const val = coin.net_inflow ? coin.net_inflow[interval] : undefined;
-              let cls = '';
-              let txt = 'N/A';
-              let tooltip = '';
-              if (typeof val === 'number') {
-                cls = val > 0 ? 'positive' : val < 0 ? 'negative' : '';
-                tooltip = val.toLocaleString();
-                txt = Math.abs(val) >= 1_000_000
-                  ? (val / 1_000_000).toFixed(2) + 'M'
-                  : Math.abs(val) >= 1_000
-                    ? (val / 1_000).toFixed(2) + 'K'
-                    : val.toFixed(0);
-              }
-              html += `
-                                <td class="change-cell">
-                                    <div class="net-value ${cls}" title="${tooltip}">${txt}</div>
-                                </td>
-                            `;
-            });
-          } else {
-            intervals.forEach(() => {
-              html += "<td>N/A</td>";
-            });
-          }
-
-          html += `
-                        </tr>
-                    `;
-        });
-
-        html += `
-                        </tbody>
-                    </table>
-                    </div>
-                `;
-
-        console.log("生成的HTML:", html);
-        container.innerHTML = html;
-        console.log("数据渲染完成");
-      } catch (error) {
-        console.error("渲染数据时出错:", error);
-        container.innerHTML = `<div class="error">渲染数据时出错: ${error.message}</div>`;
-      }
+      container.innerHTML = html;
     }
 
     // 打开币种配置弹窗

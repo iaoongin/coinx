@@ -12,7 +12,7 @@ from .market import (
     get_open_interest_history
 )
 from .indicators import get_net_inflow_data
-from .cache import should_update_cache, save_cached_data, get_cache_key
+from .cache import should_update_cache, save_cached_data, get_cache_key, save_drop_list_cache, should_update_drop_list_cache, load_drop_list_cache
 
 def get_all_coins_list():
     """获取所有币种列表"""
@@ -197,3 +197,81 @@ def update_all_data(symbols=None, force_update=False):
     
     logger.info("数据更新完成")
     return all_coins_data
+
+def update_drop_list_data(force_update=False):
+    """
+    更新跌幅榜数据并缓存
+    :param force_update: 是否强制更新
+    """
+    try:
+        # Check if cache update is needed
+        if not force_update and not should_update_drop_list_cache():
+            logger.info("当前5分钟周期内已有跌幅榜缓存数据，跳过更新")
+            # Try to return cached data
+            cache_data = load_drop_list_cache()
+            cache_key = get_cache_key()
+            if str(cache_key) in cache_data:
+                return cache_data[str(cache_key)]['data']
+        
+        logger.info("开始更新跌幅榜数据...")
+        
+        from src.binance.market import get_all_24hr_tickers
+        
+        # 1. 获取当前所有处于 TRADING 状态的 USDT 合约
+        valid_coins_list = get_all_coins_from_binance()
+        valid_symbols = set()
+        if valid_coins_list:
+             valid_symbols = {c['symbol'] for c in valid_coins_list}
+        
+        # 2. 获取所有币种的24小时数据
+        all_tickers = get_all_24hr_tickers()
+        
+        # 3. 过滤只保留有效的 TRADING 币种
+        if valid_symbols:
+            filtered_tickers = [t for t in all_tickers if t['symbol'] in valid_symbols]
+        else:
+            # 如果获取交易对信息失败，暂时不过滤，或者保留所有
+            filtered_tickers = all_tickers
+        
+        # 按跌幅排序（涨幅百分比升序）
+        filtered_tickers.sort(key=lambda x: x['priceChangePercent'])
+        
+        # 取前100名
+        top_losers = filtered_tickers[:100]
+        
+        # 格式化数据以适应前端展示
+        formatted_data = []
+        for coin in top_losers:
+            formatted_coin = {
+                'symbol': coin['symbol'],
+                'current_price': coin['lastPrice'],
+                'current_price_formatted': str(coin['lastPrice']),
+                'price_change_percent': coin['priceChangePercent'],
+                'price_change_formatted': f"{coin['priceChange']:.4f}",
+                'volume': coin['volume'],
+                'quote_volume': coin['quoteVolume'],
+                
+                # 填充 renderData 需要的字段
+                'current_open_interest': None,
+                'current_open_interest_formatted': 'N/A',
+                'current_open_interest_value': None,
+                'current_open_interest_value_formatted': 'N/A',
+                'net_inflow': {},
+                'changes': []
+            }
+            formatted_data.append(formatted_coin)
+            
+        # 保存到缓存
+        try:
+            cache_key = get_cache_key()
+            save_drop_list_cache(cache_key, formatted_data)
+            logger.info(f"跌幅榜数据已更新并缓存，主要数据 {len(formatted_data)} 条")
+        except Exception as e:
+            logger.error(f"保存跌幅榜缓存失败: {e}")
+            
+        return formatted_data
+        
+    except Exception as e:
+        logger.error(f"更新跌幅榜数据失败: {e}")
+        logger.exception(e)
+        return []
