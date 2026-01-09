@@ -22,6 +22,8 @@ except ImportError:
     from routes.pages import pages_bp
     from routes.api_data import api_data_bp
     from routes.api_config import api_config_bp
+    
+from coinx.database import db_session
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -29,6 +31,10 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 app.register_blueprint(pages_bp)
 app.register_blueprint(api_data_bp)
 app.register_blueprint(api_config_bp)
+
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    db_session.remove()
 
 @app.before_request
 def log_request_info():

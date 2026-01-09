@@ -25,7 +25,7 @@ def get_coins():
         # 获取所有币种数据
         coins_data = get_all_coins_data(active_coins)
         logger.info(f"获取到 {len(coins_data)} 个币种的数据")
-        logger.info(f"原始数据示例: {coins_data[:2] if coins_data else '无数据'}")
+        # logger.info(f"原始数据示例: {coins_data[:2] if coins_data else '无数据'}")
         
         # 获取缓存更新时间
         cache_update_time = get_cache_update_time()
@@ -83,7 +83,7 @@ def get_coins():
             formatted_data.append(formatted_coin)
         
         logger.info(f"格式化后的数据数量: {len(formatted_data)}")
-        logger.info(f"格式化后的数据示例: {formatted_data[:2] if formatted_data else '无数据'}")
+        # logger.info(f"格式化后的数据示例: {formatted_data[:2] if formatted_data else '无数据'}")
         
         response_data = {
             'status': 'success',

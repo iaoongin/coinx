@@ -354,15 +354,13 @@ def get_exchange_info():
         response.raise_for_status()
         data = response.json()
         
-        # 筛选出USDT交易对
+        # 筛选出USDT交易对，并保留原始信息
         usdt_pairs = []
         for symbol_info in data['symbols']:
+            # 这里保留筛选 USDT 和 TRADING 状态的逻辑，确保只处理我们感兴趣的合约
             if symbol_info['quoteAsset'] == 'USDT' and symbol_info['status'] == 'TRADING':
-                usdt_pairs.append({
-                    'symbol': symbol_info['symbol'],
-                    'baseAsset': symbol_info['baseAsset'],
-                    'quoteAsset': symbol_info['quoteAsset']
-                })
+                # 返回完整的 symbol_info 字典，以便上层获取更多详细信息
+                usdt_pairs.append(symbol_info)
         
         logger.info(f"获取到 {len(usdt_pairs)} 个USDT交易对")
         return usdt_pairs

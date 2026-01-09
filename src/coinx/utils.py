@@ -1,15 +1,18 @@
 import sys
 import os
+import json
+import uuid
+import logging
+from datetime import datetime
+from sqlalchemy import desc, func
 
 # 添加项目根目录到路径
 project_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
 
-import os
-import json
-import logging
-from datetime import datetime
-from coinx.config import DATA_DIR, LOGS_DIR
+from coinx.config import LOGS_DIR, TIME_INTERVALS, DATA_DIR
+from coinx.database import db_session
+from coinx.models import MarketSnapshot
 
 # 配置日志
 def setup_logger():
@@ -29,10 +32,6 @@ def setup_logger():
     # 设置根日志级别
     root_logger.setLevel(logging.INFO)
     
-    # 创建格式化器 - 类似Java的日志格式，使用固定宽度对齐
-    # %(levelname)-8s: Log级别左对齐，占8位
-    # %(filename)20s: 文件名右对齐，占20位
-    # %(lineno)4d: 行号右对齐，占4位
     formatter = logging.Formatter('%(asctime)s %(levelname)-8s [%(filename)15s:%(lineno)4d] - %(message)s')
     
     # 文件处理器（轮转日志）
@@ -56,12 +55,14 @@ def setup_logger():
     root_logger.addHandler(console_handler)
     
     # 配置其他特定库的日志
-    loggers_to_configure = ['werkzeug', 'apscheduler', 'urllib3']
+    loggers_to_configure = ['werkzeug', 'apscheduler', 'urllib3', 'sqlalchemy']
     for logger_name in loggers_to_configure:
         try:
             lib_logger = logging.getLogger(logger_name)
-            lib_logger.handlers = []  # 清除默认处理器
-            lib_logger.propagate = True  # 让其传播到根记录器
+            # lib_logger.handlers = []  # 不要清除，否则可能会影响其他的
+            if logger_name == 'sqlalchemy':
+                 lib_logger.setLevel(logging.WARNING) # SQL Alchemy日志设为Warning
+            lib_logger.propagate = True 
         except Exception as e:
             root_logger.warning(f"配置 {logger_name} 日志失败: {e}")
 
@@ -71,105 +72,124 @@ def setup_logger():
 logger = setup_logger()
 
 def save_all_coins_data(data):
-    """保存所有币种数据到本地文件"""
+    """保存所有币种数据到数据库"""
     try:
-        filename = "coins_data.json"
-        filepath = os.path.join(DATA_DIR, filename)
-        
-        # 如果文件存在，读取现有数据
-        existing_data = []
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-                # 验证数据格式
-                if not isinstance(existing_data, list):
-                    existing_data = []
-            except (json.JSONDecodeError, Exception) as e:
-                logger.error(f"读取现有数据文件失败: {e}")
-                existing_data = []
-        
-        # 添加新数据
-        new_entry = {
-            'timestamp': int(datetime.now().timestamp() * 1000),
-            'data': data
-        }
-        
-        existing_data.append(new_entry)
-        
-        # 只保留最近的10条记录，避免文件过大
-        if len(existing_data) > 10:
-            existing_data = existing_data[-10:]
-        
-        # 在保存前验证数据是否可序列化
-        try:
-            json.dumps(existing_data, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"数据序列化失败: {e}")
-            # 尝试简化数据结构
-            simplified_data = []
-            for entry in existing_data:
-                simplified_entry = {
-                    'timestamp': entry.get('timestamp', 0),
-                    'data': []
-                }
-                for item in entry.get('data', []):
-                    simplified_item = {
-                        'symbol': item.get('symbol', ''),
-                        'current_open_interest': item.get('current', {}).get('openInterest') if item.get('current') else None,
-                        'changes': item.get('changes', {})
-                    }
-                    simplified_entry['data'].append(simplified_item)
-                simplified_data.append(simplified_entry)
-            existing_data = simplified_data
-        
-        # 保存数据，先写入临时文件再重命名，避免写入过程中断导致文件损坏
-        temp_filepath = filepath + ".tmp"
-        try:
-            with open(temp_filepath, 'w', encoding='utf-8') as f:
-                json.dump(existing_data, f, ensure_ascii=False, indent=2)
-            # 原子性地替换原文件
-            os.replace(temp_filepath, filepath)
-            logger.info(f"所有币种数据已保存: {filename}，共 {len(existing_data)} 条记录")
-        except Exception as e:
-            # 清理临时文件
-            if os.path.exists(temp_filepath):
-                os.remove(temp_filepath)
-            # 记录错误而不是抛出异常
-            logger.error(f"保存数据时出错: {e}")
-            logger.exception(e)
+        if not data:
+            return
+
+        # 生成批次ID
+        batch_id = str(uuid.uuid4())
+        snapshot_time = int(datetime.now().timestamp() * 1000)
+
+        snapshots = []
+        for coin_data in data:
+            symbol = coin_data.get('symbol')
+            if not symbol:
+                continue
+                
+            current = coin_data.get('current', {})
             
+            # 准备数据JSON
+            # 这里我们把原始数据存入JSON字段，以便后续查询时能还原完整结构
+            # 同时也把关键指标提取到列中，方便SQL查询
+            
+            snapshot = MarketSnapshot(
+                batch_id=batch_id,
+                symbol=symbol,
+                price=current.get('price'), # 假设 api 返回的数据里有 price，或者通过 current 获取
+                # 注意：原始数据中 current.price 可能是 None，需要逻辑中计算
+                # 这里我们尽量存原始值
+                open_interest=current.get('openInterest'),
+                open_interest_value=current.get('openInterestValue'),
+                data_json=coin_data,
+                snapshot_time=snapshot_time
+            )
+            
+            # 补充价格计算逻辑，如果原始数据没有直接提供
+            if snapshot.price is None and snapshot.open_interest and snapshot.open_interest_value:
+                 try:
+                     snapshot.price = float(snapshot.open_interest_value) / float(snapshot.open_interest)
+                 except:
+                     pass
+
+            snapshots.append(snapshot)
+        
+        # 批量插入
+        if snapshots:
+            db_session.add_all(snapshots)
+            db_session.commit()
+            logger.info(f"所有币种数据已保存到DB，批次: {batch_id}，共 {len(snapshots)} 条记录")
+            
+            # 清理旧数据 (保留最近10个批次)
+            # 这一步可以选择性执行，或者由独立的清理任务执行
+            cleanup_old_data()
+
     except Exception as e:
+        db_session.rollback()
         logger.error(f"保存所有币种数据失败: {e}")
         logger.exception(e)
 
-def load_all_coins_data():
-    """从本地文件加载所有币种数据"""
+def cleanup_old_data(keep_batches=20):
+    """清理旧数据，只保留最近的N个批次"""
     try:
-        filename = "coins_data.json"
-        filepath = os.path.join(DATA_DIR, filename)
+        # 查询最近的N个批次的时间戳
+        # SELECT DISTINCT snapshot_time FROM market_snapshots ORDER BY snapshot_time DESC LIMIT N
         
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                # 验证数据格式并返回最新的数据
-                if isinstance(data, list) and len(data) > 0:
-                    latest_data = data[-1].get('data', [])
-                    # 确保返回的是列表而不是None
-                    return latest_data if latest_data is not None else []
-                else:
-                    return []
-            except (json.JSONDecodeError, Exception) as e:
-                logger.error(f"加载所有币种数据失败: {e}")
-                # 如果文件损坏，尝试创建新文件
-                try:
-                    with open(filepath, 'w', encoding='utf-8') as f:
-                        json.dump([], f, ensure_ascii=False, indent=2)
-                except Exception as write_error:
-                    logger.error(f"重置数据文件失败: {write_error}")
-                return []
-        return []
+        # 使用 SQLAlchemy 查询
+        subquery = db_session.query(MarketSnapshot.snapshot_time).\
+            group_by(MarketSnapshot.snapshot_time).\
+            order_by(desc(MarketSnapshot.snapshot_time)).\
+            limit(keep_batches).subquery()
+            
+        # 找到第N个批次的时间（最小时间）
+        # 这种方式可能比较复杂，更简单的是找到第N个distinct snapshot_time
+        
+        times = db_session.query(MarketSnapshot.snapshot_time).\
+            group_by(MarketSnapshot.snapshot_time).\
+            order_by(desc(MarketSnapshot.snapshot_time)).\
+            limit(keep_batches).all()
+            
+        if len(times) >= keep_batches:
+            min_time = times[-1][0]
+            
+            # 删除小于该时间的记录
+            # DELETE FROM market_snapshots WHERE snapshot_time < min_time
+            deleted = db_session.query(MarketSnapshot).\
+                filter(MarketSnapshot.snapshot_time < min_time).\
+                delete(synchronize_session=False)
+                
+            db_session.commit()
+            if deleted > 0:
+                logger.info(f"清理了旧数据: {deleted} 条记录")
+                
+    except Exception as e:
+        db_session.rollback()
+        logger.warning(f"清理旧数据失败: {e}")
+
+def load_all_coins_data():
+    """从数据库加载每个币种的最新数据"""
+    try:
+        # 使用子查询找到每个symbol最新的snapshot_time
+        subquery = db_session.query(
+            MarketSnapshot.symbol,
+            func.max(MarketSnapshot.snapshot_time).label('max_time')
+        ).group_by(MarketSnapshot.symbol).subquery()
+        
+        # 连接查询获取完整记录
+        snapshots = db_session.query(MarketSnapshot).join(
+            subquery,
+            (MarketSnapshot.symbol == subquery.c.symbol) &
+            (MarketSnapshot.snapshot_time == subquery.c.max_time)
+        ).all()
+            
+        # 还原为原始列表格式
+        result = []
+        for snapshot in snapshots:
+            if snapshot.data_json:
+                result.append(snapshot.data_json)
+                
+        return result
+        
     except Exception as e:
         logger.error(f"加载所有币种数据失败: {e}")
         return []
@@ -196,32 +216,15 @@ def calculate_change_ratio(current, past):
 def get_cache_update_time():
     """获取缓存更新时间"""
     try:
-        import os
-        import json
-        from datetime import datetime
-        
-        # 缓存文件路径
-        CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'open_interest_cache.json')
-        
-        logger.info(f"尝试获取缓存更新时间，缓存文件路径: {CACHE_FILE}")
-        
-        if os.path.exists(CACHE_FILE):
-            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-                cache_data = json.load(f)
+        # 尝试从数据库获取最新更新时间
+        latest_time_row = db_session.query(MarketSnapshot.snapshot_time).\
+            order_by(desc(MarketSnapshot.snapshot_time)).\
+            first()
             
-            # 获取最新的缓存时间戳
-            if cache_data:
-                timestamps = sorted(cache_data.keys(), key=int)
-                latest_timestamp = int(timestamps[-1])
-                logger.info(f"找到缓存数据，最新时间戳: {latest_timestamp}")
-                return latest_timestamp * 1000  # 转换为毫秒
-            else:
-                logger.info("缓存文件存在但无数据")
-        else:
-            logger.info("缓存文件不存在")
-        
+        if latest_time_row:
+            return latest_time_row[0]
+            
         return None
     except Exception as e:
-        logger.error(f"获取缓存更新时间失败: {e}")
-        logger.exception(e)
+        logger.warning(f"获取缓存更新时间失败: {e}")
         return None

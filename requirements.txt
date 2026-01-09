@@ -3,3 +3,6 @@ requests==2.31.0
 apscheduler==3.10.1
 pytest==8.4.2
 pytest-cov==7.0.0
+pymysql==1.1.0
+sqlalchemy==2.0.23
+PyYAML==6.0.1

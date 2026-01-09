@@ -1,0 +1,36 @@
+server:
+  host: 0.0.0.0
+  port: 5000
+  debug: false
+
+profiles:
+  active: dev
+
+app:
+  update_interval: 300
+  time_intervals: 
+    - 5m
+    - 15m
+    - 30m
+    - 1h
+    - 2h
+    - 4h
+    - 6h
+    - 12h
+    - 1d
+
+database:
+  host: localhost
+  port: 3306
+  username: root
+  password: ""
+  name: coinx
+  charset: utf8mb4
+
+proxy:
+  enabled: false
+  host: 127.0.0.1
+  port: 7897
+
+binance:
+  base_url: https://proxy.yffjglcms.com/fapi.binance.com

@@ -683,15 +683,17 @@
       const countdownElement = document.getElementById("countdown");
 
       // 计算下次刷新时间（下一个5分钟时间点）
+      // 计算下次刷新时间（基于当前时间，对齐到5分钟网格）
       const now = new Date();
-      const nextRefreshTime = new Date(lastUpdateTime);
-      nextRefreshTime.setMinutes(
-        Math.ceil(nextRefreshTime.getMinutes() / 5) * 5
-      );
+      const nextRefreshTime = new Date(now);
+      // 向上取整到最近的5分钟
+      const minutes = Math.ceil(nextRefreshTime.getMinutes() / 5) * 5;
+
+      nextRefreshTime.setMinutes(minutes);
       nextRefreshTime.setSeconds(0);
       nextRefreshTime.setMilliseconds(0);
 
-      // 如果计算出的时间已经过去，则加上5分钟
+      // 确保时间在未来
       if (nextRefreshTime <= now) {
         nextRefreshTime.setTime(nextRefreshTime.getTime() + 5 * 60 * 1000);
       }

@@ -1,124 +1,122 @@
 import sys
 import os
+import json
+from datetime import datetime
+from sqlalchemy.dialects.mysql import insert
 
 # 添加项目根目录到路径
 project_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
 
-import requests
-import json
-import logging
-from datetime import datetime, timedelta
-from coinx.config import DATA_DIR, BINANCE_BASE_URL, USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
+# 添加src到路径
+sys.path.insert(0, os.path.join(project_root, 'src'))
+
 from coinx.utils import logger
+from coinx.database import db_session, init_db
+from coinx.models import Coin
+from coinx.config import DATA_DIR, TIME_INTERVALS
 
 # 币种配置文件路径
 COINS_CONFIG_FILE = os.path.join(DATA_DIR, 'coins_config.json')
 
-def get_session():
-    """创建带代理配置的会话"""
-    session = requests.Session()
-    
-    if USE_PROXY:
-        proxies = {
-            'http': PROXY_URL,
-            'https': HTTPS_PROXY_URL
-        }
-        session.proxies.update(proxies)
-        logger.info(f"使用代理: {PROXY_URL}")
-    
-    return session
-
-
-
 def load_coins_config():
     """
-    从本地文件加载币种配置
+    从数据库加载币种配置
     :return: 币种配置列表（只包含启用跟踪的币种）
     """
     try:
-        if os.path.exists(COINS_CONFIG_FILE):
-            with open(COINS_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                # 如果是旧格式，转换为新格式
-                if isinstance(config, list):
-                    # 转换旧格式为新格式
-                    new_config = {
-                        'updated_time': datetime.now().isoformat(),
-                        'coins': {coin: True for coin in config}  # 默认都启用跟踪
-                    }
-                    save_coins_config_dict(new_config['coins'])
-                    return list(new_config['coins'].keys())
-                elif isinstance(config, dict) and 'coins' in config:
-                    # 新格式：返回启用跟踪的币种
-                    tracked_coins = [coin for coin, tracked in config['coins'].items() if tracked]
-                    return tracked_coins
-                else:
-                    return []
-        else:
-            # 如果配置文件不存在，创建默认配置
-            default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
-            save_coins_config_dict(default_coins)
-            return list(default_coins.keys())
+        # 确保数据库已初始化（可选，如果确定已初始化可移除）
+        # init_db()
+        
+        coins = db_session.query(Coin).filter(Coin.is_tracking == True).all()
+        
+        if not coins:
+            # 如果数据库为空，尝试从文件迁移或创建默认
+            if os.path.exists(COINS_CONFIG_FILE):
+                migrate_from_file()
+                coins = db_session.query(Coin).filter(Coin.is_tracking == True).all()
+            else:
+                # 默认配置
+                default_coins = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+                for symbol in default_coins:
+                    add_coin(symbol, True)
+                return default_coins
+
+        return [coin.symbol for coin in coins]
+        
     except Exception as e:
         logger.error(f"加载币种配置失败: {e}")
+        # 出错时回退到默认
         return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
 
 def load_coins_config_dict():
     """
-    从本地文件加载币种配置字典（包含跟踪状态）
+    从数据库加载币种配置字典（包含跟踪状态）
     :return: 币种配置字典 {symbol: tracked}
     """
     try:
-        if os.path.exists(COINS_CONFIG_FILE):
-            with open(COINS_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                # 如果是旧格式，转换为新格式
-                if isinstance(config, dict) and 'coins' in config:
-                    coins_data = config['coins']
-                    if isinstance(coins_data, list):
-                        # 转换旧格式为新格式
-                        new_config = {
-                            'updated_time': config.get('updated_time', datetime.now().isoformat()),
-                            'coins': {coin: True for coin in coins_data}  # 默认都启用跟踪
-                        }
-                        save_coins_config_dict(new_config['coins'])
-                        return new_config['coins']
-                    elif isinstance(coins_data, dict):
-                        return coins_data
-                else:
-                    # 如果格式不正确，创建默认配置
-                    default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
-                    save_coins_config_dict(default_coins)
-                    return default_coins
-        else:
-            # 如果配置文件不存在，创建默认配置
-            default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
-            save_coins_config_dict(default_coins)
-            return default_coins
+        coins = db_session.query(Coin).all()
+        
+        if not coins and os.path.exists(COINS_CONFIG_FILE):
+            migrate_from_file()
+            coins = db_session.query(Coin).all()
+            
+        return {coin.symbol: coin.is_tracking for coin in coins}
     except Exception as e:
         logger.error(f"加载币种配置字典失败: {e}")
-        # 出错时返回默认配置
-        default_coins = {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
-        return default_coins
+        return {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
 
 def save_coins_config_dict(coins_dict):
     """
-    保存币种配置字典到本地文件
+    保存币种配置字典到数据库
     :param coins_dict: 币种配置字典 {symbol: tracked}
     """
     try:
-        config = {
-            'updated_time': datetime.now().isoformat(),
-            'coins': coins_dict
-        }
+        for symbol, tracked in coins_dict.items():
+            # 使用 merge 进行 upsert (insert or update)
+            # 注意：Merge 会查询一次，效率可能略低，也可以使用 SQLAlchemy 的 upsert 方言
+            
+            # MySQL特定的 UPSERT
+            stmt = insert(Coin).values(symbol=symbol, is_tracking=tracked)
+            on_duplicate_key_stmt = stmt.on_duplicate_key_update(is_tracking=tracked, updated_at=datetime.now())
+            
+            db_session.execute(on_duplicate_key_stmt)
+            
+        db_session.commit()
+        logger.info(f"币种配置已保存到数据库: {len(coins_dict)} 个币种")
         
-        with open(COINS_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"币种配置已保存: {len(coins_dict)} 个币种")
     except Exception as e:
+        db_session.rollback()
         logger.error(f"保存币种配置失败: {e}")
+
+def migrate_from_file():
+    """从旧的JSON文件迁移数据到数据库"""
+    try:
+        if not os.path.exists(COINS_CONFIG_FILE):
+            return
+            
+        logger.info("开始从文件迁移币种配置到数据库...")
+        with open(COINS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            
+        coins_to_add = {}
+        
+        if isinstance(config, list):
+             coins_to_add = {coin: True for coin in config}
+        elif isinstance(config, dict) and 'coins' in config:
+            coins_data = config['coins']
+            if isinstance(coins_data, list):
+                coins_to_add = {coin: True for coin in coins_data}
+            elif isinstance(coins_data, dict):
+                coins_to_add = coins_data
+                
+        # 保存到数据库
+        if coins_to_add:
+            save_coins_config_dict(coins_to_add)
+            logger.info("迁移完成")
+            
+    except Exception as e:
+        logger.error(f"迁移失败: {e}")
 
 def update_coins_config():
     """
@@ -142,22 +140,56 @@ def update_coins_config():
         elif len(all_coins) == 0:
             # 获取到了响应但没有符合条件的交易对
             logger.warning("未找到符合条件的USDT交易对")
-            # 仍然认为更新操作成功，因为配置文件未受影响
             return True
         else:
-            # 提取交易对名称
-            coin_symbols = [coin['symbol'] for coin in all_coins]
+            # 批量更新：使用 upsert 更新所有信息
+            count = 0
+            for coin_info in all_coins:
+                symbol = coin_info.get('symbol')
+                if not symbol:
+                    continue
+                
+                # 确定跟踪状态：如果是新币种，默认不跟踪；如果已存在，保持原有状态
+                if symbol not in current_config:
+                    is_tracking = False 
+                    count += 1
+                else:
+                    is_tracking = current_config[symbol]
+
+                # 构建数据字典
+                values = {
+                    'symbol': symbol,
+                    'is_tracking': is_tracking,
+                    'base_asset': coin_info.get('baseAsset'),
+                    'quote_asset': coin_info.get('quoteAsset'),
+                    'margin_asset': coin_info.get('marginAsset'),
+                    'price_precision': coin_info.get('pricePrecision'),
+                    'quantity_precision': coin_info.get('quantityPrecision'),
+                    'base_asset_precision': coin_info.get('baseAssetPrecision'),
+                    'quote_precision': coin_info.get('quotePrecision'),
+                    'status': coin_info.get('status'),
+                    'onboard_date': coin_info.get('onboardDate'),
+                    'delivery_date': coin_info.get('deliveryDate'),
+                    'contract_type': coin_info.get('contractType'),
+                    # underlyingSubType 是列表，取第一个或拼接
+                    'underlying_type': coin_info.get('underlyingType'),
+                    'liquidation_fee': coin_info.get('liquidationFee'),
+                    'maint_margin_percent': coin_info.get('maintMarginPercent'),
+                    'required_margin_percent': coin_info.get('requiredMarginPercent'),
+                    'updated_at': datetime.now()
+                }
+                
+                # 执行 Upsert
+                stmt = insert(Coin).values(**values)
+                on_duplicate_key_stmt = stmt.on_duplicate_key_update(**values)
+                db_session.execute(on_duplicate_key_stmt)
             
-            # 更新配置：保留现有币种的跟踪状态，添加新币种（默认不跟踪）
-            updated_config = current_config.copy()
-            for symbol in coin_symbols:
-                if symbol not in updated_config:
-                    updated_config[symbol] = False  # 新币种默认不跟踪
+            db_session.commit()
             
-            # 保存更新后的配置
-            save_coins_config_dict(updated_config)
+            if count > 0:
+                logger.info(f"添加了 {count} 个新币种")
             
-            logger.info(f"币种配置更新完成，共 {len(updated_config)} 个币种")
+            logger.info(f"币种配置更新完成，共更新 {len(all_coins)} 个币种信息")
             return True
     except Exception as e:
         logger.error(f"更新币种配置失败: {e}")
@@ -174,7 +206,6 @@ def get_active_coins(filter_symbols=None):
     
     # 如果提供了筛选列表，则只返回筛选后的币种
     if filter_symbols:
-        # 确保筛选的币种在配置列表中且启用跟踪
         filtered_coins = [coin for coin in tracked_coins if coin in filter_symbols]
         return filtered_coins
     
@@ -191,7 +222,6 @@ def get_all_coins_list():
         if all_coins:
             return [coin['symbol'] for coin in all_coins]
         else:
-            # 如果无法从币安获取，返回空列表
             return []
     except Exception as e:
         logger.error(f"获取所有币种列表失败: {e}")
@@ -204,18 +234,16 @@ def set_coin_tracking(symbol, tracked):
     :param tracked: 是否跟踪（True/False）
     """
     try:
-        # 加载现有配置
-        coins_config = load_coins_config_dict()
-        
-        # 更新币种跟踪状态
-        coins_config[symbol] = tracked
-        
-        # 保存配置
-        save_coins_config_dict(coins_config)
+        # 使用upsert逻辑更新单个
+        stmt = insert(Coin).values(symbol=symbol, is_tracking=tracked)
+        on_duplicate_key_stmt = stmt.on_duplicate_key_update(is_tracking=tracked, updated_at=datetime.now())
+        db_session.execute(on_duplicate_key_stmt)
+        db_session.commit()
         
         logger.info(f"币种 {symbol} 跟踪状态已更新为: {tracked}")
         return True
     except Exception as e:
+        db_session.rollback()
         logger.error(f"更新币种跟踪状态失败: {e}")
         return False
 
@@ -225,53 +253,51 @@ def add_coin(symbol, tracked=True):
     :param symbol: 币种符号
     :param tracked: 是否跟踪（默认True）
     """
-    try:
-        # 加载现有配置
-        coins_config = load_coins_config_dict()
-        
-        # 添加币种
-        coins_config[symbol] = tracked
-        
-        # 保存配置
-        save_coins_config_dict(coins_config)
-        
-        logger.info(f"币种 {symbol} 已添加到配置，跟踪状态: {tracked}")
-        return True
-    except Exception as e:
-        logger.error(f"添加币种失败: {e}")
-        return False
+    return set_coin_tracking(symbol, tracked)
 
 def remove_coin(symbol):
     """
-    从配置中移除币种
-    :param symbol: 币种符号
+    从配置中移除币种 (设置为不跟踪，或者物理删除？这里选择物理删除以匹配原语意，或者仅设为不跟踪)
+    原逻辑是 del coins_config[symbol]，相当于不再管理。
+    在数据库中，我们选择物理删除。
     """
     try:
-        # 加载现有配置
-        coins_config = load_coins_config_dict()
-        
-        # 移除币种
-        if symbol in coins_config:
-            del coins_config[symbol]
-            
-            # 保存配置
-            save_coins_config_dict(coins_config)
-            
-            logger.info(f"币种 {symbol} 已从配置中移除")
-            return True
-        else:
-            logger.warning(f"币种 {symbol} 不在配置中")
-            return False
+        db_session.query(Coin).filter(Coin.symbol == symbol).delete()
+        db_session.commit()
+        logger.info(f"币种 {symbol} 已从配置中移除")
+        return True
     except Exception as e:
+        db_session.rollback()
         logger.error(f"移除币种失败: {e}")
         return False
 
+# 提供 get_session 兼容旧代码使用requests
+import requests
+from coinx.config import USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
+
+def get_session():
+    """创建带代理配置的requests会话"""
+    session = requests.Session()
+    
+    if USE_PROXY:
+        proxies = {
+            'http': PROXY_URL,
+            'https': HTTPS_PROXY_URL
+        }
+        session.proxies.update(proxies)
+        logger.info(f"使用代理: {PROXY_URL}")
+    
+    return session
+
 if __name__ == "__main__":
     # 测试功能
-    print("测试币种管理功能...")
+    print("测试币种管理功能 (DB模式)...")
+    
+    # 迁移数据
+    # migrate_from_file()
     
     # 更新币种配置
-    update_coins_config()
+    # update_coins_config()
     
     # 获取活跃币种
     active_coins = get_active_coins()
