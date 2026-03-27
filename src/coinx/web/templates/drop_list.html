@@ -782,7 +782,7 @@
           if (updateResult.status === "success") {
             // 更新成功后获取数据
             console.log("更新成功，开始获取币种数据...");
-            return fetch("/api/coins");
+            return fetch("/api/drop-list");
           } else {
             // 更新失败时也尝试获取现有数据
             console.log("更新失败，但仍尝试获取币种数据...");

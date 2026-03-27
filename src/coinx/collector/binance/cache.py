@@ -103,6 +103,34 @@ def should_update_drop_list_cache():
     cache_key = get_cache_key()
     cache_data = load_drop_list_cache()
     needs_update = str(cache_key) not in cache_data
+    logger.info(f"检查跌幅榜缓存更新: 当前缓存键 {cache_key}, 需要更新={needs_update}")
+    return needs_update
+
+def get_drop_list_cache_update_time():
+    """获取跌幅榜缓存更新时间"""
+    try:
+        logger.info(f"尝试获取跌幅榜缓存更新时间，缓存文件路径: {DROP_LIST_CACHE_FILE}")
+
+        if os.path.exists(DROP_LIST_CACHE_FILE):
+            with open(DROP_LIST_CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+
+            if cache_data:
+                timestamps = sorted(cache_data.keys(), key=int)
+                latest_timestamp = int(timestamps[-1])
+                logger.info(f"找到跌幅榜缓存数据，最新时间戳: {latest_timestamp}")
+                return latest_timestamp * 1000
+            else:
+                logger.info("跌幅榜缓存文件存在但无数据")
+        else:
+            logger.info("跌幅榜缓存文件不存在")
+
+        return None
+    except Exception as e:
+        logger.error(f"获取跌幅榜缓存更新时间失败: {e}")
+        logger.exception(e)
+        return None
+
 def get_cache_update_time():
     """获取缓存更新时间"""
     try:

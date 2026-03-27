@@ -10,6 +10,7 @@ from coinx.collector import (
     get_exchange_distribution_real, get_net_inflow_data as get_net_inflow_data_real,
     get_cache_update_time
 )
+from coinx.collector.binance.cache import get_drop_list_cache_update_time
 
 api_data_bp = Blueprint('api_data', __name__)
 
@@ -196,6 +197,7 @@ def get_drop_list():
         
         # Get data (with cache logic handled inside update_drop_list_data)
         data = update_drop_list_data(force_update=force)
+        cache_update_time = get_drop_list_cache_update_time()
         
         if not data:
              # Try to load from cache even if update failed or returned empty (though update_drop_list_data tries to return cache if not updating)
@@ -204,7 +206,8 @@ def get_drop_list():
         response_data = {
             'status': 'success',
             'message': '获取跌幅榜数据成功',
-            'data': data
+            'data': data,
+            'cache_update_time': cache_update_time
         }
         return jsonify(response_data)
     except Exception as e:
