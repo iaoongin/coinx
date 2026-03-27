@@ -8,7 +8,7 @@ profiles:
 
 app:
   update_interval: 300
-  time_intervals: 
+  time_intervals:
     - 5m
     - 15m
     - 30m
@@ -19,9 +19,9 @@ app:
     - 12h
     - 1d
   binance_series:
-    enabled: false
+    enabled: true
     interval: 300
-    limit: 30
+    limit: 300
     types:
       - top_long_short_position_ratio
       - top_long_short_account_ratio

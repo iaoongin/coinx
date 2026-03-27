@@ -20,6 +20,13 @@ from coinx.collector import (
     collect_series_batch,
 )
 from coinx.collector.binance.cache import get_drop_list_cache_update_time
+from coinx.config import (
+    BINANCE_SERIES_ENABLED,
+    BINANCE_SERIES_INTERVAL,
+    BINANCE_SERIES_LIMIT,
+    BINANCE_SERIES_TYPES,
+    BINANCE_SERIES_PERIODS,
+)
 
 
 api_data_bp = Blueprint('api_data', __name__)
@@ -31,6 +38,24 @@ SUPPORTED_SERIES_TYPES = {
     'klines',
     'global_long_short_account_ratio',
 }
+
+
+@api_data_bp.route('/api/binance-series/config')
+def get_binance_series_config():
+    """获取 Binance 历史序列页面默认配置。"""
+    return jsonify(
+        {
+            'status': 'success',
+            'message': '获取 Binance 历史序列配置成功',
+            'data': {
+                'enabled': BINANCE_SERIES_ENABLED,
+                'interval': BINANCE_SERIES_INTERVAL,
+                'limit': BINANCE_SERIES_LIMIT,
+                'series_types': BINANCE_SERIES_TYPES,
+                'periods': BINANCE_SERIES_PERIODS,
+            },
+        }
+    )
 
 
 @api_data_bp.route('/api/coins')

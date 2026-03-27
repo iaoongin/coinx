@@ -59,6 +59,19 @@ def test_collect_binance_series_api_validates_required_fields():
     assert payload['status'] == 'error'
 
 
+def test_get_binance_series_config_api_returns_defaults():
+    client = create_test_client()
+
+    response = client.get('/api/binance-series/config')
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['status'] == 'success'
+    assert 'series_types' in payload['data']
+    assert 'periods' in payload['data']
+    assert 'limit' in payload['data']
+
+
 def test_collect_binance_series_batch_api_returns_summary(monkeypatch):
     def fake_collect_batch(symbols, periods, series_types=None, limit=30):
         assert symbols == ['BTCUSDT', 'ETHUSDT']

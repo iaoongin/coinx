@@ -14,9 +14,6 @@
         --line: #dbe4f0;
         --primary: #2563eb;
         --primary-hover: #1d4ed8;
-        --success: #16a34a;
-        --warning: #ea580c;
-        --danger: #dc2626;
       }
 
       * {
@@ -71,7 +68,8 @@
       }
 
       .nav-btn,
-      .action-btn {
+      .action-btn,
+      .secondary-btn {
         border: none;
         border-radius: 999px;
         padding: 11px 18px;
@@ -93,13 +91,28 @@
         box-shadow: 0 10px 20px rgba(37, 99, 235, 0.22);
       }
 
+      .secondary-btn {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: #1e3a8a;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 9px 14px;
+      }
+
       .nav-btn:hover,
-      .action-btn:hover {
+      .action-btn:hover,
+      .secondary-btn:hover {
         transform: translateY(-1px);
       }
 
       .action-btn:hover {
         background: linear-gradient(135deg, var(--primary-hover), var(--primary));
+      }
+
+      .secondary-btn:hover {
+        border-color: #93c5fd;
+        background: #eff6ff;
       }
 
       .grid {
@@ -180,6 +193,13 @@
         font-size: 12px;
       }
 
+      .inline-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
       .result-panel {
         margin-top: 24px;
         background: #0f172a;
@@ -205,6 +225,7 @@
         border-radius: 999px;
         font-size: 12px;
         font-weight: 700;
+        background: rgba(255, 255, 255, 0.1);
       }
 
       .badge.success {
@@ -257,10 +278,6 @@
           flex-direction: column;
           align-items: flex-start;
         }
-
-        .topbar-actions {
-          width: 100%;
-        }
       }
     </style>
   </head>
@@ -269,7 +286,7 @@
       <div class="topbar">
         <div class="title-block">
           <h1>Binance 历史序列管理</h1>
-          <p>支持单条采集、批量采集，以及结果摘要查看。</p>
+          <p>交易对默认来自当前跟踪配置，类型、周期和 limit 默认来自后端配置。</p>
         </div>
         <div class="topbar-actions">
           <a class="nav-btn" href="/">返回首页</a>
@@ -287,25 +304,19 @@
             <div class="field-grid">
               <div class="field">
                 <label for="singleSeriesType">序列类型</label>
-                <select id="singleSeriesType" name="series_type">
-                  <option value="klines">klines</option>
-                  <option value="open_interest_hist">open_interest_hist</option>
-                  <option value="top_long_short_position_ratio">top_long_short_position_ratio</option>
-                  <option value="top_long_short_account_ratio">top_long_short_account_ratio</option>
-                  <option value="global_long_short_account_ratio">global_long_short_account_ratio</option>
-                </select>
+                <select id="singleSeriesType" name="series_type"></select>
               </div>
               <div class="field">
                 <label for="singleSymbol">交易对</label>
-                <input id="singleSymbol" name="symbol" value="BTCUSDT" />
+                <input id="singleSymbol" name="symbol" value="" placeholder="将自动填充第一个跟踪币种" />
               </div>
               <div class="field">
                 <label for="singlePeriod">周期</label>
-                <input id="singlePeriod" name="period" value="5m" />
+                <input id="singlePeriod" name="period" value="" />
               </div>
               <div class="field">
                 <label for="singleLimit">抓取条数</label>
-                <input id="singleLimit" name="limit" type="number" min="1" value="20" />
+                <input id="singleLimit" name="limit" type="number" min="1" value="" />
               </div>
             </div>
             <p class="help">适合验证单个接口是否能正常抓取并入库。</p>
@@ -320,22 +331,25 @@
             <div class="field-grid">
               <div class="field full">
                 <label for="batchSymbols">交易对列表</label>
-                <textarea id="batchSymbols">BTCUSDT,ETHUSDT</textarea>
-                <div class="help">使用英文逗号分隔，例如 `BTCUSDT,ETHUSDT`。</div>
+                <textarea id="batchSymbols"></textarea>
+                <div class="help">默认会自动填充当前已跟踪币种，也可以手动编辑，使用英文逗号分隔。</div>
+                <div class="inline-actions">
+                  <button class="secondary-btn" type="button" id="fillTrackedSymbolsBtn">填充跟踪币种</button>
+                </div>
               </div>
               <div class="field full">
                 <label for="batchPeriods">周期列表</label>
-                <textarea id="batchPeriods">5m,15m</textarea>
-                <div class="help">使用英文逗号分隔，例如 `5m,15m,1h`。</div>
+                <textarea id="batchPeriods"></textarea>
+                <div class="help">默认来自后端配置，也可以手动编辑。</div>
               </div>
               <div class="field full">
                 <label for="batchSeriesTypes">序列类型列表</label>
-                <textarea id="batchSeriesTypes">klines,open_interest_hist</textarea>
-                <div class="help">留空时默认抓取全部支持类型。</div>
+                <textarea id="batchSeriesTypes"></textarea>
+                <div class="help">默认来自后端配置，留空时接口层仍会按全部支持类型执行。</div>
               </div>
               <div class="field">
                 <label for="batchLimit">抓取条数</label>
-                <input id="batchLimit" type="number" min="1" value="10" />
+                <input id="batchLimit" type="number" min="1" value="" />
               </div>
             </div>
             <button class="action-btn" type="submit">执行批量采集</button>
@@ -351,6 +365,15 @@
     </div>
 
     <script>
+      let trackedSymbols = [];
+      let pageConfig = {
+        enabled: false,
+        interval: 300,
+        limit: 30,
+        periods: [],
+        series_types: [],
+      };
+
       function parseCsvText(text) {
         return text
           .split(",")
@@ -385,6 +408,72 @@
         resultOutput.textContent = JSON.stringify(data, null, 2);
       }
 
+      function applyTrackedSymbols() {
+        const batchSymbols = document.getElementById("batchSymbols");
+        const singleSymbol = document.getElementById("singleSymbol");
+
+        batchSymbols.value = trackedSymbols.join(",");
+        if (!singleSymbol.value.trim() && trackedSymbols.length > 0) {
+          singleSymbol.value = trackedSymbols[0];
+        }
+      }
+
+      function applyPageConfig() {
+        const singleSeriesType = document.getElementById("singleSeriesType");
+        const singlePeriod = document.getElementById("singlePeriod");
+        const singleLimit = document.getElementById("singleLimit");
+        const batchPeriods = document.getElementById("batchPeriods");
+        const batchSeriesTypes = document.getElementById("batchSeriesTypes");
+        const batchLimit = document.getElementById("batchLimit");
+
+        singleSeriesType.innerHTML = "";
+        pageConfig.series_types.forEach((seriesType) => {
+          const option = document.createElement("option");
+          option.value = seriesType;
+          option.textContent = seriesType;
+          singleSeriesType.appendChild(option);
+        });
+
+        if (pageConfig.periods.length > 0) {
+          singlePeriod.value = pageConfig.periods[0];
+          batchPeriods.value = pageConfig.periods.join(",");
+        }
+
+        batchSeriesTypes.value = pageConfig.series_types.join(",");
+        singleLimit.value = pageConfig.limit;
+        batchLimit.value = pageConfig.limit;
+      }
+
+      async function loadTrackedSymbols() {
+        const response = await fetch("/api/coins-config");
+        const payload = await response.json();
+
+        if (!response.ok || payload.status !== "success") {
+          throw new Error(payload.message || "获取跟踪币种失败");
+        }
+
+        const coinsConfig = payload.data || {};
+        trackedSymbols = Object.entries(coinsConfig)
+          .filter(([, tracked]) => Boolean(tracked))
+          .map(([symbol]) => symbol);
+
+        applyTrackedSymbols();
+        return trackedSymbols;
+      }
+
+      async function loadPageConfig() {
+        const response = await fetch("/api/binance-series/config");
+        const payload = await response.json();
+
+        if (!response.ok || payload.status !== "success") {
+          throw new Error(payload.message || "获取历史序列配置失败");
+        }
+
+        pageConfig = payload.data;
+        applyPageConfig();
+        return pageConfig;
+      }
+
       async function postJson(url, body) {
         const response = await fetch(url, {
           method: "POST",
@@ -400,6 +489,20 @@
         }
         return payload;
       }
+
+      document.getElementById("fillTrackedSymbolsBtn").addEventListener("click", async () => {
+        showStatus("正在加载已跟踪币种...", "success");
+        try {
+          await loadTrackedSymbols();
+          if (trackedSymbols.length === 0) {
+            showStatus("当前没有已跟踪币种，请先到币种配置页启用跟踪。", "error");
+            return;
+          }
+          showStatus(`已填充 ${trackedSymbols.length} 个跟踪币种。`, "success");
+        } catch (error) {
+          showStatus(`加载跟踪币种失败: ${error.message}`, "error");
+        }
+      });
 
       document.getElementById("singleForm").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -428,6 +531,7 @@
           periods: parseCsvText(document.getElementById("batchPeriods").value),
           limit: Number(document.getElementById("batchLimit").value),
         };
+
         if (rawSeriesTypes.length > 0) {
           body.series_types = rawSeriesTypes;
         }
@@ -439,6 +543,23 @@
           renderResult(payload.data, true);
         } catch (error) {
           showStatus(`批量采集失败: ${error.message}`, "error");
+        }
+      });
+
+      window.addEventListener("DOMContentLoaded", async () => {
+        try {
+          await Promise.all([loadPageConfig(), loadTrackedSymbols()]);
+
+          if (trackedSymbols.length > 0) {
+            showStatus(
+              `已加载配置：types=${pageConfig.series_types.length}，periods=${pageConfig.periods.length}，tracked=${trackedSymbols.length}。`,
+              "success"
+            );
+          } else {
+            showStatus("已加载配置，但当前没有已跟踪币种，请先到币种配置页启用跟踪。", "error");
+          }
+        } catch (error) {
+          showStatus(`初始化页面失败: ${error.message}`, "error");
         }
       });
     </script>
