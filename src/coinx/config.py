@@ -129,6 +129,28 @@ UPDATE_INTERVAL = get_conf('UPDATE_INTERVAL', 'app.update_interval', 300, int)
 # 支持的时间间隔
 _DEFAULT_INTERVALS = ['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']
 TIME_INTERVALS = get_conf('TIME_INTERVALS', 'app.time_intervals', _DEFAULT_INTERVALS, list)
+_DEFAULT_BINANCE_SERIES_TYPES = [
+    'top_long_short_position_ratio',
+    'top_long_short_account_ratio',
+    'open_interest_hist',
+    'klines',
+    'global_long_short_account_ratio',
+]
+BINANCE_SERIES_ENABLED = get_conf('BINANCE_SERIES_ENABLED', 'app.binance_series.enabled', False, bool)
+BINANCE_SERIES_INTERVAL = get_conf('BINANCE_SERIES_INTERVAL', 'app.binance_series.interval', UPDATE_INTERVAL, int)
+BINANCE_SERIES_LIMIT = get_conf('BINANCE_SERIES_LIMIT', 'app.binance_series.limit', 30, int)
+BINANCE_SERIES_TYPES = get_conf(
+    'BINANCE_SERIES_TYPES',
+    'app.binance_series.types',
+    _DEFAULT_BINANCE_SERIES_TYPES,
+    list,
+)
+BINANCE_SERIES_PERIODS = get_conf(
+    'BINANCE_SERIES_PERIODS',
+    'app.binance_series.periods',
+    TIME_INTERVALS,
+    list,
+)
 
 # 代理配置
 PROXY_HOST = get_conf('PROXY_HOST', 'proxy.host', '127.0.0.1')

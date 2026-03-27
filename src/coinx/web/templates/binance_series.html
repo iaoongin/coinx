@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Binance 历史序列管理</title>
+    <style>
+      :root {
+        --bg-a: #4f46e5;
+        --bg-b: #0f766e;
+        --panel: rgba(255, 255, 255, 0.94);
+        --text: #1f2937;
+        --muted: #6b7280;
+        --line: #dbe4f0;
+        --primary: #2563eb;
+        --primary-hover: #1d4ed8;
+        --success: #16a34a;
+        --warning: #ea580c;
+        --danger: #dc2626;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.18), transparent 28%),
+          linear-gradient(140deg, var(--bg-a), var(--bg-b));
+        padding: 24px;
+      }
+
+      .shell {
+        max-width: 1240px;
+        margin: 0 auto;
+        background: var(--panel);
+        backdrop-filter: blur(8px);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .title-block h1 {
+        margin: 0 0 8px;
+        font-size: 30px;
+        color: #0f172a;
+      }
+
+      .title-block p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .topbar-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .nav-btn,
+      .action-btn {
+        border: none;
+        border-radius: 999px;
+        padding: 11px 18px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      }
+
+      .nav-btn {
+        background: linear-gradient(135deg, #64748b, #475569);
+        color: #fff;
+      }
+
+      .action-btn {
+        background: linear-gradient(135deg, var(--primary), #3b82f6);
+        color: #fff;
+        box-shadow: 0 10px 20px rgba(37, 99, 235, 0.22);
+      }
+
+      .nav-btn:hover,
+      .action-btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .action-btn:hover {
+        background: linear-gradient(135deg, var(--primary-hover), var(--primary));
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      .card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(219, 228, 240, 0.9);
+        border-radius: 20px;
+        padding: 22px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+      }
+
+      .card h2 {
+        margin: 0 0 10px;
+        font-size: 20px;
+      }
+
+      .card p {
+        margin: 0 0 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .field.full {
+        grid-column: 1 / -1;
+      }
+
+      label {
+        font-size: 13px;
+        font-weight: 700;
+        color: #334155;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 11px 12px;
+        font-size: 14px;
+        color: var(--text);
+        background: #fff;
+      }
+
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #60a5fa;
+        box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.18);
+      }
+
+      .help {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .result-panel {
+        margin-top: 24px;
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 20px;
+        padding: 20px;
+      }
+
+      .result-panel h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      .result-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .badge {
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .badge.success {
+        background: rgba(22, 163, 74, 0.18);
+        color: #86efac;
+      }
+
+      .badge.warning {
+        background: rgba(234, 88, 12, 0.18);
+        color: #fdba74;
+      }
+
+      .status-box {
+        margin-bottom: 18px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        font-size: 14px;
+      }
+
+      .status-box.success {
+        background: rgba(22, 163, 74, 0.12);
+        color: #166534;
+        border: 1px solid rgba(22, 163, 74, 0.24);
+      }
+
+      .status-box.error {
+        background: rgba(220, 38, 38, 0.12);
+        color: #991b1b;
+        border: 1px solid rgba(220, 38, 38, 0.24);
+      }
+
+      pre {
+        margin: 0;
+        max-height: 360px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 960px) {
+        .grid,
+        .field-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .topbar-actions {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="title-block">
+          <h1>Binance 历史序列管理</h1>
+          <p>支持单条采集、批量采集，以及结果摘要查看。</p>
+        </div>
+        <div class="topbar-actions">
+          <a class="nav-btn" href="/">返回首页</a>
+          <a class="nav-btn" href="/coins-config">币种配置</a>
+        </div>
+      </div>
+
+      <div id="statusBox"></div>
+
+      <div class="grid">
+        <section class="card">
+          <h2>单条采集</h2>
+          <p>按单个接口类型、交易对和周期触发一次采集。</p>
+          <form id="singleForm">
+            <div class="field-grid">
+              <div class="field">
+                <label for="singleSeriesType">序列类型</label>
+                <select id="singleSeriesType" name="series_type">
+                  <option value="klines">klines</option>
+                  <option value="open_interest_hist">open_interest_hist</option>
+                  <option value="top_long_short_position_ratio">top_long_short_position_ratio</option>
+                  <option value="top_long_short_account_ratio">top_long_short_account_ratio</option>
+                  <option value="global_long_short_account_ratio">global_long_short_account_ratio</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="singleSymbol">交易对</label>
+                <input id="singleSymbol" name="symbol" value="BTCUSDT" />
+              </div>
+              <div class="field">
+                <label for="singlePeriod">周期</label>
+                <input id="singlePeriod" name="period" value="5m" />
+              </div>
+              <div class="field">
+                <label for="singleLimit">抓取条数</label>
+                <input id="singleLimit" name="limit" type="number" min="1" value="20" />
+              </div>
+            </div>
+            <p class="help">适合验证单个接口是否能正常抓取并入库。</p>
+            <button class="action-btn" type="submit">执行单条采集</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>批量采集</h2>
+          <p>一次触发多个交易对、多个周期、多个序列类型的组合采集。</p>
+          <form id="batchForm">
+            <div class="field-grid">
+              <div class="field full">
+                <label for="batchSymbols">交易对列表</label>
+                <textarea id="batchSymbols">BTCUSDT,ETHUSDT</textarea>
+                <div class="help">使用英文逗号分隔，例如 `BTCUSDT,ETHUSDT`。</div>
+              </div>
+              <div class="field full">
+                <label for="batchPeriods">周期列表</label>
+                <textarea id="batchPeriods">5m,15m</textarea>
+                <div class="help">使用英文逗号分隔，例如 `5m,15m,1h`。</div>
+              </div>
+              <div class="field full">
+                <label for="batchSeriesTypes">序列类型列表</label>
+                <textarea id="batchSeriesTypes">klines,open_interest_hist</textarea>
+                <div class="help">留空时默认抓取全部支持类型。</div>
+              </div>
+              <div class="field">
+                <label for="batchLimit">抓取条数</label>
+                <input id="batchLimit" type="number" min="1" value="10" />
+              </div>
+            </div>
+            <button class="action-btn" type="submit">执行批量采集</button>
+          </form>
+        </section>
+      </div>
+
+      <section class="result-panel">
+        <h3>执行结果</h3>
+        <div id="resultMeta" class="result-meta"></div>
+        <pre id="resultOutput">尚未执行采集。</pre>
+      </section>
+    </div>
+
+    <script>
+      function parseCsvText(text) {
+        return text
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      function showStatus(message, type) {
+        const statusBox = document.getElementById("statusBox");
+        statusBox.innerHTML = `<div class="status-box ${type}">${message}</div>`;
+      }
+
+      function renderResult(data, isBatch) {
+        const resultMeta = document.getElementById("resultMeta");
+        const resultOutput = document.getElementById("resultOutput");
+
+        if (isBatch) {
+          resultMeta.innerHTML = `
+            <span class="badge success">成功 ${data.success_count}</span>
+            <span class="badge warning">失败 ${data.failure_count}</span>
+            <span class="badge">limit ${data.limit}</span>
+          `;
+        } else {
+          resultMeta.innerHTML = `
+            <span class="badge success">影响 ${data.affected}</span>
+            <span class="badge">${data.series_type}</span>
+            <span class="badge">${data.symbol}</span>
+            <span class="badge">${data.period}</span>
+          `;
+        }
+
+        resultOutput.textContent = JSON.stringify(data, null, 2);
+      }
+
+      async function postJson(url, body) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || payload.status !== "success") {
+          throw new Error(payload.message || "请求失败");
+        }
+        return payload;
+      }
+
+      document.getElementById("singleForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const body = {
+          series_type: document.getElementById("singleSeriesType").value,
+          symbol: document.getElementById("singleSymbol").value.trim(),
+          period: document.getElementById("singlePeriod").value.trim(),
+          limit: Number(document.getElementById("singleLimit").value),
+        };
+
+        showStatus("正在执行单条采集，请稍候...", "success");
+        try {
+          const payload = await postJson("/api/binance-series/collect", body);
+          showStatus("单条采集成功。", "success");
+          renderResult(payload.data, false);
+        } catch (error) {
+          showStatus(`单条采集失败: ${error.message}`, "error");
+        }
+      });
+
+      document.getElementById("batchForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const rawSeriesTypes = parseCsvText(document.getElementById("batchSeriesTypes").value.trim());
+        const body = {
+          symbols: parseCsvText(document.getElementById("batchSymbols").value),
+          periods: parseCsvText(document.getElementById("batchPeriods").value),
+          limit: Number(document.getElementById("batchLimit").value),
+        };
+        if (rawSeriesTypes.length > 0) {
+          body.series_types = rawSeriesTypes;
+        }
+
+        showStatus("正在执行批量采集，请稍候...", "success");
+        try {
+          const payload = await postJson("/api/binance-series/batch-collect", body);
+          showStatus("批量采集成功。", "success");
+          renderResult(payload.data, true);
+        } catch (error) {
+          showStatus(`批量采集失败: ${error.message}`, "error");
+        }
+      });
+    </script>
+  </body>
+</html>

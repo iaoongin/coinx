@@ -18,6 +18,19 @@ app:
     - 6h
     - 12h
     - 1d
+  binance_series:
+    enabled: false
+    interval: 300
+    limit: 30
+    types:
+      - top_long_short_position_ratio
+      - top_long_short_account_ratio
+      - open_interest_hist
+      - klines
+      - global_long_short_account_ratio
+    periods:
+      - 5m
+      - 15m
 
 database:
   host: localhost

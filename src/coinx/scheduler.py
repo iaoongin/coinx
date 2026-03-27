@@ -1,51 +1,87 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from .collector import update_all_data, should_update_cache, update_drop_list_data
-from .coin_manager import update_coins_config
-from .utils import logger
-from .config import UPDATE_INTERVAL
 
-# 创建调度器
+from .collector import (
+    update_all_data,
+    should_update_cache,
+    update_drop_list_data,
+    collect_series_batch,
+)
+from .coin_manager import update_coins_config, get_active_coins
+from .utils import logger
+from .config import (
+    UPDATE_INTERVAL,
+    BINANCE_SERIES_ENABLED,
+    BINANCE_SERIES_INTERVAL,
+    BINANCE_SERIES_LIMIT,
+    BINANCE_SERIES_TYPES,
+    BINANCE_SERIES_PERIODS,
+)
+
+
 scheduler = BackgroundScheduler()
+
 
 @scheduler.scheduled_job('interval', seconds=UPDATE_INTERVAL, id='update_data_job')
 def scheduled_update():
-    """定时更新数据的任务"""
+    """定时更新展示数据。"""
     try:
-        logger.info("开始执行定时数据更新任务...")
-        # 获取活跃币种列表（用于Web展示）
-        from .coin_manager import get_active_coins
+        logger.info("开始执行定时数据更新任务")
         symbols = get_active_coins()
-        
-        # 检查是否需要更新缓存（基于自然5分钟间隔）
+
         if not should_update_cache():
-            logger.info("当前5分钟周期内已有缓存数据，跳过定时更新")
+            logger.info("当前周期内已有缓存数据，跳过展示数据更新")
             return
-        
-        # 更新已启用跟踪的币种数据（仅限活跃币种）
+
         update_all_data(symbols=symbols)
-        
-        # 更新跌幅榜数据
         update_drop_list_data()
-        
         logger.info("定时数据更新任务执行完成")
     except Exception as e:
         logger.error(f"定时任务执行失败: {e}")
-        logger.exception(e)  # 记录详细的异常信息
+        logger.exception(e)
+
+
+@scheduler.scheduled_job('interval', seconds=BINANCE_SERIES_INTERVAL, id='binance_series_job')
+def scheduled_binance_series_update():
+    """定时采集 Binance 历史序列数据。"""
+    if not BINANCE_SERIES_ENABLED:
+        return
+
+    try:
+        symbols = get_active_coins()
+        logger.info(
+            f"开始执行 Binance 历史序列采集任务: symbols={len(symbols)}, "
+            f"periods={BINANCE_SERIES_PERIODS}, series_types={BINANCE_SERIES_TYPES}, limit={BINANCE_SERIES_LIMIT}"
+        )
+        summary = collect_series_batch(
+            symbols=symbols,
+            periods=BINANCE_SERIES_PERIODS,
+            series_types=BINANCE_SERIES_TYPES,
+            limit=BINANCE_SERIES_LIMIT,
+        )
+        logger.info(
+            f"Binance 历史序列采集完成: success={summary['success_count']}, "
+            f"failure={summary['failure_count']}"
+        )
+    except Exception as e:
+        logger.error(f"Binance 历史序列采集任务失败: {e}")
+        logger.exception(e)
+
 
 @scheduler.scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')
 def scheduled_coins_config_update():
-    """定时更新币种配置的任务（每天凌晨执行）"""
+    """定时更新币种配置，每天凌晨执行。"""
     try:
-        logger.info("开始执行币种配置更新任务...")
+        logger.info("开始执行币种配置更新任务")
         update_coins_config()
         logger.info("币种配置更新任务执行完成")
     except Exception as e:
         logger.error(f"币种配置更新任务执行失败: {e}")
-        logger.exception(e)  # 记录详细的异常信息
+        logger.exception(e)
+
 
 def start_scheduler():
-    """启动调度器"""
-    logger.info("启动数据更新调度器...")
+    """启动调度器。"""
+    logger.info("启动数据更新调度器")
     try:
         scheduler.start()
         logger.info("调度器启动成功")
