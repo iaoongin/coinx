@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlalchemy import and_, func, or_
 
@@ -47,6 +48,36 @@ def format_number(num):
     return f"{value:.5e}"
 
 
+def format_price(num):
+    if num is None:
+        return "N/A"
+
+    value = Decimal(str(float(num)))
+    if value == 0:
+        return "0"
+
+    plain = format(value, 'f').rstrip('0').rstrip('.')
+    unsigned_plain = plain.lstrip('-')
+
+    if '.' in unsigned_plain:
+        integer_part, fractional_part = unsigned_plain.split('.')
+        integer_digits = len(integer_part.lstrip('0'))
+        total_digits = integer_digits + len(fractional_part)
+    else:
+        total_digits = len(unsigned_plain.lstrip('0'))
+
+    if total_digits <= 7:
+        return plain
+
+    if abs(value) >= 1:
+        return f"{float(value):.2f}"
+
+    fixed = f"{float(value):.7f}".rstrip('0').rstrip('.')
+    if fixed not in ('', '-0', '0'):
+        return fixed
+    return f"{float(value):.5e}"
+
+
 def _interval_to_ms(interval):
     if interval.endswith('m'):
         return int(interval[:-1]) * 60 * 1000
@@ -93,6 +124,12 @@ def _get_exact_window(records_by_time, current_time, points):
     return window
 
 
+def _calc_net_inflow_value(window):
+    taker_buy_quote = sum(float(item.taker_buy_quote_volume or 0) for item in window)
+    quote_volume = sum(float(item.quote_volume or 0) for item in window)
+    return (2 * taker_buy_quote) - quote_volume
+
+
 def _build_net_inflow(kline_by_time, current_time):
     inflow = {}
     for interval in TIME_INTERVALS:
@@ -102,9 +139,7 @@ def _build_net_inflow(kline_by_time, current_time):
             inflow[interval] = None
             continue
 
-        taker_buy_quote = sum(float(item.taker_buy_quote_volume or 0) for item in window)
-        quote_volume = sum(float(item.quote_volume or 0) for item in window)
-        inflow[interval] = (2 * taker_buy_quote) - quote_volume
+        inflow[interval] = _calc_net_inflow_value(window)
     return inflow
 
 
@@ -356,9 +391,9 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time):
             'open_interest_value_formatted': format_number(past_open_interest_value),
             'price_change': price_change,
             'price_change_percent': _calc_percent_change(current_price, past_price),
-            'price_change_formatted': format_number(price_change),
+            'price_change_formatted': format_price(price_change),
             'current_price': past_price,
-            'current_price_formatted': format_number(past_price),
+            'current_price_formatted': format_price(past_price),
         }
 
     day_change = changes.get('24h', _empty_change())
@@ -369,7 +404,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time):
         'current_open_interest_value': current_open_interest_value,
         'current_open_interest_value_formatted': format_number(current_open_interest_value),
         'current_price': current_price,
-        'current_price_formatted': format_number(current_price),
+        'current_price_formatted': format_price(current_price),
         'price_change': day_change['price_change'],
         'price_change_percent': day_change['price_change_percent'],
         'price_change_formatted': day_change['price_change_formatted'],

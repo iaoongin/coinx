@@ -106,6 +106,70 @@ def test_get_homepage_series_data_returns_none_for_missing_interval_points(db_se
     assert coin['net_inflow']['15m'] is None
 
 
+def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        289,
+        price_base=0.0000001,
+        price_step=0.0,
+    )
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert coins[0]['current_price_formatted'] == '0.0000001'
+
+
+def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_digits_within_seven(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        289,
+        price_base=1234.567,
+        price_step=0.0,
+    )
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert coins[0]['current_price_formatted'] == '1234.567'
+
+
+def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        289,
+        price_base=1234.5678,
+        price_step=0.0,
+    )
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert coins[0]['current_price_formatted'] == '1234.57'
+
+
+def test_get_homepage_series_data_formats_tiny_prices_with_scientific_notation_after_seven_decimal_places(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        289,
+        price_base=0.00000001,
+        price_step=0.0,
+    )
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert coins[0]['current_price_formatted'] == '1.00000e-08'
+
+
 def test_get_homepage_series_update_time_uses_min_common_time_across_symbols(db_session):
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 20)
