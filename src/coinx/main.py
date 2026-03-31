@@ -6,6 +6,7 @@ import sys
 import time
 import signal
 import threading
+from coinx.config import WEB_DEBUG, WEB_HOST, WEB_PORT
 from coinx.scheduler import start_scheduler, scheduler
 from coinx.web.app import app
 from coinx.utils import logger
@@ -43,8 +44,8 @@ def main():
         time.sleep(1)
         
         # 在主线程中启动Web服务
-        logger.info("启动Web服务...")
-        app.run(debug=False, host='0.0.0.0', port=5000, use_reloader=False)
+        logger.info(f"启动Web服务: http://{WEB_HOST}:{WEB_PORT}")
+        app.run(debug=WEB_DEBUG, host=WEB_HOST, port=WEB_PORT, use_reloader=False)
     except KeyboardInterrupt:
         logger.info("接收到键盘中断信号")
     except Exception as e:

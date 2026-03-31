@@ -15,6 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
+from coinx.config import WEB_HOST, WEB_PORT
 from coinx.utils import logger
 
 
@@ -144,7 +145,7 @@ class FlaskAppManager:
                     f.write(str(process.pid))
 
                 logger.info(f"应用已后台启动，PID: {process.pid}")
-                logger.info("访问地址: http://127.0.0.1:5000")
+                logger.info(f"访问地址: http://{WEB_HOST}:{WEB_PORT}")
                 return True
             else:
                 # 前台模式：直接显示输出，阻塞直到退出
@@ -162,7 +163,7 @@ class FlaskAppManager:
                     f.write(str(process.pid))
                 
                 logger.info(f"应用已前台启动，按 Ctrl+C 停止")
-                logger.info("访问地址: http://127.0.0.1:5000")
+                logger.info(f"访问地址: http://{WEB_HOST}:{WEB_PORT}")
                 
                 try:
                     process.wait()

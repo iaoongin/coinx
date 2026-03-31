@@ -9,6 +9,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from coinx.utils import logger
+from coinx.config import WEB_DEBUG, WEB_HOST, WEB_PORT
 
 # Import blueprints
 # 注意：必须在添加项目根目录到sys.path之后导入
@@ -58,4 +59,4 @@ def log_response_info(response):
     return response
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host=WEB_HOST, port=WEB_PORT, debug=WEB_DEBUG)
