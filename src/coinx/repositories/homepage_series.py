@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import and_, func, or_
 
@@ -18,17 +19,17 @@ HOMEPAGE_BULK_QUERY_THRESHOLD = 8
 class HomepageOpenInterestPoint:
     symbol: str
     event_time: int
-    sum_open_interest: float | None
-    sum_open_interest_value: float | None
+    sum_open_interest: Optional[float]
+    sum_open_interest_value: Optional[float]
 
 
 @dataclass(frozen=True)
 class HomepageKlinePoint:
     symbol: str
     open_time: int
-    close_price: float | None
-    quote_volume: float | None
-    taker_buy_quote_volume: float | None
+    close_price: Optional[float]
+    quote_volume: Optional[float]
+    taker_buy_quote_volume: Optional[float]
 
 
 def format_number(num):
