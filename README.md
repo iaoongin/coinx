@@ -217,9 +217,9 @@ coinx/
 - 统一缓存策略
 - 校准 `compose.yml` 与当前真实入口
 
-## Binance History Series
+## Binance 历史序列
 
-The project now supports structured collection, storage, API triggering, and page-based management for these Binance history series:
+当前项目已经支持以下 Binance 历史序列的结构化采集、落库、接口触发与页面管理：
 
 - `top_long_short_position_ratio`
 - `top_long_short_account_ratio`
@@ -227,7 +227,7 @@ The project now supports structured collection, storage, API triggering, and pag
 - `klines`
 - `global_long_short_account_ratio`
 
-Related tables:
+对应数据表：
 
 - `binance_top_long_short_position_ratio`
 - `binance_top_long_short_account_ratio`
@@ -235,21 +235,29 @@ Related tables:
 - `binance_klines`
 - `binance_global_long_short_account_ratio`
 
-### Page
+### 近期变更
+
+- `feat(binance): 新增历史序列采集与管理页`
+- `feat(binance): 新增历史序列修补与双模式入口`
+- `feat(binance): 支持历史序列覆盖回补`
+- `feat(binance): 首页切换到历史序列快照链路`
+- `docs(binance): 补充历史序列使用说明`
+
+### 页面
 
 - `/binance-series`
-  - Binance history series management page
+  - Binance 历史序列管理页
 
-### APIs
+### 接口
 
 - `POST /api/binance-series/collect`
-  - collect one history series and store it into MySQL
+  - 采集单个历史序列并写入 MySQL
 - `POST /api/binance-series/batch-collect`
-  - collect multiple symbols / periods / series types in batch
+  - 按币种、周期、序列类型批量采集历史序列
 - `POST /api/binance-series/repair-tracked`
-  - repair tracked 5m history series with coverage-aware backfill and tail repair
+  - 对 tracked 币种执行 `5m` 历史序列覆盖回补与尾部追平
 
-## Homepage Data Notes
+## 首页历史序列说明
 
 - 首页数据现在直接来自 `binance_open_interest_hist` 与 `binance_klines`
 - `GET /api/coins` 会一次性构建首页快照，并同时返回：
@@ -268,7 +276,7 @@ Related tables:
   - `72h`
   - `168h`
 
-### Homepage Query Optimization
+### 首页查询优化
 
 为降低首页加载延迟，首页查询做了以下约束：
 
@@ -279,7 +287,7 @@ Related tables:
 
 这意味着首页性能瓶颈主要在数据库查询，而不是前端渲染或 Python 计算。
 
-### Script
+### 脚本示例
 
 ```bash
 python scripts/fetch_binance_series.py klines --symbol BTCUSDT --period 5m --limit 20
@@ -287,9 +295,9 @@ python scripts/fetch_binance_series.py open_interest_hist --symbol BTCUSDT --per
 python scripts/fetch_binance_series.py top_long_short_position_ratio --symbol BTCUSDT --period 5m --limit 20
 ```
 
-### Scheduler Config
+### 调度配置
 
-Configured in `application.yml`:
+`application.yml` 中的相关配置如下：
 
 ```yaml
 app:
@@ -314,11 +322,11 @@ app:
       sleep_ms: 500
 ```
 
-Manual collection stays on-demand via page/API, while scheduled execution is reserved for `repair`.
+手动采集继续按页面或 API 按需触发，调度器定时执行的是 `repair` 链路。
 
-### Tests
+### 相关测试
 
-Related tests include:
+相关测试包括：
 
 - `tests/test_binance_market_parsers.py`
 - `tests/test_binance_series_repository.py`
