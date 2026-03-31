@@ -298,7 +298,47 @@
 
       <div class="grid">
         <section class="card">
-          <h2>单条采集</h2>
+          <h2>缺口修补</h2>
+          <p>按系统规则修补当前 tracked coins 的尾部缺口，只处理 5m 周期。</p>
+          <form id="repairForm">
+            <div class="field-grid">
+              <div class="field full">
+                <label for="repairTrackedSymbols">跟踪币种</label>
+                <textarea id="repairTrackedSymbols" readonly></textarea>
+                <div class="help">修补对象固定来自当前已跟踪币种，页面会自动加载并展示。</div>
+              </div>
+              <div class="field">
+                <label for="repairPeriod">修补周期</label>
+                <input id="repairPeriod" value="" readonly />
+              </div>
+              <div class="field">
+                <label for="repairBootstrapDays">回补天数</label>
+                <input id="repairBootstrapDays" value="" readonly />
+              </div>
+              <div class="field">
+                <label for="repairKlinesPageLimit">K 线分页</label>
+                <input id="repairKlinesPageLimit" value="" readonly />
+              </div>
+              <div class="field">
+                <label for="repairFuturesPageLimit">指标分页</label>
+                <input id="repairFuturesPageLimit" value="" readonly />
+              </div>
+              <div class="field full">
+                <label for="repairSeriesTypes">修补序列类型</label>
+                <textarea id="repairSeriesTypes"></textarea>
+                <div class="help">默认会填充全部支持的 5 个序列，也可以手动删减后再执行。</div>
+              </div>
+            </div>
+            <p class="help">修补按尾部缺口分页推进，适合补停机期间缺失的数据；不适合替代临时采集。</p>
+            <div class="inline-actions">
+              <button class="secondary-btn" type="button" id="reloadRepairTrackedBtn">刷新跟踪币种</button>
+              <button class="action-btn" type="submit">执行缺口修补</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>手动采集</h2>
           <p>按单个接口类型、交易对和周期触发一次采集。</p>
           <form id="singleForm">
             <div class="field-grid">
@@ -360,18 +400,27 @@
       <section class="result-panel">
         <h3>执行结果</h3>
         <div id="resultMeta" class="result-meta"></div>
-        <pre id="resultOutput">尚未执行采集。</pre>
+        <pre id="resultOutput">尚未执行任务。</pre>
       </section>
     </div>
 
     <script>
       let trackedSymbols = [];
       let pageConfig = {
-        enabled: false,
-        interval: 300,
-        limit: 30,
-        periods: [],
-        series_types: [],
+        collect: {
+          limit: 30,
+          periods: [],
+          series_types: [],
+        },
+        repair: {
+          enabled: false,
+          interval: 900,
+          period: "5m",
+          bootstrap_days: 7,
+          klines_page_limit: 1000,
+          futures_page_limit: 500,
+          sleep_ms: 500,
+        },
       };
 
       function parseCsvText(text) {
@@ -386,15 +435,23 @@
         statusBox.innerHTML = `<div class="status-box ${type}">${message}</div>`;
       }
 
-      function renderResult(data, isBatch) {
+      function renderResult(data, mode) {
         const resultMeta = document.getElementById("resultMeta");
         const resultOutput = document.getElementById("resultOutput");
 
-        if (isBatch) {
+        if (mode === "batch") {
           resultMeta.innerHTML = `
             <span class="badge success">成功 ${data.success_count}</span>
             <span class="badge warning">失败 ${data.failure_count}</span>
             <span class="badge">limit ${data.limit}</span>
+          `;
+        } else if (mode === "repair") {
+          resultMeta.innerHTML = `
+            <span class="badge success">成功 ${data.success_count}</span>
+            <span class="badge warning">失败 ${data.failure_count}</span>
+            <span class="badge">跳过 ${data.skipped_count || 0}</span>
+            <span class="badge">${data.period}</span>
+            <span class="badge">symbols ${(data.symbols || []).length}</span>
           `;
         } else {
           resultMeta.innerHTML = `
@@ -411,8 +468,10 @@
       function applyTrackedSymbols() {
         const batchSymbols = document.getElementById("batchSymbols");
         const singleSymbol = document.getElementById("singleSymbol");
+        const repairTrackedSymbols = document.getElementById("repairTrackedSymbols");
 
         batchSymbols.value = trackedSymbols.join(",");
+        repairTrackedSymbols.value = trackedSymbols.join(",");
         if (!singleSymbol.value.trim() && trackedSymbols.length > 0) {
           singleSymbol.value = trackedSymbols[0];
         }
@@ -425,23 +484,35 @@
         const batchPeriods = document.getElementById("batchPeriods");
         const batchSeriesTypes = document.getElementById("batchSeriesTypes");
         const batchLimit = document.getElementById("batchLimit");
+        const repairSeriesTypes = document.getElementById("repairSeriesTypes");
+        const repairPeriod = document.getElementById("repairPeriod");
+        const repairBootstrapDays = document.getElementById("repairBootstrapDays");
+        const repairKlinesPageLimit = document.getElementById("repairKlinesPageLimit");
+        const repairFuturesPageLimit = document.getElementById("repairFuturesPageLimit");
+        const collectConfig = pageConfig.collect || { series_types: [], periods: [], limit: 30 };
+        const repairConfig = pageConfig.repair || {};
 
         singleSeriesType.innerHTML = "";
-        pageConfig.series_types.forEach((seriesType) => {
+        collectConfig.series_types.forEach((seriesType) => {
           const option = document.createElement("option");
           option.value = seriesType;
           option.textContent = seriesType;
           singleSeriesType.appendChild(option);
         });
 
-        if (pageConfig.periods.length > 0) {
-          singlePeriod.value = pageConfig.periods[0];
-          batchPeriods.value = pageConfig.periods.join(",");
+        if (collectConfig.periods.length > 0) {
+          singlePeriod.value = collectConfig.periods[0];
+          batchPeriods.value = collectConfig.periods.join(",");
         }
 
-        batchSeriesTypes.value = pageConfig.series_types.join(",");
-        singleLimit.value = pageConfig.limit;
-        batchLimit.value = pageConfig.limit;
+        batchSeriesTypes.value = collectConfig.series_types.join(",");
+        singleLimit.value = collectConfig.limit;
+        batchLimit.value = collectConfig.limit;
+        repairSeriesTypes.value = collectConfig.series_types.join(",");
+        repairPeriod.value = repairConfig.period || "";
+        repairBootstrapDays.value = repairConfig.bootstrap_days || "";
+        repairKlinesPageLimit.value = repairConfig.klines_page_limit || "";
+        repairFuturesPageLimit.value = repairConfig.futures_page_limit || "";
       }
 
       async function loadTrackedSymbols() {
@@ -504,6 +575,39 @@
         }
       });
 
+      document.getElementById("reloadRepairTrackedBtn").addEventListener("click", async () => {
+        showStatus("正在刷新修补币种范围...", "success");
+        try {
+          await loadTrackedSymbols();
+          if (trackedSymbols.length === 0) {
+            showStatus("当前没有已跟踪币种，修补范围为空。", "error");
+            return;
+          }
+          showStatus(`修补范围已刷新，当前共 ${trackedSymbols.length} 个跟踪币种。`, "success");
+        } catch (error) {
+          showStatus(`刷新修补币种失败: ${error.message}`, "error");
+        }
+      });
+
+      document.getElementById("repairForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const rawSeriesTypes = parseCsvText(document.getElementById("repairSeriesTypes").value.trim());
+        const body = {};
+
+        if (rawSeriesTypes.length > 0) {
+          body.series_types = rawSeriesTypes;
+        }
+
+        showStatus("正在执行缺口修补，请稍候...", "success");
+        try {
+          const payload = await postJson("/api/binance-series/repair-tracked", body);
+          showStatus("缺口修补执行完成。", "success");
+          renderResult(payload.data, "repair");
+        } catch (error) {
+          showStatus(`缺口修补失败: ${error.message}`, "error");
+        }
+      });
+
       document.getElementById("singleForm").addEventListener("submit", async (event) => {
         event.preventDefault();
         const body = {
@@ -517,7 +621,7 @@
         try {
           const payload = await postJson("/api/binance-series/collect", body);
           showStatus("单条采集成功。", "success");
-          renderResult(payload.data, false);
+          renderResult(payload.data, "single");
         } catch (error) {
           showStatus(`单条采集失败: ${error.message}`, "error");
         }
@@ -540,7 +644,7 @@
         try {
           const payload = await postJson("/api/binance-series/batch-collect", body);
           showStatus("批量采集成功。", "success");
-          renderResult(payload.data, true);
+          renderResult(payload.data, "batch");
         } catch (error) {
           showStatus(`批量采集失败: ${error.message}`, "error");
         }
@@ -552,7 +656,7 @@
 
           if (trackedSymbols.length > 0) {
             showStatus(
-              `已加载配置：types=${pageConfig.series_types.length}，periods=${pageConfig.periods.length}，tracked=${trackedSymbols.length}。`,
+              `已加载配置：collectTypes=${pageConfig.collect.series_types.length}，collectPeriods=${pageConfig.collect.periods.length}，tracked=${trackedSymbols.length}。`,
               "success"
             );
           } else {

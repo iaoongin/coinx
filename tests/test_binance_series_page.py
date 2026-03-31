@@ -18,3 +18,5 @@ def test_binance_series_page_renders():
 
     assert response.status_code == 200
     assert 'Binance 历史序列管理'.encode('utf-8') in response.data
+    assert '手动采集'.encode('utf-8') in response.data
+    assert '缺口修补'.encode('utf-8') in response.data

@@ -94,15 +94,43 @@ curl -X POST http://127.0.0.1:5000/api/binance-series/batch-collect \
 - `series_types`：要采集的序列类型列表，不传时默认采集全部支持类型
 - `limit`：每个接口单次抓取条数
 
-## 4. 定时采集配置
+### 3.3 tracked coins 修补
+
+接口：
+
+- `POST /api/binance-series/repair-tracked`
+
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/binance-series/repair-tracked \
+  -H "Content-Type: application/json" \
+  -d "{\"series_types\":[\"klines\",\"open_interest_hist\"]}"
+```
+
+请求体：
+
+```json
+{
+  "series_types": ["klines", "open_interest_hist"]
+}
+```
+
+说明：
+
+- 不传 `series_types` 时，会按修补任务默认顺序执行 5 个序列
+- 修补范围只针对当前 tracked coins
+- 第一阶段固定修补 `5m`
+- 本地没有数据时默认回补最近 `7` 天
+- 本地已有数据时只补最后一条之后的尾部缺口
+
+## 4. 配置说明
 
 在 `application.yml` 中新增了 `app.binance_series` 配置：
 
 ```yaml
 app:
   binance_series:
-    enabled: false
-    interval: 300
     limit: 30
     types:
       - top_long_short_position_ratio
@@ -112,16 +140,33 @@ app:
       - global_long_short_account_ratio
     periods:
       - 5m
-      - 15m
+    repair:
+      enabled: false
+      interval: 900
+      period: 5m
+      bootstrap_days: 7
+      klines_page_limit: 1000
+      futures_page_limit: 500
+      sleep_ms: 500
 ```
 
 字段说明：
 
-- `enabled`：是否开启定时采集
-- `interval`：定时采集间隔，单位秒
-- `limit`：每次请求的抓取条数
+- `limit`：手动采集时每次请求的抓取条数
 - `types`：要采集的序列类型
-- `periods`：要采集的周期
+- `periods`：手动采集可选周期
+- `repair.enabled`：是否开启定时修补
+- `repair.interval`：定时修补执行频率，单位秒
+- `repair.period`：第一阶段固定为 `5m`
+- `repair.bootstrap_days`：本地无数据时默认回补天数
+- `repair.klines_page_limit`：K 线修补分页大小
+- `repair.futures_page_limit`：其余 4 个序列的分页大小
+- `repair.sleep_ms`：每页请求后的休眠毫秒数，用于降低流控风险
+
+说明：
+
+- `collect` 只保留手动触发，不再由 scheduler 定时执行
+- `repair` 才是定时任务入口
 
 ## 5. 当前已验证内容
 
@@ -131,6 +176,7 @@ app:
 - 仓储幂等写入测试通过
 - 集成测试通过
 - API 测试通过
+- 修补窗口与分页修补测试通过
 - 真实 MySQL 建表成功
 - 真实接口抓取成功
 - 重复抓取后记录数保持稳定，幂等生效

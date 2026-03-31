@@ -136,8 +136,6 @@ _DEFAULT_BINANCE_SERIES_TYPES = [
     'klines',
     'global_long_short_account_ratio',
 ]
-BINANCE_SERIES_ENABLED = get_conf('BINANCE_SERIES_ENABLED', 'app.binance_series.enabled', False, bool)
-BINANCE_SERIES_INTERVAL = get_conf('BINANCE_SERIES_INTERVAL', 'app.binance_series.interval', UPDATE_INTERVAL, int)
 BINANCE_SERIES_LIMIT = get_conf('BINANCE_SERIES_LIMIT', 'app.binance_series.limit', 30, int)
 BINANCE_SERIES_TYPES = get_conf(
     'BINANCE_SERIES_TYPES',
@@ -150,6 +148,48 @@ BINANCE_SERIES_PERIODS = get_conf(
     'app.binance_series.periods',
     TIME_INTERVALS,
     list,
+)
+BINANCE_SERIES_REPAIR_ENABLED = get_conf(
+    'BINANCE_SERIES_REPAIR_ENABLED',
+    'app.binance_series.repair.enabled',
+    False,
+    bool,
+)
+BINANCE_SERIES_REPAIR_INTERVAL = get_conf(
+    'BINANCE_SERIES_REPAIR_INTERVAL',
+    'app.binance_series.repair.interval',
+    900,
+    int,
+)
+BINANCE_SERIES_REPAIR_PERIOD = get_conf(
+    'BINANCE_SERIES_REPAIR_PERIOD',
+    'app.binance_series.repair.period',
+    '5m',
+    str,
+)
+BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS = get_conf(
+    'BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS',
+    'app.binance_series.repair.bootstrap_days',
+    7,
+    int,
+)
+BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT = get_conf(
+    'BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT',
+    'app.binance_series.repair.klines_page_limit',
+    1000,
+    int,
+)
+BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT = get_conf(
+    'BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT',
+    'app.binance_series.repair.futures_page_limit',
+    500,
+    int,
+)
+BINANCE_SERIES_REPAIR_SLEEP_MS = get_conf(
+    'BINANCE_SERIES_REPAIR_SLEEP_MS',
+    'app.binance_series.repair.sleep_ms',
+    500,
+    int,
 )
 
 # 代理配置

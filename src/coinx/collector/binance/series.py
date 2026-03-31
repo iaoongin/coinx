@@ -29,42 +29,67 @@ def _request_series(path, params, session=None, timeout=10):
     return response.json()
 
 
-def fetch_top_long_short_position_ratio(symbol, period, limit, session=None):
+def fetch_top_long_short_position_ratio(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {'symbol': symbol, 'period': period, 'limit': limit}
+    if start_time is not None:
+        params['startTime'] = start_time
+    if end_time is not None:
+        params['endTime'] = end_time
     return _request_series(
         SERIES_ENDPOINTS['top_long_short_position_ratio'],
-        {'symbol': symbol, 'period': period, 'limit': limit},
+        params,
         session=session,
     )
 
 
-def fetch_top_long_short_account_ratio(symbol, period, limit, session=None):
+def fetch_top_long_short_account_ratio(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {'symbol': symbol, 'period': period, 'limit': limit}
+    if start_time is not None:
+        params['startTime'] = start_time
+    if end_time is not None:
+        params['endTime'] = end_time
     return _request_series(
         SERIES_ENDPOINTS['top_long_short_account_ratio'],
-        {'symbol': symbol, 'period': period, 'limit': limit},
+        params,
         session=session,
     )
 
 
-def fetch_open_interest_hist(symbol, period, limit, session=None):
+def fetch_open_interest_hist(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {'symbol': symbol, 'period': period, 'limit': limit}
+    if start_time is not None:
+        params['startTime'] = start_time
+    if end_time is not None:
+        params['endTime'] = end_time
     return _request_series(
         SERIES_ENDPOINTS['open_interest_hist'],
-        {'symbol': symbol, 'period': period, 'limit': limit},
+        params,
         session=session,
     )
 
 
-def fetch_klines(symbol, period, limit, session=None):
+def fetch_klines(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {'symbol': symbol, 'interval': period, 'limit': limit}
+    if start_time is not None:
+        params['startTime'] = start_time
+    if end_time is not None:
+        params['endTime'] = end_time
     return _request_series(
         SERIES_ENDPOINTS['klines'],
-        {'symbol': symbol, 'interval': period, 'limit': limit},
+        params,
         session=session,
     )
 
 
-def fetch_global_long_short_account_ratio(symbol, period, limit, session=None):
+def fetch_global_long_short_account_ratio(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {'symbol': symbol, 'period': period, 'limit': limit}
+    if start_time is not None:
+        params['startTime'] = start_time
+    if end_time is not None:
+        params['endTime'] = end_time
     return _request_series(
         SERIES_ENDPOINTS['global_long_short_account_ratio'],
-        {'symbol': symbol, 'period': period, 'limit': limit},
+        params,
         session=session,
     )
 
@@ -153,7 +178,7 @@ def parse_global_long_short_account_ratio(payload, symbol, period):
     ]
 
 
-def fetch_series_payload(series_type, symbol, period, limit, session=None):
+def fetch_series_payload(series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
     fetchers = {
         'top_long_short_position_ratio': fetch_top_long_short_position_ratio,
         'top_long_short_account_ratio': fetch_top_long_short_account_ratio,
@@ -167,7 +192,14 @@ def fetch_series_payload(series_type, symbol, period, limit, session=None):
     except KeyError as exc:
         raise ValueError(f"不支持的序列类型: {series_type}") from exc
 
-    return fetcher(symbol, period, limit, session=session)
+    return fetcher(
+        symbol,
+        period,
+        limit,
+        session=session,
+        start_time=start_time,
+        end_time=end_time,
+    )
 
 
 def parse_series_payload(series_type, payload, symbol, period):

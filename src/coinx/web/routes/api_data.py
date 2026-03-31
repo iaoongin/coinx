@@ -18,14 +18,20 @@ from coinx.collector import (
     get_cache_update_time,
     collect_and_store_series,
     collect_series_batch,
+    repair_tracked_symbols,
 )
 from coinx.collector.binance.cache import get_drop_list_cache_update_time
 from coinx.config import (
-    BINANCE_SERIES_ENABLED,
-    BINANCE_SERIES_INTERVAL,
     BINANCE_SERIES_LIMIT,
     BINANCE_SERIES_TYPES,
     BINANCE_SERIES_PERIODS,
+    BINANCE_SERIES_REPAIR_ENABLED,
+    BINANCE_SERIES_REPAIR_INTERVAL,
+    BINANCE_SERIES_REPAIR_PERIOD,
+    BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS,
+    BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
+    BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
+    BINANCE_SERIES_REPAIR_SLEEP_MS,
 )
 
 
@@ -48,11 +54,20 @@ def get_binance_series_config():
             'status': 'success',
             'message': '获取 Binance 历史序列配置成功',
             'data': {
-                'enabled': BINANCE_SERIES_ENABLED,
-                'interval': BINANCE_SERIES_INTERVAL,
-                'limit': BINANCE_SERIES_LIMIT,
-                'series_types': BINANCE_SERIES_TYPES,
-                'periods': BINANCE_SERIES_PERIODS,
+                'collect': {
+                    'limit': BINANCE_SERIES_LIMIT,
+                    'series_types': BINANCE_SERIES_TYPES,
+                    'periods': BINANCE_SERIES_PERIODS,
+                },
+                'repair': {
+                    'enabled': BINANCE_SERIES_REPAIR_ENABLED,
+                    'interval': BINANCE_SERIES_REPAIR_INTERVAL,
+                    'period': BINANCE_SERIES_REPAIR_PERIOD,
+                    'bootstrap_days': BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS,
+                    'klines_page_limit': BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
+                    'futures_page_limit': BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
+                    'sleep_ms': BINANCE_SERIES_REPAIR_SLEEP_MS,
+                },
             },
         }
     )
@@ -313,5 +328,43 @@ def batch_collect_binance_series():
             {
                 'status': 'error',
                 'message': f'批量采集 Binance 历史序列失败: {str(e)}',
+            }
+        ), 500
+
+
+@api_data_bp.route('/api/binance-series/repair-tracked', methods=['POST'])
+def repair_tracked_binance_series():
+    """手动修补 tracked coins 的 Binance 历史序列。"""
+    payload = request.get_json(silent=True) or {}
+    series_types = payload.get('series_types')
+
+    if series_types is not None:
+        if not isinstance(series_types, list):
+            return jsonify({'status': 'error', 'message': 'series_types 必须是数组'}), 400
+        invalid_types = [series_type for series_type in series_types if series_type not in SUPPORTED_SERIES_TYPES]
+        if invalid_types:
+            return jsonify(
+                {
+                    'status': 'error',
+                    'message': f'存在不支持的 series_type: {invalid_types}',
+                }
+            ), 400
+
+    try:
+        result = repair_tracked_symbols(series_types=series_types)
+        return jsonify(
+            {
+                'status': 'success',
+                'message': '历史序列修补成功',
+                'data': result,
+            }
+        )
+    except Exception as e:
+        logger.error(f"修补 Binance 历史序列失败: {e}")
+        logger.exception(e)
+        return jsonify(
+            {
+                'status': 'error',
+                'message': f'修补 Binance 历史序列失败: {str(e)}',
             }
         ), 500

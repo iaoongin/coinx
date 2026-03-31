@@ -67,9 +67,11 @@ def test_get_binance_series_config_api_returns_defaults():
     assert response.status_code == 200
     payload = response.get_json()
     assert payload['status'] == 'success'
-    assert 'series_types' in payload['data']
-    assert 'periods' in payload['data']
-    assert 'limit' in payload['data']
+    assert 'collect' in payload['data']
+    assert 'repair' in payload['data']
+    assert 'series_types' in payload['data']['collect']
+    assert 'periods' in payload['data']['collect']
+    assert 'limit' in payload['data']['collect']
 
 
 def test_collect_binance_series_batch_api_returns_summary(monkeypatch):
@@ -118,3 +120,29 @@ def test_collect_binance_series_batch_api_validates_required_fields():
     assert response.status_code == 400
     payload = response.get_json()
     assert payload['status'] == 'error'
+
+
+def test_repair_tracked_binance_series_api_returns_summary(monkeypatch):
+    def fake_repair(series_types=None):
+        assert series_types == ['klines', 'open_interest_hist']
+        return {
+            'status': 'success',
+            'symbols': ['BTCUSDT'],
+            'series_types': series_types,
+            'success_count': 2,
+            'failure_count': 0,
+            'results': [],
+        }
+
+    monkeypatch.setattr('coinx.web.routes.api_data.repair_tracked_symbols', fake_repair)
+    client = create_test_client()
+
+    response = client.post(
+        '/api/binance-series/repair-tracked',
+        json={'series_types': ['klines', 'open_interest_hist']},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['status'] == 'success'
+    assert payload['data']['success_count'] == 2

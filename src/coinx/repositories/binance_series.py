@@ -1,3 +1,5 @@
+from sqlalchemy import func
+
 from coinx.database import get_session
 from coinx.models import (
     BinanceTopLongShortPositionRatio,
@@ -63,6 +65,26 @@ def upsert_series_records(series_type, records, session=None):
     except Exception:
         db.rollback()
         raise
+    finally:
+        if own_session:
+            db.close()
+
+
+def get_latest_series_timestamp(series_type, symbol, period='5m', session=None):
+    """Return the latest local timestamp for a series."""
+    model = get_series_model(series_type)
+    timestamp_field = 'open_time' if series_type == 'klines' else 'event_time'
+
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        column = getattr(model, timestamp_field)
+        return (
+            db.query(func.max(column))
+            .filter(model.symbol == symbol, model.period == period)
+            .scalar()
+        )
     finally:
         if own_session:
             db.close()

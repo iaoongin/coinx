@@ -19,8 +19,6 @@ app:
     - 12h
     - 1d
   binance_series:
-    enabled: true
-    interval: 300
     limit: 300
     types:
       - top_long_short_position_ratio
@@ -30,7 +28,14 @@ app:
       - global_long_short_account_ratio
     periods:
       - 5m
-      - 15m
+    repair:
+      enabled: false
+      interval: 900
+      period: 5m
+      bootstrap_days: 7
+      klines_page_limit: 1000
+      futures_page_limit: 500
+      sleep_ms: 500
 
 database:
   host: localhost

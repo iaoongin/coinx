@@ -246,6 +246,8 @@ Related tables:
   - collect one history series and store it into MySQL
 - `POST /api/binance-series/batch-collect`
   - collect multiple symbols / periods / series types in batch
+- `POST /api/binance-series/repair-tracked`
+  - repair tracked coins for 5m history series with a 7-day bootstrap window
 
 ### Script
 
@@ -262,8 +264,6 @@ Configured in `application.yml`:
 ```yaml
 app:
   binance_series:
-    enabled: false
-    interval: 300
     limit: 30
     types:
       - top_long_short_position_ratio
@@ -273,8 +273,17 @@ app:
       - global_long_short_account_ratio
     periods:
       - 5m
-      - 15m
+    repair:
+      enabled: false
+      interval: 900
+      period: 5m
+      bootstrap_days: 7
+      klines_page_limit: 1000
+      futures_page_limit: 500
+      sleep_ms: 500
 ```
+
+Manual collection stays on-demand via page/API, while scheduled execution is reserved for `repair`.
 
 ### Tests
 
@@ -286,3 +295,5 @@ Related tests include:
 - `tests/test_binance_series_service.py`
 - `tests/test_binance_series_api.py`
 - `tests/test_binance_series_page.py`
+- `tests/test_binance_series_repair_window.py`
+- `tests/test_binance_series_repair_service.py`
