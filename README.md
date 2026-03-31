@@ -77,7 +77,7 @@ mysql -u root -p coinx < sql/schema.sql
 | `COINX_ENV` | 选择环境配置文件，例如 `dev` 会加载 `application-dev.yml` | `application.yml` 中的 `profiles.active`，默认是 `dev` |
 | `BINANCE_BASE_URL` | Binance API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/fapi.binance.com` |
 | `UPDATE_INTERVAL` | 定时刷新市场数据的间隔，单位为秒 | `300` |
-| `TIME_INTERVALS` | 需要计算的时间周期列表，当前更建议放在 YAML 中配置，不建议直接用环境变量字符串覆盖 | `5m,15m,30m,1h,2h,4h,6h,12h,1d` |
+| `TIME_INTERVALS` | 需要计算的时间周期列表，当前更建议放在 YAML 中配置，不建议直接用环境变量字符串覆盖 | `5m,15m,30m,1h,4h,12h,24h,48h,72h,168h` |
 | `USE_PROXY` | 是否启用 HTTP/HTTPS 代理，支持 `true/false/1/0/yes/no` | `false` |
 | `PROXY_HOST` | 代理主机地址 | `127.0.0.1` |
 | `PROXY_PORT` | 代理端口 | `7897` |
@@ -247,7 +247,37 @@ Related tables:
 - `POST /api/binance-series/batch-collect`
   - collect multiple symbols / periods / series types in batch
 - `POST /api/binance-series/repair-tracked`
-  - repair tracked coins for 5m history series with a 7-day bootstrap window
+  - repair tracked 5m history series with coverage-aware backfill and tail repair
+
+## Homepage Data Notes
+
+- 首页数据现在直接来自 `binance_open_interest_hist` 与 `binance_klines`
+- `GET /api/coins` 会一次性构建首页快照，并同时返回：
+  - `data`
+  - `cache_update_time`
+- `GET /api/update`、`POST /api/binance-series/repair-tracked` 与首页定时刷新统一复用 coverage-aware repair
+- 首页长周期区间统一基于 `5m` 历史序列推导：
+  - `5m`
+  - `15m`
+  - `30m`
+  - `1h`
+  - `4h`
+  - `12h`
+  - `24h`
+  - `48h`
+  - `72h`
+  - `168h`
+
+### Homepage Query Optimization
+
+为降低首页加载延迟，首页查询做了以下约束：
+
+- 只查询首页真正需要的列，不加载 `raw_json` 等大字段
+- 小规模 tracked 币种优先走按币种索引倒序 `limit` 查询
+- `GET /api/coins` 不重复构建两次首页快照
+- futures 历史接口修补按固定时间窗分页，避免长周期覆盖看似修补成功但实际没有前移
+
+这意味着首页性能瓶颈主要在数据库查询，而不是前端渲染或 Python 计算。
 
 ### Script
 
@@ -278,6 +308,7 @@ app:
       interval: 900
       period: 5m
       bootstrap_days: 7
+      coverage_hours: 168
       klines_page_limit: 1000
       futures_page_limit: 500
       sleep_ms: 500

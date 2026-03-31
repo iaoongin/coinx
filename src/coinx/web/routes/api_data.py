@@ -1,38 +1,42 @@
-from flask import Blueprint, jsonify, request
 import threading
 
-from coinx.utils import logger
-from coinx.data_processor import get_all_coins_data
+from flask import Blueprint, jsonify, request
+
 from coinx.coin_manager import get_active_coins
 from coinx.collector import (
-    should_update_cache,
-    update_all_data,
-    update_drop_list_data,
-    get_latest_price,
-    get_24hr_ticker,
-    get_open_interest,
-    get_funding_rate,
-    get_long_short_ratio,
-    get_exchange_distribution_real,
-    get_net_inflow_data as get_net_inflow_data_real,
-    get_cache_update_time,
     collect_and_store_series,
     collect_series_batch,
+    get_24hr_ticker,
+    get_exchange_distribution_real,
+    get_funding_rate,
+    get_latest_price,
+    get_long_short_ratio,
+    get_net_inflow_data as get_net_inflow_data_real,
+    get_open_interest,
     repair_tracked_symbols,
+    update_drop_list_data,
 )
 from coinx.collector.binance.cache import get_drop_list_cache_update_time
 from coinx.config import (
     BINANCE_SERIES_LIMIT,
-    BINANCE_SERIES_TYPES,
     BINANCE_SERIES_PERIODS,
-    BINANCE_SERIES_REPAIR_ENABLED,
-    BINANCE_SERIES_REPAIR_INTERVAL,
-    BINANCE_SERIES_REPAIR_PERIOD,
     BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS,
-    BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
+    BINANCE_SERIES_REPAIR_ENABLED,
     BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
+    BINANCE_SERIES_REPAIR_INTERVAL,
+    BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
+    BINANCE_SERIES_REPAIR_PERIOD,
     BINANCE_SERIES_REPAIR_SLEEP_MS,
+    BINANCE_SERIES_TYPES,
 )
+from coinx.repositories.homepage_series import (
+    HOMEPAGE_REQUIRED_SERIES_TYPES,
+    get_homepage_series_data,
+    get_homepage_series_snapshot,
+    get_homepage_series_update_time,
+    should_refresh_homepage_series,
+)
+from coinx.utils import logger
 
 
 api_data_bp = Blueprint('api_data', __name__)
@@ -46,13 +50,75 @@ SUPPORTED_SERIES_TYPES = {
 }
 
 
+def _format_homepage_coins_payload(coins_data):
+    formatted_data = []
+    for coin in coins_data:
+        formatted_coin = {
+            'symbol': coin['symbol'],
+            'current_open_interest': coin['current_open_interest'],
+            'current_open_interest_formatted': coin['current_open_interest_formatted'],
+            'current_open_interest_value': coin['current_open_interest_value'],
+            'current_open_interest_value_formatted': coin['current_open_interest_value_formatted'],
+            'current_price': coin['current_price'],
+            'current_price_formatted': coin['current_price_formatted'],
+            'price_change': coin['price_change'],
+            'price_change_percent': coin['price_change_percent'],
+            'price_change_formatted': coin['price_change_formatted'],
+            'net_inflow': coin.get('net_inflow', {}),
+        }
+
+        changes = []
+        for interval, data in (coin.get('changes') or {}).items():
+            changes.append(
+                {
+                    'interval': interval,
+                    'ratio': data['ratio'],
+                    'value_ratio': data['value_ratio'],
+                    'open_interest': data['open_interest'],
+                    'open_interest_formatted': data['open_interest_formatted'],
+                    'open_interest_value': data['open_interest_value'],
+                    'open_interest_value_formatted': data['open_interest_value_formatted'],
+                    'price_change': data['price_change'],
+                    'price_change_percent': data['price_change_percent'],
+                    'price_change_formatted': data['price_change_formatted'],
+                    'current_price': data['current_price'],
+                    'current_price_formatted': data['current_price_formatted'],
+                }
+            )
+
+        changes.sort(
+            key=lambda x: (
+                x['interval'].endswith('m') and int(x['interval'][:-1])
+                or x['interval'].endswith('h') and int(x['interval'][:-1]) * 60
+                or x['interval'].endswith('d') and int(x['interval'][:-1]) * 1440
+                or 0
+            )
+        )
+        formatted_coin['changes'] = changes
+        formatted_data.append(formatted_coin)
+
+    return formatted_data
+
+
+def _validate_series_types(series_types):
+    if series_types is None:
+        return None
+    if not isinstance(series_types, list):
+        return 'series_types must be a list'
+
+    invalid_types = [series_type for series_type in series_types if series_type not in SUPPORTED_SERIES_TYPES]
+    if invalid_types:
+        return f'unsupported series_type values: {invalid_types}'
+
+    return None
+
+
 @api_data_bp.route('/api/binance-series/config')
 def get_binance_series_config():
-    """获取 Binance 历史序列页面默认配置。"""
     return jsonify(
         {
             'status': 'success',
-            'message': '获取 Binance 历史序列配置成功',
+            'message': 'binance series config loaded',
             'data': {
                 'collect': {
                     'limit': BINANCE_SERIES_LIMIT,
@@ -75,106 +141,61 @@ def get_binance_series_config():
 
 @api_data_bp.route('/api/coins')
 def get_coins():
-    """获取所有活跃币种的数据。"""
-    logger.info("获取所有币种数据")
+    logger.info('开始从历史序列加载首页数据')
     try:
         active_coins = get_active_coins()
-        coins_data = get_all_coins_data(active_coins)
-        cache_update_time = get_cache_update_time()
-
-        formatted_data = []
-        for coin in coins_data:
-            formatted_coin = {
-                'symbol': coin['symbol'],
-                'current_open_interest': coin['current_open_interest'],
-                'current_open_interest_formatted': coin['current_open_interest_formatted'],
-                'current_open_interest_value': coin['current_open_interest_value'],
-                'current_open_interest_value_formatted': coin['current_open_interest_value_formatted'],
-                'current_price': coin['current_price'],
-                'current_price_formatted': coin['current_price_formatted'],
-                'price_change': coin['price_change'],
-                'price_change_percent': coin['price_change_percent'],
-                'price_change_formatted': coin['price_change_formatted'],
-                'net_inflow': coin.get('net_inflow', {}),
-            }
-
-            changes = []
-            for interval, data in (coin.get('changes') or {}).items():
-                changes.append(
-                    {
-                        'interval': interval,
-                        'ratio': data['ratio'],
-                        'value_ratio': data['value_ratio'],
-                        'open_interest': data['open_interest'],
-                        'open_interest_formatted': data['open_interest_formatted'],
-                        'open_interest_value': data['open_interest_value'],
-                        'open_interest_value_formatted': data['open_interest_value_formatted'],
-                        'price_change': data['price_change'],
-                        'price_change_percent': data['price_change_percent'],
-                        'price_change_formatted': data['price_change_formatted'],
-                        'current_price': data['current_price'],
-                        'current_price_formatted': data['current_price_formatted'],
-                    }
-                )
-
-            changes.sort(
-                key=lambda x: (
-                    x['interval'].endswith('m') and int(x['interval'][:-1])
-                    or x['interval'].endswith('h') and int(x['interval'][:-1]) * 60
-                    or x['interval'].endswith('d') and int(x['interval'][:-1]) * 1440
-                    or 0
-                )
-            )
-            formatted_coin['changes'] = changes
-            formatted_data.append(formatted_coin)
+        snapshot = get_homepage_series_snapshot(active_coins)
+        formatted_data = _format_homepage_coins_payload(snapshot['data'])
 
         return jsonify(
             {
                 'status': 'success',
-                'message': '获取币种数据成功',
+                'message': 'homepage data loaded',
                 'data': formatted_data,
-                'cache_update_time': cache_update_time,
+                'cache_update_time': snapshot['cache_update_time'],
             }
         )
     except Exception as e:
-        logger.error(f"获取币种数据失败: {e}")
+        logger.error(f'加载首页数据失败: {e}')
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'获取币种数据失败: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'failed to load homepage data: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/update')
 def update_data():
-    """手动更新展示数据。"""
-    logger.info("手动更新数据")
+    logger.info('开始触发首页历史序列刷新')
     try:
         force = request.args.get('force', 'false').lower() == 'true'
-        if not force and not should_update_cache():
-            return jsonify({'status': 'success', 'message': '数据已经是最新，无需更新'})
-
         try:
             symbols = get_active_coins()
         except Exception as e:
-            logger.error(f"获取订阅币种失败，将使用空列表: {e}")
+            logger.error(f'加载首页刷新所需的跟踪币种失败: {e}')
             symbols = []
 
+        if not force and not should_refresh_homepage_series(symbols):
+            logger.info('首页历史序列已是最新，无需刷新')
+            return jsonify({'status': 'success', 'message': 'homepage series already up to date'})
+
         update_thread = threading.Thread(
-            target=update_all_data,
-            kwargs={'symbols': symbols, 'force_update': True},
+            target=repair_tracked_symbols,
+            kwargs={
+                'symbols': symbols,
+                'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            },
         )
         update_thread.daemon = True
         update_thread.start()
 
-        return jsonify({'status': 'success', 'message': '已触发数据更新，请稍后刷新页面查看'})
+        return jsonify({'status': 'success', 'message': 'homepage series refresh triggered'})
     except Exception as e:
-        logger.error(f"更新数据失败: {e}")
+        logger.error(f'触发首页历史序列刷新失败: {e}')
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'数据更新失败: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'failed to trigger homepage refresh: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/coin-detail/<symbol>')
 def get_coin_detail(symbol):
-    """获取指定币种的详情数据。"""
-    logger.info(f"获取币种详情: {symbol}")
+    logger.info(f'开始加载币种详情: {symbol}')
     try:
         detail_data = {
             'symbol': symbol,
@@ -186,17 +207,16 @@ def get_coin_detail(symbol):
             'exchange_distribution': get_exchange_distribution_real(symbol),
             'net_inflow_data': get_net_inflow_data_real(symbol),
         }
-        return jsonify({'status': 'success', 'message': '获取币种详情成功', 'data': detail_data})
+        return jsonify({'status': 'success', 'message': 'coin detail loaded', 'data': detail_data})
     except Exception as e:
-        logger.error(f"获取币种详情失败: {e}")
+        logger.error(f'加载币种详情失败: {symbol}, 错误: {e}')
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'获取币种详情失败: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'failed to load coin detail: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/drop-list')
 def get_drop_list():
-    """获取跌幅榜数据。"""
-    logger.info("获取跌幅榜数据")
+    logger.info('开始加载跌幅榜数据')
     try:
         force = request.args.get('force', 'false').lower() == 'true'
         data = update_drop_list_data(force_update=force)
@@ -204,20 +224,19 @@ def get_drop_list():
         return jsonify(
             {
                 'status': 'success',
-                'message': '获取跌幅榜数据成功',
+                'message': 'drop-list data loaded',
                 'data': data,
                 'cache_update_time': cache_update_time,
             }
         )
     except Exception as e:
-        logger.error(f"获取跌幅榜数据失败: {e}")
+        logger.error(f'加载跌幅榜数据失败: {e}')
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'获取跌幅榜数据失败: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'failed to load drop-list data: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/binance-series/collect', methods=['POST'])
 def collect_binance_series():
-    """手动采集单个 Binance 历史序列并写入数据库。"""
     payload = request.get_json(silent=True) or {}
     series_type = payload.get('series_type')
     symbol = payload.get('symbol')
@@ -228,17 +247,12 @@ def collect_binance_series():
         return jsonify(
             {
                 'status': 'error',
-                'message': '缺少必要参数：series_type、symbol、period、limit',
+                'message': 'missing required fields: series_type, symbol, period, limit',
             }
         ), 400
 
     if series_type not in SUPPORTED_SERIES_TYPES:
-        return jsonify(
-            {
-                'status': 'error',
-                'message': f'不支持的 series_type: {series_type}',
-            }
-        ), 400
+        return jsonify({'status': 'error', 'message': f'unsupported series_type: {series_type}'}), 400
 
     try:
         result = collect_and_store_series(
@@ -247,27 +261,15 @@ def collect_binance_series():
             period=period,
             limit=int(limit),
         )
-        return jsonify(
-            {
-                'status': 'success',
-                'message': '历史序列采集成功',
-                'data': result,
-            }
-        )
+        return jsonify({'status': 'success', 'message': 'series collected', 'data': result})
     except Exception as e:
-        logger.error(f"采集 Binance 历史序列失败: {e}")
+        logger.error(f'采集历史序列失败: {e}')
         logger.exception(e)
-        return jsonify(
-            {
-                'status': 'error',
-                'message': f'采集 Binance 历史序列失败: {str(e)}',
-            }
-        ), 500
+        return jsonify({'status': 'error', 'message': f'failed to collect series: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/binance-series/batch-collect', methods=['POST'])
 def batch_collect_binance_series():
-    """手动批量采集 Binance 历史序列并写入数据库。"""
     payload = request.get_json(silent=True) or {}
     symbols = payload.get('symbols')
     periods = payload.get('periods')
@@ -278,34 +280,16 @@ def batch_collect_binance_series():
         return jsonify(
             {
                 'status': 'error',
-                'message': '缺少必要参数：symbols、periods、limit',
+                'message': 'missing required fields: symbols, periods, limit',
             }
         ), 400
 
     if not isinstance(symbols, list) or not isinstance(periods, list):
-        return jsonify(
-            {
-                'status': 'error',
-                'message': 'symbols 和 periods 必须是数组',
-            }
-        ), 400
+        return jsonify({'status': 'error', 'message': 'symbols and periods must be lists'}), 400
 
-    if series_types is not None:
-        if not isinstance(series_types, list):
-            return jsonify(
-                {
-                    'status': 'error',
-                    'message': 'series_types 必须是数组',
-                }
-            ), 400
-        invalid_types = [series_type for series_type in series_types if series_type not in SUPPORTED_SERIES_TYPES]
-        if invalid_types:
-            return jsonify(
-                {
-                    'status': 'error',
-                    'message': f'存在不支持的 series_type: {invalid_types}',
-                }
-            ), 400
+    error = _validate_series_types(series_types)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
 
     try:
         result = collect_series_batch(
@@ -314,57 +298,26 @@ def batch_collect_binance_series():
             series_types=series_types,
             limit=int(limit),
         )
-        return jsonify(
-            {
-                'status': 'success',
-                'message': '批量历史序列采集成功',
-                'data': result,
-            }
-        )
+        return jsonify({'status': 'success', 'message': 'batch series collected', 'data': result})
     except Exception as e:
-        logger.error(f"批量采集 Binance 历史序列失败: {e}")
+        logger.error(f'批量采集历史序列失败: {e}')
         logger.exception(e)
-        return jsonify(
-            {
-                'status': 'error',
-                'message': f'批量采集 Binance 历史序列失败: {str(e)}',
-            }
-        ), 500
+        return jsonify({'status': 'error', 'message': f'failed to batch collect series: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/binance-series/repair-tracked', methods=['POST'])
 def repair_tracked_binance_series():
-    """手动修补 tracked coins 的 Binance 历史序列。"""
     payload = request.get_json(silent=True) or {}
     series_types = payload.get('series_types')
 
-    if series_types is not None:
-        if not isinstance(series_types, list):
-            return jsonify({'status': 'error', 'message': 'series_types 必须是数组'}), 400
-        invalid_types = [series_type for series_type in series_types if series_type not in SUPPORTED_SERIES_TYPES]
-        if invalid_types:
-            return jsonify(
-                {
-                    'status': 'error',
-                    'message': f'存在不支持的 series_type: {invalid_types}',
-                }
-            ), 400
+    error = _validate_series_types(series_types)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 400
 
     try:
         result = repair_tracked_symbols(series_types=series_types)
-        return jsonify(
-            {
-                'status': 'success',
-                'message': '历史序列修补成功',
-                'data': result,
-            }
-        )
+        return jsonify({'status': 'success', 'message': 'tracked series repaired', 'data': result})
     except Exception as e:
-        logger.error(f"修补 Binance 历史序列失败: {e}")
+        logger.error(f'修补已跟踪币种历史序列失败: {e}')
         logger.exception(e)
-        return jsonify(
-            {
-                'status': 'error',
-                'message': f'修补 Binance 历史序列失败: {str(e)}',
-            }
-        ), 500
+        return jsonify({'status': 'error', 'message': f'failed to repair tracked series: {str(e)}'}), 500
