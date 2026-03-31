@@ -88,3 +88,23 @@ def get_latest_series_timestamp(series_type, symbol, period='5m', session=None):
     finally:
         if own_session:
             db.close()
+
+
+def get_earliest_series_timestamp(series_type, symbol, period='5m', session=None):
+    """Return the earliest local timestamp for a series."""
+    model = get_series_model(series_type)
+    timestamp_field = 'open_time' if series_type == 'klines' else 'event_time'
+
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        column = getattr(model, timestamp_field)
+        return (
+            db.query(func.min(column))
+            .filter(model.symbol == symbol, model.period == period)
+            .scalar()
+        )
+    finally:
+        if own_session:
+            db.close()

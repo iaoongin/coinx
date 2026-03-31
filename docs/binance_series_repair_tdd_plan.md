@@ -1,5 +1,7 @@
 # Binance 历史序列修补方案（第一阶段，TDD）
 
+> 状态说明：本文记录的是第一阶段的 tail-only 修补方案，当前实现已经升级为 coverage-aware repair。涉及首页长周期覆盖、`coverage_hours`、固定时间窗分页等最新口径，请以 [docs/binance_series_coverage_repair_plan.md](/z:/Resource/Code/project/coinx/docs/binance_series_coverage_repair_plan.md) 为准。
+
 ## 1. 目标
 
 第一阶段只处理“已跟踪币种”的历史序列修补，目标是补齐由于系统停机、任务中断等原因造成的尾部缺失数据。

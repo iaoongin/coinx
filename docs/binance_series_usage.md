@@ -121,8 +121,10 @@ curl -X POST http://127.0.0.1:5000/api/binance-series/repair-tracked \
 - 不传 `series_types` 时，会按修补任务默认顺序执行 5 个序列
 - 修补范围只针对当前 tracked coins
 - 第一阶段固定修补 `5m`
-- 本地没有数据时默认回补最近 `7` 天
-- 本地已有数据时只补最后一条之后的尾部缺口
+- 修补逻辑同时处理头部覆盖不足和尾部追平，不再只是补“最后一段”
+- `open_interest_hist` 等 futures 历史接口按固定时间窗分页，避免 `48h / 72h / 168h` 长周期缺口补不回来
+- 本地无数据时，会按 `bootstrap_days` 与 `coverage_hours` 推导起始时间后回补
+- 本地已有数据但覆盖不足时会向前回补，覆盖足够时才只追尾
 
 ## 4. 配置说明
 
@@ -145,6 +147,7 @@ app:
       interval: 900
       period: 5m
       bootstrap_days: 7
+      coverage_hours: 168
       klines_page_limit: 1000
       futures_page_limit: 500
       sleep_ms: 500
@@ -159,6 +162,7 @@ app:
 - `repair.interval`：定时修补执行频率，单位秒
 - `repair.period`：第一阶段固定为 `5m`
 - `repair.bootstrap_days`：本地无数据时默认回补天数
+- `repair.coverage_hours`：首页依赖的 `5m` 序列至少要覆盖的小时数，默认 `168`
 - `repair.klines_page_limit`：K 线修补分页大小
 - `repair.futures_page_limit`：其余 4 个序列的分页大小
 - `repair.sleep_ms`：每页请求后的休眠毫秒数，用于降低流控风险
@@ -167,6 +171,7 @@ app:
 
 - `collect` 只保留手动触发，不再由 scheduler 定时执行
 - `repair` 才是定时任务入口
+- futures 类历史接口修补时会按固定时间窗推进分页游标，而不是依赖返回结果尾部时间
 
 ## 5. 当前已验证内容
 

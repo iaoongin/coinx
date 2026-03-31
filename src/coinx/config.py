@@ -127,7 +127,7 @@ BINANCE_BASE_URL = get_conf('BINANCE_BASE_URL', 'binance.base_url', 'https://pro
 UPDATE_INTERVAL = get_conf('UPDATE_INTERVAL', 'app.update_interval', 300, int)
 
 # 支持的时间间隔
-_DEFAULT_INTERVALS = ['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']
+_DEFAULT_INTERVALS = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']
 TIME_INTERVALS = get_conf('TIME_INTERVALS', 'app.time_intervals', _DEFAULT_INTERVALS, list)
 _DEFAULT_BINANCE_SERIES_TYPES = [
     'top_long_short_position_ratio',
@@ -171,6 +171,12 @@ BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS = get_conf(
     'BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS',
     'app.binance_series.repair.bootstrap_days',
     7,
+    int,
+)
+BINANCE_SERIES_REPAIR_COVERAGE_HOURS = get_conf(
+    'BINANCE_SERIES_REPAIR_COVERAGE_HOURS',
+    'app.binance_series.repair.coverage_hours',
+    168,
     int,
 )
 BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT = get_conf(
