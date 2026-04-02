@@ -17,6 +17,7 @@
 
     .container {
       max-width: 1200px;
+      width: 100%;
       margin: 0 auto;
       background-color: rgba(255, 255, 255, 0.95);
       padding: 25px;
@@ -198,9 +199,12 @@
     .table-wrapper {
       margin-top: 25px;
       border-radius: 12px;
-      overflow: hidden;
+      overflow-x: auto;
+      overflow-y: visible;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
       background: white;
+      /* 固定表头 */
+      position: relative;
     }
 
     table {
@@ -228,11 +232,17 @@
       color: #ffffff;
       border: none;
       white-space: nowrap;
+      /* 固定首列 */
+      position: sticky;
+      left: 0;
+      z-index: 10;
     }
 
     th:first-child {
       text-align: left;
       padding-left: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      z-index: 20;
     }
 
     /* ==================== 单元格设计 ==================== */
@@ -243,6 +253,7 @@
       font-weight: 400;
       color: #4b5563;
       border-bottom: 1px solid #f3f4f6;
+      white-space: nowrap;
     }
 
     /* 币种名称列（带 rowspan） */
@@ -254,6 +265,11 @@
       color: #1f2937;
       vertical-align: middle;
       border-right: 2px solid #e5e7eb;
+      /* 固定首列 */
+      position: sticky;
+      left: 0;
+      background: white;
+      z-index: 5;
     }
 
     /* 类型列（持仓量/持仓价值/价格） */
@@ -580,6 +596,92 @@
       to {
         transform: translateX(0);
         opacity: 1;
+      }
+    }
+
+    /* ==================== 响应式布局 ==================== */
+    /* 统一使用紧凑布局（覆盖所有屏幕） */
+    th, td {
+      padding: 10px 8px;
+    }
+
+    td {
+      font-size: 13px;
+    }
+
+    td[rowspan] {
+      font-size: 13px;
+    }
+
+    /* lg 及以下 (≤ 991px): 更紧凑 */
+    @media (max-width: 991px) {
+      th, td {
+        padding: 8px 6px;
+      }
+
+      td {
+        font-size: 12px;
+      }
+
+      td[rowspan] {
+        font-size: 12px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      .header-row {
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .right-header-section {
+        width: 100%;
+        justify-content: space-between;
+      }
+    }
+
+    /* md (≤ 767px): 极紧凑 + 表格横向滚动 */
+    @media (max-width: 767px) {
+      .container {
+        padding: 10px;
+      }
+
+      h1 {
+        font-size: 20px;
+      }
+
+      th, td {
+        padding: 6px 4px;
+      }
+
+      th {
+        font-size: 10px;
+      }
+
+      td {
+        font-size: 11px;
+      }
+
+      td[rowspan] {
+        font-size: 11px;
+      }
+
+      .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .right-header-section {
+        width: 100%;
+        flex-direction: row;
+        justify-content: space-between;
+      }
+
+      .config-button {
+        padding: 8px 15px;
+        font-size: 12px;
       }
     }
   </style>
