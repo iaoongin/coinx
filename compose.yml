@@ -5,7 +5,13 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: sh -c "pip install -r requirements.txt && python main.py"
+    env_file:
+      - .env
+    environment:
+      - PIP_INDEX_URL=${PIP_INDEX_URL}
+    command: sh -c "pip install -r requirements.txt && pip install -e . && python -m coinx.main"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: always
     ports:
       - "5000:5000"

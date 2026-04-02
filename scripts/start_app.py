@@ -10,10 +10,13 @@ import time
 import signal
 import psutil
 from pathlib import Path
+from dotenv import load_dotenv
 
 # 添加项目根目录的src到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
+
+load_dotenv(project_root / ".env")
 
 from coinx.config import WEB_HOST, WEB_PORT
 from coinx.utils import logger
