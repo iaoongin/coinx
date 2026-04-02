@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>币种跌幅榜</title>
+  <title>行情榜</title>
   <style>
     body {
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
@@ -531,6 +531,27 @@
       box-shadow: none;
     }
 
+    .rank-type-btn {
+      padding: 8px 16px;
+      border: 1px solid #ddd;
+      background: #fff;
+      color: #333;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .rank-type-btn:hover {
+      background: #f0f0f0;
+    }
+
+    .rank-type-btn.active {
+      background: #e74c3c;
+      color: #fff;
+      border-color: #e74c3c;
+    }
+
     .filter-input {
       margin-bottom: 15px;
     }
@@ -587,7 +608,7 @@
 
 <body>
   <div class="container">
-    <h1>币种跌幅榜</h1>
+    <h1>行情榜</h1>
 
     <div class="header-row">
       <div>
@@ -608,6 +629,14 @@
           <span>↻</span> 刷新
         </button>
       </div>
+    </div>
+
+    <div class="rank-type-selector" style="margin: 15px 0; display: flex; gap: 10px; align-items: center;">
+      <span style="font-weight: 600;">排行类型:</span>
+      <button class="btn rank-type-btn active" data-type="price_change" data-direction="down">跌幅榜</button>
+      <button class="btn rank-type-btn" data-type="price_change" data-direction="up">涨幅榜</button>
+      <button class="btn rank-type-btn" data-type="quote_volume" data-direction="all">成交额榜</button>
+      <button class="btn rank-type-btn" data-type="volume" data-direction="all">成交量榜</button>
     </div>
 
     <!-- 删除了"数据每5分钟自动更新一次"这行 -->
@@ -673,10 +702,33 @@
     let selectedAllCoins = new Set(); // 选中的所有币种
     let selectedTrackedCoins = new Set(); // 选中的跟踪币种
 
+    let currentRankType = 'price_change';
+    let currentDirection = 'down';
+
     // 页面加载完成后获取数据
     document.addEventListener("DOMContentLoaded", function () {
+      initRankTypeButtons();
       loadData();
     });
+
+    // 初始化排行类型切换按钮
+    function initRankTypeButtons() {
+      const buttons = document.querySelectorAll('.rank-type-btn');
+      buttons.forEach(btn => {
+        btn.addEventListener('click', function() {
+          buttons.forEach(b => b.classList.remove('active'));
+          this.classList.add('active');
+          currentRankType = this.dataset.type;
+          currentDirection = this.dataset.direction;
+          loadData();
+        });
+      });
+    }
+
+    // 获取API URL
+    function getApiUrl() {
+      return `/api/market-rank?type=${currentRankType}&direction=${currentDirection}&limit=100`;
+    }
 
     // 基于缓存更新时间计算倒计时
     function updateCountdownBasedOnCache() {
@@ -732,21 +784,20 @@
     function loadCoinsData() {
       const container = document.getElementById("data-container");
 
-      // 获取跌幅榜数据
-      fetch("/api/drop-list")
+      // 获取行情榜数据
+      fetch(getApiUrl())
         .then((response) => {
-          console.log("币种数据接口响应:", response);
+          console.log("行情榜数据接口响应:", response);
           return response.json();
         })
         .then((result) => {
-          console.log("币种数据结果:", result);
+          console.log("行情榜数据结果:", result);
           if (result.status === "success") {
             console.log("数据获取成功，开始渲染数据...");
 
-            // 只更新显示时间，不重启倒计时
-            if (result.cache_update_time) {
+            if (result.snapshot_time) {
               const lastUpdateElement = document.getElementById("last-update-time");
-              const updateTime = new Date(result.cache_update_time);
+              const updateTime = new Date(result.snapshot_time);
               lastUpdateElement.textContent = updateTime.toLocaleString("zh-CN");
             }
 
@@ -771,7 +822,7 @@
 
       // 先调用更新接口获取最新数据
       console.log("开始获取数据...");
-      const url = "/api/drop-list";
+      const url = getApiUrl();
       fetch(url)
         .then((response) => {
           console.log("更新接口响应:", response);
@@ -780,27 +831,24 @@
         .then((updateResult) => {
           console.log("更新结果:", updateResult);
           if (updateResult.status === "success") {
-            // 更新成功后获取数据
-            console.log("更新成功，开始获取币种数据...");
-            return fetch("/api/drop-list");
+            console.log("更新成功，开始获取行情榜数据...");
+            return fetch(getApiUrl());
           } else {
-            // 更新失败时也尝试获取现有数据
-            console.log("更新失败，但仍尝试获取币种数据...");
-            return fetch("/api/drop-list");
+            console.log("更新失败，但仍尝试获取行情榜数据...");
+            return fetch(getApiUrl());
           }
         })
         .then((response) => {
-          console.log("币种数据接口响应:", response);
+          console.log("行情榜数据接口响应:", response);
           return response.json();
         })
         .then((result) => {
-          console.log("币种数据结果:", result);
+          console.log("行情榜数据结果:", result);
           if (result.status === "success") {
             console.log("数据获取成功，开始渲染数据...");
 
-            // 更新最后更新时间和倒计时
-            if (result.cache_update_time) {
-              updateLastUpdateTime(result.cache_update_time);
+            if (result.snapshot_time) {
+              updateLastUpdateTime(result.snapshot_time);
             }
 
             renderData(result.data);
@@ -843,7 +891,7 @@
 
     // 渲染数据
     function renderData(coinsData) {
-      console.log("开始渲染跌幅榜数据:", coinsData);
+      console.log("开始渲染行情榜数据:", coinsData);
       const container = document.getElementById("data-container");
 
       if (!coinsData || !Array.isArray(coinsData) || coinsData.length === 0) {
@@ -852,7 +900,7 @@
         return;
       }
 
-      // 构建表格HTML - 简化的跌幅榜表格
+      // 构建表格HTML - 简化的行情榜表格
       let html = `
         <div class="table-wrapper">
           <table>
@@ -862,7 +910,8 @@
                 <th style="text-align: left;">币种</th>
                 <th>当前价格 (USDT)</th>
                 <th>24h 涨跌幅</th>
-                <th>24h 成交金额 (USDT)</th>
+                <th>24h 成交量</th>
+                <th>24h 成交额 (USDT)</th>
               </tr>
             </thead>
             <tbody>
@@ -875,35 +924,49 @@
         const changeClass = changePercent > 0 ? "positive" : changePercent < 0 ? "negative" : "";
         const changeSign = changePercent > 0 ? "+" : "";
 
+        // 格式化成交量
+        const volume = coin.volume;
+        let formattedVolume = "0";
+        if (volume >= 100000000) {
+          formattedVolume = (volume / 100000000).toFixed(2) + "亿";
+        } else if (volume >= 10000) {
+          formattedVolume = (volume / 10000).toFixed(2) + "万";
+        } else {
+          formattedVolume = parseFloat(volume).toFixed(2);
+        }
+
         // 格式化成交额
         const quoteVolume = coin.quote_volume;
-        let formattedVolume = "0";
+        let formattedQuoteVolume = "0";
         if (quoteVolume >= 100000000) {
-          formattedVolume = (quoteVolume / 100000000).toFixed(2) + "亿";
+          formattedQuoteVolume = (quoteVolume / 100000000).toFixed(2) + "亿";
         } else if (quoteVolume >= 10000) {
-          formattedVolume = (quoteVolume / 10000).toFixed(2) + "万";
+          formattedQuoteVolume = (quoteVolume / 10000).toFixed(2) + "万";
         } else {
-          formattedVolume = parseFloat(quoteVolume).toFixed(2);
+          formattedQuoteVolume = parseFloat(quoteVolume).toFixed(2);
         }
 
         html += `
           <tr>
             <td style="padding-left: 20px; text-align: left; width: 60px;">
                 <span style="display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; border-radius: 50%; background-color: ${index < 3 ? '#e74c3c' : '#bdc3c7'}; color: white; font-weight: bold; font-size: 12px;">
-                    ${index + 1}
+                    ${coin.rank_index || index + 1}
                 </span>
             </td>
             <td style="text-align: left;">
                 <strong><a href="/coin-detail?symbol=${coin.symbol}" style="color: #2c3e50; text-decoration: none;">${coin.symbol}</a></strong>
             </td>
             <td>
-                <span style="font-weight: 600;">${parseFloat(coin.current_price).toFixed(coin.current_price < 1 ? 6 : 2)}</span>
+                <span style="font-weight: 600;">${parseFloat(coin.price || coin.current_price).toFixed((coin.price || coin.current_price) < 1 ? 6 : 2)}</span>
             </td>
             <td>
                 <span class="${changeClass}" style="font-weight: 600;">${changeSign}${parseFloat(changePercent).toFixed(2)}%</span>
             </td>
             <td>
                 <span style="color: #7f8c8d;">${formattedVolume}</span>
+            </td>
+            <td>
+                <span style="color: #7f8c8d;">${formattedQuoteVolume}</span>
             </td>
           </tr>
         `;

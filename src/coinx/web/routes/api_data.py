@@ -15,7 +15,9 @@ from coinx.collector import (
     get_open_interest,
     repair_tracked_symbols,
     update_drop_list_data,
+    update_market_tickers,
 )
+from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
 from coinx.collector.binance.cache import get_drop_list_cache_update_time
 from coinx.config import (
     BINANCE_SERIES_LIMIT,
@@ -233,6 +235,42 @@ def get_drop_list():
         logger.error(f'加载跌幅榜数据失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load drop-list data: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/market-rank')
+def get_market_rank():
+    """获取行情排行数据"""
+    logger.info('开始加载行情榜数据')
+    try:
+        rank_type = request.args.get('type', 'price_change')
+        direction = request.args.get('direction', 'down')
+        limit = int(request.args.get('limit', 100))
+        
+        data = get_market_tickers(rank_type=rank_type, direction=direction, limit=limit)
+        
+        formatted_data = []
+        for idx, item in enumerate(data, 1):
+            formatted_data.append({
+                'symbol': item.symbol,
+                'rank_index': idx,
+                'price': float(item.last_price) if item.last_price else None,
+                'price_change_percent': float(item.price_change_percent) if item.price_change_percent else None,
+                'volume': float(item.volume) if item.volume else None,
+                'quote_volume': float(item.quote_volume) if item.quote_volume else None,
+            })
+        
+        close_time = get_latest_close_time()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'market rank data loaded',
+            'data': formatted_data,
+            'snapshot_time': close_time,
+        })
+    except Exception as e:
+        logger.error(f'加载行情榜数据失败: {e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load market rank data: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/binance-series/collect', methods=['POST'])

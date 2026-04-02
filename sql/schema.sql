@@ -123,3 +123,27 @@ CREATE TABLE IF NOT EXISTS binance_global_long_short_account_ratio (
     UNIQUE KEY uk_bglsar_symbol_period_time (symbol, period, event_time),
     KEY idx_bglsar_symbol_period_time (symbol, period, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Binance 全市场多空账户数比历史数据表';
+
+-- 行情快照原始数据表
+CREATE TABLE IF NOT EXISTS market_tickers (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    symbol VARCHAR(20) NOT NULL COMMENT '交易对',
+    price_change DECIMAL(24, 8) DEFAULT NULL COMMENT '价格变动',
+    price_change_percent DECIMAL(20, 8) DEFAULT NULL COMMENT '涨跌幅',
+    weighted_avg_price DECIMAL(24, 8) DEFAULT NULL COMMENT '加权平均价',
+    last_price DECIMAL(24, 8) DEFAULT NULL COMMENT '最新价',
+    last_qty DECIMAL(24, 8) DEFAULT NULL COMMENT '最新成交量',
+    open_price DECIMAL(24, 8) DEFAULT NULL COMMENT '开盘价',
+    high_price DECIMAL(24, 8) DEFAULT NULL COMMENT '最高价',
+    low_price DECIMAL(24, 8) DEFAULT NULL COMMENT '最低价',
+    volume DECIMAL(30, 8) DEFAULT NULL COMMENT '成交量',
+    quote_volume DECIMAL(30, 8) DEFAULT NULL COMMENT '成交额',
+    open_time BIGINT DEFAULT NULL COMMENT '24h窗口开始时间',
+    close_time BIGINT DEFAULT NULL COMMENT '24h窗口结束时间',
+    first_id BIGINT DEFAULT NULL COMMENT '首笔交易ID',
+    last_id BIGINT DEFAULT NULL COMMENT '末笔交易ID',
+    count BIGINT DEFAULT NULL COMMENT '交易笔数',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_symbol (symbol),
+    KEY idx_close_time (close_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='行情快照原始数据表';

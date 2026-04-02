@@ -2,15 +2,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from coinx.config import TIME_INTERVALS
 from coinx.utils import save_all_coins_data, logger
-# 避免循环引用，如果是从外部导入 binance_api，而 coin_manager 可能也导入 binance_api
-# 但是 coin_manager 的 get_all_coins_from_binance 似乎没有依赖 binance_api 的核心逻辑
 from coinx.coin_manager import get_active_coins
 from .market import (
     get_open_interest,
     get_latest_price,
     get_24hr_ticker,
     get_open_interest_history,
-    get_exchange_info
+    get_exchange_info,
+    get_all_24hr_tickers
 )
 from .indicators import get_net_inflow_data
 from .cache import should_update_cache, save_cached_data, get_cache_key, save_drop_list_cache, should_update_drop_list_cache, load_drop_list_cache
@@ -274,5 +273,66 @@ def update_drop_list_data(force_update=False):
         
     except Exception as e:
         logger.error(f"更新跌幅榜数据失败: {e}")
+        logger.exception(e)
+        return []
+
+
+def update_market_tickers(force_update=False):
+    """
+    采集行情快照数据并落库
+    :param force_update: 是否强制更新
+    """
+    from .market import get_exchange_info
+    from coinx.repositories.market_tickers import save_market_tickers
+    
+    try:
+        logger.info("开始采集行情快照数据...")
+        
+        valid_coins_list = get_exchange_info()
+        valid_symbols = set()
+        if valid_coins_list:
+            valid_symbols = {c['symbol'] for c in valid_coins_list}
+        
+        all_tickers = get_all_24hr_tickers()
+        
+        if valid_symbols:
+            filtered_tickers = [t for t in all_tickers if t['symbol'] in valid_symbols]
+        else:
+            filtered_tickers = all_tickers
+        
+        if not filtered_tickers:
+            logger.warning("没有获取到有效的行情数据")
+            return []
+        
+        collect_time = int(time.time() * 1000)
+        
+        records = []
+        for coin in filtered_tickers:
+            records.append({
+                'symbol': coin['symbol'],
+                'price_change': coin['priceChange'],
+                'price_change_percent': coin['priceChangePercent'],
+                'weighted_avg_price': coin['weightedAvgPrice'],
+                'last_price': coin['lastPrice'],
+                'last_qty': coin['lastQty'],
+                'open_price': coin['openPrice'],
+                'high_price': coin['highPrice'],
+                'low_price': coin['lowPrice'],
+                'volume': coin['volume'],
+                'quote_volume': coin['quoteVolume'],
+                'open_time': coin['openTime'],
+                'close_time': coin['closeTime'],
+                'first_id': coin['firstId'],
+                'last_id': coin['lastId'],
+                'count': coin['count'],
+            })
+        
+        saved_count = save_market_tickers(records, collect_time=collect_time)
+        logger.info(f"行情快照数据已落库，共 {saved_count} 条记录")
+        
+        return records
+        
+    except Exception as e:
+        logger.error(f"采集行情快照数据失败: {e}")
         logger.exception(e)
         return []

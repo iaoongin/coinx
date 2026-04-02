@@ -16,6 +16,7 @@ from coinx.models import (
     BinanceOpenInterestHist,
     BinanceKline,
     BinanceGlobalLongShortAccountRatio,
+    MarketTickers,
 )
 
 
@@ -30,6 +31,7 @@ def db_session():
             BinanceOpenInterestHist.__table__,
             BinanceKline.__table__,
             BinanceGlobalLongShortAccountRatio.__table__,
+            MarketTickers.__table__,
         ],
     )
     session = sessionmaker(bind=engine)()

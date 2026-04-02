@@ -168,6 +168,39 @@ class BinanceKline(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
 
+class MarketTickers(Base):
+    """行情快照原始数据表"""
+
+    __tablename__ = 'market_tickers'
+    __table_args__ = (
+        Index('idx_mt_symbol', 'symbol'),
+        Index('idx_mt_close_time', 'close_time'),
+        {'comment': '行情快照原始数据表'},
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
+    symbol = Column(String(20), nullable=False, comment='交易对')
+    price_change = Column(DECIMAL(24, 8), comment='价格变动')
+    price_change_percent = Column(DECIMAL(20, 8), comment='涨跌幅')
+    weighted_avg_price = Column(DECIMAL(24, 8), comment='加权平均价')
+    last_price = Column(DECIMAL(24, 8), comment='最新价')
+    last_qty = Column(DECIMAL(24, 8), comment='最新成交量')
+    open_price = Column(DECIMAL(24, 8), comment='开盘价')
+    high_price = Column(DECIMAL(24, 8), comment='最高价')
+    low_price = Column(DECIMAL(24, 8), comment='最低价')
+    volume = Column(DECIMAL(30, 8), comment='成交量')
+    quote_volume = Column(DECIMAL(30, 8), comment='成交额')
+    open_time = Column(BigInteger, comment='24h窗口开始时间')
+    close_time = Column(BigInteger, comment='24h窗口结束时间')
+    first_id = Column(BigInteger, comment='首笔交易ID')
+    last_id = Column(BigInteger, comment='末笔交易ID')
+    count = Column(BigInteger, comment='交易笔数')
+    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
+
+    def __repr__(self):
+        return f"<MarketTickers(symbol='{self.symbol}', close_time={self.close_time})>"
+
+
 class BinanceGlobalLongShortAccountRatio(Base):
     """Binance 全市场多空账户数比历史表"""
 
@@ -188,3 +221,6 @@ class BinanceGlobalLongShortAccountRatio(Base):
     raw_json = Column(JSON, comment='接口原始返回数据')
     created_at = Column(DateTime, default=datetime.now, comment='创建时间')
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+    def __repr__(self):
+        return f"<BinanceGlobalLongShortAccountRatio(symbol='{self.symbol}', period='{self.period}')>"

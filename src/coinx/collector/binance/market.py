@@ -136,17 +136,14 @@ def get_all_24hr_tickers():
     try:
         url = f"{BINANCE_BASE_URL}/fapi/v1/ticker/24hr"
         
-        # 使用会话
         session = get_session()
         logger.info(f"请求所有币种24小时价格变化数据: {url}")
         response = request_with_retry(session, url, timeout=20)
         response.raise_for_status()
         data = response.json()
         
-        # 转换数据格式
         result = []
         for item in data:
-            # 过滤掉非USDT合约，或者根据需求保留
             if not item['symbol'].endswith('USDT'):
                 continue
                 
@@ -154,11 +151,19 @@ def get_all_24hr_tickers():
                 'symbol': item['symbol'],
                 'priceChange': float(item['priceChange']),
                 'priceChangePercent': float(item['priceChangePercent']),
+                'weightedAvgPrice': float(item['weightedAvgPrice']),
                 'lastPrice': float(item['lastPrice']),
+                'lastQty': float(item['lastQty']),
+                'openPrice': float(item['openPrice']),
                 'highPrice': float(item['highPrice']),
                 'lowPrice': float(item['lowPrice']),
                 'volume': float(item['volume']),
-                'quoteVolume': float(item['quoteVolume'])
+                'quoteVolume': float(item['quoteVolume']),
+                'openTime': int(item['openTime']),
+                'closeTime': int(item['closeTime']),
+                'firstId': int(item['firstId']),
+                'lastId': int(item['lastId']),
+                'count': int(item['count']),
             })
             
         logger.info(f"获取到 {len(result)} 个币种的24小时数据")
