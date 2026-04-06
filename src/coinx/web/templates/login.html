@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CoinX 登录</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-1: #0f172a;
+      --bg-2: #1d4ed8;
+      --panel: rgba(255, 255, 255, 0.94);
+      --text: #0f172a;
+      --muted: #475569;
+      --line: rgba(148, 163, 184, 0.35);
+      --accent: #ea580c;
+      --accent-hover: #c2410c;
+      --error-bg: rgba(248, 113, 113, 0.12);
+      --error-text: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, rgba(251, 191, 36, 0.2), transparent 36%),
+        linear-gradient(135deg, var(--bg-1), var(--bg-2));
+    }
+
+    .panel {
+      width: 100%;
+      max-width: 420px;
+      padding: 32px 28px;
+      border-radius: 24px;
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.35);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+    }
+
+    .subtitle {
+      margin: 0 0 24px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus {
+      border-color: rgba(234, 88, 12, 0.6);
+      box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.14);
+    }
+
+    .error {
+      margin: 14px 0 0;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--error-bg);
+      color: var(--error-text);
+      font-size: 14px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 20px;
+      padding: 14px 16px;
+      border: none;
+      border-radius: 14px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.18s ease, background 0.18s ease;
+    }
+
+    button:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>CoinX</h1>
+    <p class="subtitle">网页服务已启用登录保护，请输入用户名和密码继续。</p>
+    <form method="post" action="{{ url_for('auth.login') }}">
+      <input type="hidden" name="next" value="{{ next_target }}" />
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" autocomplete="username" required />
+      <label for="password">访问密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" autofocus required />
+      {% if error_message %}
+      <div class="error">{{ error_message }}</div>
+      {% endif %}
+      <button type="submit">登录</button>
+    </form>
+  </main>
+</body>
+</html>
