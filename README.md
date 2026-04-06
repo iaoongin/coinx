@@ -90,6 +90,9 @@ mysql -u root -p coinx < sql/schema.sql
 | `WEB_HOST` | Web 服务监听地址 | `0.0.0.0` |
 | `WEB_PORT` | Web 服务端口 | `5000` |
 | `WEB_DEBUG` | 是否启用 Flask Debug，支持 `true/false/1/0/yes/no` | `false` |
+| `WEB_USERNAME` | 网页登录用户名 | `admin` |
+| `WEB_PASSWORD` | 网页登录密码，未配置时启动时会自动生成并打印到日志 | 随机生成 |
+| `WEB_SESSION_SECRET` | 会话签名密钥，未配置时自动生成 | 随机生成 |
 
 示例：
 
@@ -135,6 +138,8 @@ python scripts/start_app.py stop
 ```text
 http://127.0.0.1:5000
 ```
+
+首次访问网页会先进入 `/login` 登录页，需要输入 `WEB_USERNAME` 和 `WEB_PASSWORD`。如果没有配置 `WEB_PASSWORD`，系统会在启动日志中打印自动生成的临时密码。
 
 ## Pages
 

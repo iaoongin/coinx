@@ -29,6 +29,9 @@ def get_env(key, default=None, type_func=None):
 WEB_HOST = get_env('WEB_HOST', '0.0.0.0')
 WEB_PORT = get_env('WEB_PORT', 5500, int)
 WEB_DEBUG = get_env('WEB_DEBUG', False, bool)
+WEB_USERNAME = get_env('WEB_USERNAME', 'admin')
+WEB_PASSWORD = get_env('WEB_PASSWORD')
+WEB_SESSION_SECRET = get_env('WEB_SESSION_SECRET')
 
 UPDATE_INTERVAL = get_env('UPDATE_INTERVAL', 300, int)
 TIME_INTERVALS = get_env(
