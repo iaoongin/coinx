@@ -1,0 +1,29 @@
+{
+  "name": "coinx-playwright",
+  "version": "1.0.0",
+  "description": "Playwright tests for CoinX.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iaoongin/coinx.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/iaoongin/coinx/issues"
+  },
+  "homepage": "https://github.com/iaoongin/coinx#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "playwright": "^1.59.1"
+  }
+}

@@ -45,7 +45,7 @@ def main():
         
         # 在主线程中启动Web服务
         logger.info(f"启动Web服务: http://{WEB_HOST}:{WEB_PORT}")
-        app.run(debug=WEB_DEBUG, host=WEB_HOST, port=WEB_PORT, use_reloader=False)
+        app.run(debug=WEB_DEBUG, host=WEB_HOST, port=WEB_PORT, use_reloader=WEB_DEBUG)
     except KeyboardInterrupt:
         logger.info("接收到键盘中断信号")
     except Exception as e:

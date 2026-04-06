@@ -97,6 +97,12 @@ db.sqlite3-journal
 .env.local
 .env.*.local
 
+# Playwright
+tests/playwright/node_modules/
+tests/playwright/.artifacts/
+playwright-report/
+test-results/
+
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -111,8 +117,5 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-
+# data
 data
-
-application-dev.yml
-application-prod.yml
