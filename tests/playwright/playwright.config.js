@@ -22,7 +22,7 @@ module.exports = defineConfig({
     },
   ],
   webServer: {
-    command: 'cd ../.. && PYTHONPATH=src python src/coinx/web/app.py',
+    command: 'cd ../.. && WEB_PASSWORD=playwright-test-password PYTHONPATH=src python src/coinx/web/app.py',
     port: 5500,
     timeout: 120000,
     reuseExistingServer: !process.env.CI,

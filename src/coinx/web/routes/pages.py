@@ -33,6 +33,13 @@ def market_rank():
     return render_template('market_rank.html')
 
 
+@pages_bp.route('/hedge-calculator')
+def hedge_calculator():
+    """对冲计算器页面"""
+    logger.info("访问对冲计算器页面")
+    return render_template('hedge_calculator.html')
+
+
 @pages_bp.route('/binance-series')
 def binance_series():
     """Binance 历史序列管理页面"""

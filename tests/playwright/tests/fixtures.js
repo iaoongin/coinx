@@ -327,6 +327,15 @@ const test = base.extend({
 
     await use(context);
   },
+  page: async ({ page }, use) => {
+    await page.goto('/login');
+    await page.locator('#username').fill('admin');
+    await page.locator('#password').fill('playwright-test-password');
+    await page.getByRole('button', { name: '登录' }).click();
+    await expect(page).toHaveURL(/\/$/);
+
+    await use(page);
+  },
 });
 
 module.exports = {

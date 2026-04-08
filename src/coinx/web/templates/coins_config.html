@@ -9,9 +9,9 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <style>
-    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); font-size: 14px; color: #333; }
-    #app { max-width: 1200px; margin: 0 auto; }
-    .config-container { background-color: rgba(255, 255, 255, 0.95); padding: 25px; border-radius: var(--page-surface-radius); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); min-height: 78vh; }
+    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: var(--page-padding); background: var(--page-bg-gradient); font-size: 14px; color: #333; }
+    #app { max-width: var(--page-max-width); margin: 0 auto; }
+    .config-container { background-color: var(--page-surface-bg); padding: var(--page-surface-padding); border-radius: var(--page-surface-radius); box-shadow: var(--page-surface-shadow); min-height: 78vh; }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #ecf0f1; }
     .header h1 { margin: 0; color: #2c3e50; font-size: 28px; font-weight: 600; }
     @media (max-width: 768px) {

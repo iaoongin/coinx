@@ -10,6 +10,9 @@
   <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <style>
     :root {
+      --page-max-width: 1200px;
+      --page-padding: 20px;
+      --page-bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       --bg-a: #4f46e5;
       --bg-b: #0f766e;
       --panel: rgba(255, 255, 255, 0.94);
@@ -28,10 +31,10 @@
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
       color: var(--text);
       background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.18), transparent 28%),
-                  linear-gradient(140deg, #667eea, #764ba2);
-      padding: 20px;
+                  var(--page-bg-gradient);
+      padding: var(--page-padding);
     }
-    #app { max-width: 1200px; margin: 0 auto; }
+    #app { max-width: var(--page-max-width); margin: 0 auto; }
     .shell {
       background: var(--panel);
       backdrop-filter: blur(8px);
