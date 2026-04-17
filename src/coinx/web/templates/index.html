@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>
     body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: var(--page-padding); background: var(--page-bg-gradient); font-size: 14px; color: #333; }
     #app { max-width: var(--page-max-width); margin: 0 auto; }
@@ -19,6 +20,7 @@
     .positive { color: #27ae60; font-weight: 600; }
     .negative { color: #e74c3c; font-weight: 600; }
     .table-wrapper { margin-top: 25px; border-radius: 12px; overflow-x: auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08); background: white; }
+    .mini-chart { width: 80px; height: 30px; }
     table { width: 100%; border-collapse: separate; border-spacing: 0; }
     thead { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
     th { background: transparent; padding: 16px 14px; text-align: center; font-size: 12px; font-weight: 700; color: #f8fafc; border: none; white-space: nowrap; text-shadow: 0 1px 1px rgba(15, 23, 42, 0.28); }
@@ -67,6 +69,7 @@
             <tr>
               <th style="position: sticky; left: 0; z-index: 20;">币种</th>
               <th>类型</th>
+              <th>趋势</th>
               <th>当前</th>
               <th v-for="interval in intervals" :key="interval">{{ interval }}</th>
             </tr>
@@ -76,9 +79,10 @@
               <!-- 持仓量行 -->
               <tr>
                 <td :rowspan="4" class="symbol-cell">
-                  <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-link">{{ coin.symbol }}</a>
+                  <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-link">{{ coin.symbol.replace('USDT', '') }}</a>
                 </td>
                 <td class="type-cell">持仓量</td>
+                <td><div :id="'chart-oi-' + index" class="mini-chart"></div></td>
                 <td>{{ coin.current_open_interest_formatted || 'N/A' }}</td>
                 <td v-for="change in getChangesForType(coin, 'ratio')" :key="change.interval" class="change-cell">
                   <div class="ratio" :class="getChangeClass(change.ratio)">{{ formatChange(change.ratio) }}</div>
@@ -88,6 +92,7 @@
               <!-- 持仓价值行 -->
               <tr>
                 <td class="type-cell">持仓价值</td>
+                <td><div :id="'chart-value-' + index" class="mini-chart"></div></td>
                 <td>{{ coin.current_open_interest_value_formatted || 'N/A' }}</td>
                 <td v-for="change in getChangesForType(coin, 'value_ratio')" :key="change.interval" class="change-cell">
                   <div class="ratio" :class="getChangeClass(change.value_ratio)">{{ formatChange(change.value_ratio) }}</div>
@@ -97,6 +102,7 @@
               <!-- 价格行 -->
               <tr>
                 <td class="type-cell">价格</td>
+                <td><div :id="'chart-price-' + index" class="mini-chart"></div></td>
                 <td>{{ coin.current_price_formatted || 'N/A' }}</td>
                 <td v-for="change in getChangesForType(coin, 'price_change')" :key="change.interval" class="change-cell">
                   <div class="ratio" :class="getChangeClass(change.price_change_percent)">{{ formatChange(change.price_change_percent) }}</div>
@@ -106,6 +112,7 @@
               <!-- 主力净流入行 -->
               <tr>
                 <td class="type-cell">主力净流入</td>
+                <td><div :id="'chart-inflow-' + index" class="mini-chart"></div></td>
                 <td :class="getNetInflowClass(coin.net_inflow?.['5m'])">{{ formatNetInflow(coin.net_inflow?.['5m']) }}</td>
                 <td v-for="interval in intervals" :key="interval" :class="getNetInflowClass(coin.net_inflow?.[interval])">
                   {{ formatNetInflow(coin.net_inflow?.[interval]) }}
@@ -123,7 +130,7 @@
   </div>
 
   <script>
-    const { createApp, ref, onMounted, onUnmounted } = Vue;
+    const { createApp, ref, onMounted, onUnmounted, nextTick } = Vue;
 
     const App = {
       setup() {
@@ -161,6 +168,80 @@
         const getChangesForType = (coin, type) => {
           if (!coin.changes || !Array.isArray(coin.changes)) return [];
           return coin.changes.map(c => ({ ...c, type }));
+        };
+
+        const initCharts = (coins) => {
+          nextTick(() => {
+            coins.forEach((coin, index) => {
+              if (!coin.changes || !coin.changes.length) return;
+              
+              const oiData = coin.changes.map(c => c.ratio ?? 0);
+              const valueData = coin.changes.map(c => c.value_ratio ?? 0);
+              const priceData = coin.changes.map(c => c.price_change_percent ?? 0);
+              const intervalsList = coin.changes.map(c => c.interval);
+              const inflowData = intervalsList.map(intv => coin.net_inflow?.[intv] ?? 0);
+
+              const createChart = (domId, data, color) => {
+                const dom = document.getElementById(domId);
+                if (!dom || !data || data.length < 2) return;
+                const chart = echarts.init(dom, null, { renderer: 'svg' });
+                
+                chart.setOption({
+                  grid: { left: 0, right: 0, top: 0, bottom: 0 },
+                  xAxis: { show: false, type: 'value', min: 0, max: data.length - 1 },
+                  yAxis: { show: false, type: 'value' },
+                  series: [{
+                    type: 'custom',
+                    renderItem: (params, api) => {
+                      const lines = [];
+                      const zeroY = api.coord([0, 0])[1];
+                      
+                      for (let i = 0; i < data.length - 1; i++) {
+                        const val1 = data[i];
+                        const val2 = data[i + 1];
+                        if (val1 === null || val2 === null) continue;
+                        
+                        const startPoint = api.coord([i, val1]);
+                        const endPoint = api.coord([i + 1, val2]);
+                        
+                        if ((val1 >= 0 && val2 >= 0) || (val1 <= 0 && val2 <= 0)) {
+                          const color = val1 >= 0 ? '#27ae60' : '#e74c3c';
+                          lines.push({
+                            type: 'line',
+                            shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
+                            style: { stroke: color, lineWidth: 1.5 }
+                          });
+                        } else {
+                          const t = Math.abs(val1) / (Math.abs(val1) + Math.abs(val2));
+                          const crossX = startPoint[0] + t * (endPoint[0] - startPoint[0]);
+                          
+                          lines.push({
+                            type: 'line',
+                            shape: { x1: startPoint[0], y1: startPoint[1], x2: crossX, y2: zeroY },
+                            style: { stroke: '#27ae60', lineWidth: 1.5 }
+                          });
+                          lines.push({
+                            type: 'line',
+                            shape: { x1: crossX, y1: zeroY, x2: endPoint[0], y2: endPoint[1] },
+                            style: { stroke: '#e74c3c', lineWidth: 1.5 }
+                          });
+                        }
+                      }
+                      
+                      return { type: 'group', children: lines };
+                    },
+                    data: data
+                  }],
+                  tooltip: { show: false }
+                });
+              };
+
+              createChart(`chart-oi-${index}`, oiData);
+              createChart(`chart-value-${index}`, valueData);
+              createChart(`chart-price-${index}`, priceData);
+              createChart(`chart-inflow-${index}`, inflowData);
+            });
+          });
         };
 
         const updateCountdown = () => {
@@ -204,15 +285,16 @@
             const result = await dataResponse.json();
             
             if (result.status === 'success') {
-              tableData.value = result.data || [];
-              if (result.data && result.data.length > 0 && result.data[0].changes) {
-                intervals.value = result.data[0].changes.map(c => c.interval);
+                tableData.value = result.data || [];
+                if (result.data && result.data.length > 0 && result.data[0].changes) {
+                  intervals.value = result.data[0].changes.map(c => c.interval);
+                }
+                if (result.cache_update_time) {
+                  lastUpdateTime.value = new Date(result.cache_update_time).toLocaleString('zh-CN');
+                  startCountdown();
+                }
+                initCharts(result.data || []);
               }
-              if (result.cache_update_time) {
-                lastUpdateTime.value = new Date(result.cache_update_time).toLocaleString('zh-CN');
-                startCountdown();
-              }
-            }
           } catch (error) {
             console.error('加载数据失败:', error);
           } finally {
