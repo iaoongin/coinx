@@ -195,8 +195,10 @@
         const loadData = async (force = false) => {
           loading.value = true;
           try {
-            const response = await fetch(force ? '/api/update?force=true' : '/api/update');
-            await response.json();
+            if (force) {
+              const response = await fetch('/api/update?force=true');
+              await response.json();
+            }
             
             const dataResponse = await fetch('/api/coins');
             const result = await dataResponse.json();
