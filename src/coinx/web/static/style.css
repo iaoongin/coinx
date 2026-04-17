@@ -39,10 +39,6 @@ body {
   align-items: center;
   border-radius: var(--page-surface-radius);
   margin-bottom: var(--page-section-gap);
-  position: sticky;
-  top: var(--nav-sticky-top);
-  z-index: 100;
-  backdrop-filter: blur(8px);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
