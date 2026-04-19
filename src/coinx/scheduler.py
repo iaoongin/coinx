@@ -1,6 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from .collector import repair_tracked_symbols, run_series_repair_job, update_drop_list_data, update_market_tickers
+from .collector import repair_tracked_symbols, run_series_repair_job, update_market_tickers
 from .coin_manager import get_active_coins, update_coins_config
 from .config import BINANCE_SERIES_REPAIR_INTERVAL, UPDATE_INTERVAL
 from .repositories.homepage_series import (
@@ -15,7 +15,7 @@ scheduler = BackgroundScheduler()
 
 @scheduler.scheduled_job('interval', seconds=UPDATE_INTERVAL, id='update_data_job')
 def scheduled_update():
-    """Refresh homepage-required series and keep drop-list updates running."""
+    """Refresh homepage-required series and update market tickers."""
     try:
         logger.info('开始执行定时首页历史序列刷新任务')
         symbols = get_active_coins()
@@ -28,7 +28,6 @@ def scheduled_update():
         else:
             logger.info('本轮首页历史序列已是最新，跳过修补')
 
-        update_drop_list_data()
         update_market_tickers()
         logger.info('定时首页历史序列刷新任务完成')
     except Exception as e:

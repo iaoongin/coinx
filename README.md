@@ -149,8 +149,6 @@ http://127.0.0.1:5000
   - 币种配置管理
 - `/coin-detail`
   - 单币详情
-- `/drop-list`
-  - 跌幅榜
 
 ## API
 
@@ -160,8 +158,6 @@ http://127.0.0.1:5000
   - 手动触发一次刷新
 - `GET /api/coin-detail/<symbol>`
   - 获取单币详情
-- `GET /api/drop-list`
-  - 获取跌幅榜
 - `GET /api/coins-config`
   - 获取币种配置
 - `POST /api/coins-config/track`

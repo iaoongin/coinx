@@ -1,11 +1,8 @@
 from coinx.scheduler import scheduled_update
 
 
-def test_scheduled_update_repairs_homepage_series_and_updates_drop_list(monkeypatch):
-    calls = {'repair': None, 'drop_list': 0}
-
-    def fail_old_path(*args, **kwargs):
-        raise AssertionError('old scheduler path should not be used')
+def test_scheduled_update_repairs_homepage_series_and_updates_market_tickers(monkeypatch):
+    calls = {'repair': None, 'market_tickers': 0}
 
     def fake_repair(symbols=None, series_types=None):
         calls['repair'] = {
@@ -14,15 +11,13 @@ def test_scheduled_update_repairs_homepage_series_and_updates_drop_list(monkeypa
         }
         return {'status': 'success', 'results': []}
 
-    monkeypatch.setattr('coinx.scheduler.update_all_data', fail_old_path, raising=False)
-    monkeypatch.setattr('coinx.scheduler.should_update_cache', fail_old_path, raising=False)
+    def fake_update_market_tickers(force_update=False):
+        calls['market_tickers'] += 1
+
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT'])
-    monkeypatch.setattr('coinx.scheduler.should_refresh_homepage_series', lambda symbols: True, raising=False)
-    monkeypatch.setattr('coinx.scheduler.repair_tracked_symbols', fake_repair, raising=False)
-    monkeypatch.setattr(
-        'coinx.scheduler.update_drop_list_data',
-        lambda: calls.__setitem__('drop_list', calls['drop_list'] + 1),
-    )
+    monkeypatch.setattr('coinx.scheduler.should_refresh_homepage_series', lambda symbols: True)
+    monkeypatch.setattr('coinx.scheduler.repair_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.scheduler.update_market_tickers', fake_update_market_tickers)
 
     scheduled_update()
 
@@ -30,30 +25,24 @@ def test_scheduled_update_repairs_homepage_series_and_updates_drop_list(monkeypa
         'symbols': ['BTCUSDT'],
         'series_types': ['klines', 'open_interest_hist'],
     }
-    assert calls['drop_list'] == 1
+    assert calls['market_tickers'] == 1
 
 
 def test_scheduled_update_skips_repair_when_homepage_series_is_fresh(monkeypatch):
-    calls = {'repair': 0, 'drop_list': 0}
+    calls = {'repair': 0, 'market_tickers': 0}
 
-    def fail_old_path(*args, **kwargs):
-        raise AssertionError('old scheduler path should not be used')
+    def fake_update_market_tickers(force_update=False):
+        calls['market_tickers'] += 1
 
-    monkeypatch.setattr('coinx.scheduler.update_all_data', fail_old_path, raising=False)
-    monkeypatch.setattr('coinx.scheduler.should_update_cache', fail_old_path, raising=False)
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT'])
-    monkeypatch.setattr('coinx.scheduler.should_refresh_homepage_series', lambda symbols: False, raising=False)
+    monkeypatch.setattr('coinx.scheduler.should_refresh_homepage_series', lambda symbols: False)
     monkeypatch.setattr(
         'coinx.scheduler.repair_tracked_symbols',
         lambda **kwargs: calls.__setitem__('repair', calls['repair'] + 1),
-        raising=False,
     )
-    monkeypatch.setattr(
-        'coinx.scheduler.update_drop_list_data',
-        lambda: calls.__setitem__('drop_list', calls['drop_list'] + 1),
-    )
+    monkeypatch.setattr('coinx.scheduler.update_market_tickers', fake_update_market_tickers)
 
     scheduled_update()
 
     assert calls['repair'] == 0
-    assert calls['drop_list'] == 1
+    assert calls['market_tickers'] == 1

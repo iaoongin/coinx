@@ -14,11 +14,9 @@ from coinx.collector import (
     get_net_inflow_data as get_net_inflow_data_real,
     get_open_interest,
     repair_tracked_symbols,
-    update_drop_list_data,
     update_market_tickers,
 )
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
-from coinx.collector.binance.cache import get_drop_list_cache_update_time
 from coinx.config import (
     BINANCE_SERIES_LIMIT,
     BINANCE_SERIES_PERIODS,
@@ -214,27 +212,6 @@ def get_coin_detail(symbol):
         logger.error(f'加载币种详情失败: {symbol}, 错误: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load coin detail: {str(e)}'}), 500
-
-
-@api_data_bp.route('/api/drop-list')
-def get_drop_list():
-    logger.info('开始加载跌幅榜数据')
-    try:
-        force = request.args.get('force', 'false').lower() == 'true'
-        data = update_drop_list_data(force_update=force)
-        cache_update_time = get_drop_list_cache_update_time()
-        return jsonify(
-            {
-                'status': 'success',
-                'message': 'drop-list data loaded',
-                'data': data,
-                'cache_update_time': cache_update_time,
-            }
-        )
-    except Exception as e:
-        logger.error(f'加载跌幅榜数据失败: {e}')
-        logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to load drop-list data: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/market-rank')
