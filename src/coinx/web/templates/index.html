@@ -32,6 +32,7 @@
     td .ratio { font-weight: 600; margin-bottom: 2px; }
     td .value { font-size: 11px; color: #6b7280; }
     tbody tr:nth-child(6n+2) td, tbody tr:nth-child(6n+3) td, tbody tr:nth-child(6n+4) td { background: #f9fafb; }
+    tbody tr.coin-group-end td { padding-bottom: 16px !important; border-bottom: 2px solid #d1d5db; }
     tbody tr:hover td { background-color: #eef2ff !important; }
     .coin-link { color: #667eea; text-decoration: none; font-weight: 600; }
     .coin-link:hover { text-decoration: underline; }
@@ -110,7 +111,7 @@
                 </td>
               </tr>
               <!-- 主力净流入行 -->
-              <tr>
+              <tr class="coin-group-end">
                 <td class="type-cell">主力净流入</td>
                 <td><div :id="'chart-inflow-' + index" class="mini-chart"></div></td>
                 <td :class="getNetInflowClass(coin.net_inflow?.['5m'])">{{ formatNetInflow(coin.net_inflow?.['5m']) }}</td>
