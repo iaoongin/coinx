@@ -247,25 +247,21 @@
 
         const updateCountdown = () => {
           const now = new Date();
+          // 计算下一个1分钟整点
           const nextRefreshTime = new Date(now);
-          nextRefreshTime.setMinutes(Math.ceil(nextRefreshTime.getMinutes() / 5) * 5);
           nextRefreshTime.setSeconds(0);
           nextRefreshTime.setMilliseconds(0);
+          nextRefreshTime.setTime(nextRefreshTime.getTime() + 60000);
           
-          if (nextRefreshTime <= now) {
-            nextRefreshTime.setTime(nextRefreshTime.getTime() + 5 * 60 * 1000);
-          }
-
           const timeDiff = nextRefreshTime - now;
-          if (timeDiff <= 0) {
-            loadData();
-            return;
+          
+          // 当剩余时间 <= 1秒时自动刷新数据
+          if (timeDiff <= 1000) {
+            loadData(false);
           }
 
           const seconds = Math.floor(timeDiff / 1000);
-          const minutes = Math.floor(seconds / 60);
-          const secs = seconds % 60;
-          countdown.value = `${minutes}:${secs.toString().padStart(2, '0')}`;
+          countdown.value = `${seconds}秒`;
         };
 
         const startCountdown = () => {
