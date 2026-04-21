@@ -4,19 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CoinX 登录</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      color-scheme: light;
-      --bg-1: #0f172a;
-      --bg-2: #1d4ed8;
-      --panel: rgba(255, 255, 255, 0.94);
-      --text: #0f172a;
-      --muted: #475569;
-      --line: rgba(148, 163, 184, 0.35);
-      --accent: #ea580c;
-      --accent-hover: #c2410c;
-      --error-bg: rgba(248, 113, 113, 0.12);
-      --error-text: #b91c1c;
+      --bg-primary: #0a0e17;
+      --bg-card: #151c28;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --border-default: rgba(255, 255, 255, 0.1);
+      --accent: #00d4aa;
+      --accent-hover: #00b894;
+      --error-bg: rgba(239, 68, 68, 0.12);
+      --error-text: #ef4444;
     }
 
     * {
@@ -30,77 +32,89 @@
       align-items: center;
       justify-content: center;
       padding: 24px;
-      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      color: var(--text);
-      background:
-        radial-gradient(circle at top, rgba(251, 191, 36, 0.2), transparent 36%),
-        linear-gradient(135deg, var(--bg-1), var(--bg-2));
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+      color: var(--text-primary);
+      background: var(--bg-primary);
     }
 
     .panel {
       width: 100%;
-      max-width: 420px;
+      max-width: 380px;
       padding: 32px 28px;
-      border-radius: 24px;
-      background: var(--panel);
-      backdrop-filter: blur(18px);
-      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.35);
+      border-radius: 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
 
     h1 {
-      margin: 0 0 10px;
-      font-size: 30px;
+      margin: 0 0 8px;
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    h1 span {
+      color: var(--accent);
     }
 
     .subtitle {
       margin: 0 0 24px;
-      color: var(--muted);
-      line-height: 1.6;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.5;
     }
 
     label {
       display: block;
       margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 600;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
     }
 
     input[type="text"],
     input[type="password"] {
       width: 100%;
-      padding: 14px 16px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      font-size: 15px;
+      padding: 12px 14px;
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      font-size: 14px;
+      color: var(--text-primary);
+      background: var(--bg-primary);
       outline: none;
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
     input[type="text"]:focus,
     input[type="password"]:focus {
-      border-color: rgba(234, 88, 12, 0.6);
-      box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.14);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.15);
+    }
+
+    input::placeholder {
+      color: var(--text-muted);
     }
 
     .error {
       margin: 14px 0 0;
       padding: 12px 14px;
-      border-radius: 12px;
+      border-radius: 8px;
       background: var(--error-bg);
       color: var(--error-text);
-      font-size: 14px;
+      font-size: 13px;
     }
 
     button {
       width: 100%;
       margin-top: 20px;
-      padding: 14px 16px;
+      padding: 12px 16px;
       border: none;
-      border-radius: 14px;
+      border-radius: 8px;
       background: var(--accent);
-      color: #fff;
-      font-size: 15px;
-      font-weight: 700;
+      color: var(--bg-primary);
+      font-size: 14px;
+      font-weight: 600;
       cursor: pointer;
       transition: transform 0.18s ease, background 0.18s ease;
     }
@@ -113,7 +127,7 @@
 </head>
 <body>
   <main class="panel">
-    <h1>CoinX</h1>
+    <h1><span>◈</span> CoinX</h1>
     <p class="subtitle">网页服务已启用登录保护，请输入用户名和密码继续。</p>
     <form method="post" action="{{ url_for('auth.login') }}">
       <input type="hidden" name="next" value="{{ next_target }}" />

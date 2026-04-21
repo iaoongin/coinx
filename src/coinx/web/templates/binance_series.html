@@ -4,76 +4,250 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Binance 历史序列管理</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <style>
     :root {
       --page-max-width: 1200px;
       --page-padding: 20px;
-      --page-bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      --bg-a: #4f46e5;
-      --bg-b: #0f766e;
-      --panel: rgba(255, 255, 255, 0.94);
-      --text: #1f2937;
-      --muted: #6b7280;
-      --line: #dbe4f0;
-      --primary: #2563eb;
-      --primary-hover: #1d4ed8;
-      --page-surface-radius: 16px;
-      --page-section-gap: 24px;
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      color: var(--text);
-      background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.18), transparent 28%),
-                  var(--page-bg-gradient);
+      font-family: 'Noto Sans SC', sans-serif;
+      color: var(--text-primary);
       padding: var(--page-padding);
     }
-    #app { max-width: var(--page-max-width); margin: 0 auto; }
+
+    #app { max-width: var(--page-max-width); margin: 20px auto; }
+
     .shell {
-      background: var(--panel);
-      backdrop-filter: blur(8px);
-      border-radius: var(--page-surface-radius);
-      padding: 28px;
-      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 24px;
+      margin-bottom: 20px;
+      animation: fadeInUp 0.5s ease;
     }
-    .title-block h1 { margin: 0 0 8px; font-size: 30px; color: #0f172a; }
-    .title-block p { margin: 0; color: var(--muted); font-size: 14px; }
-    .title-block { margin-bottom: 24px; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+
+    .title-block {
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .title-block h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+
+    .title-block h1 span {
+      color: var(--gold-primary);
+    }
+
+    .title-block p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
     .card {
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid rgba(219, 228, 240, 0.9);
-      border-radius: 20px;
-      padding: 22px;
-      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-    }
-    .card h2 { margin: 0 0 10px; font-size: 20px; }
-    .card p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
-    .result-panel {
-      margin-top: 24px;
-      background: #0f172a;
-      color: #e2e8f0;
-      border-radius: 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius);
       padding: 20px;
     }
-    .result-panel h3 { margin: 0 0 10px; font-size: 18px; }
-    .result-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+
+    .card h2 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .card p {
+      margin: 0 0 14px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .result-panel {
+      margin-top: 24px;
+      background: #0d1117;
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius);
+      padding: 20px;
+    }
+
+    .result-panel h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: var(--gold-primary);
+    }
+
+    .result-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
     pre {
       margin: 0;
-      max-height: 360px;
+      max-height: 320px;
       overflow: auto;
       white-space: pre-wrap;
       word-break: break-word;
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 13px;
+      font-family: var(--font-mono);
+      font-size: 12px;
       line-height: 1.6;
+      color: var(--text-secondary);
     }
+
+    .help-text {
+      margin-top: 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .badge {
+      display: inline-flex;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+    }
+
+    .badge.success {
+      background: var(--positive-dim);
+      color: var(--positive);
+    }
+
+    .badge.warning {
+      background: var(--gold-dim);
+      color: var(--gold-primary);
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      color: #080808;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.4);
+    }
+
+    .btn-default {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-default);
+    }
+
+    .btn-default:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .form-input,
+    .form-textarea,
+    .form-select {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 14px;
+      transition: all var(--transition-fast);
+    }
+
+    .form-input:focus,
+    .form-textarea:focus,
+    .form-select:focus {
+      outline: none;
+      border-color: var(--gold-primary);
+      box-shadow: 0 0 0 3px var(--gold-dim);
+    }
+
+    .form-textarea {
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .form-select {
+      cursor: pointer;
+    }
+
+    .alert {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .alert-info {
+      background: var(--gold-dim);
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      color: var(--gold-primary);
+    }
+
+    .alert-success {
+      background: var(--positive-dim);
+      border: 1px solid rgba(52, 211, 153, 0.2);
+      color: var(--positive);
+    }
+
+    .alert-error {
+      background: var(--negative-dim);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+      color: var(--negative);
+    }
+
     @media (max-width: 960px) {
       .grid { grid-template-columns: 1fr; }
     }
@@ -82,87 +256,93 @@
 <body>
   <div id="app">
     {% include 'components/nav.html' %}
-    
+
     <div class="shell">
       <div class="title-block">
-        <h1>Binance 历史序列管理</h1>
+        <h1><span>◇</span> Binance 历史序列管理</h1>
         <p>交易对默认来自当前跟踪配置，类型、周期和 limit 默认来自后端配置。</p>
       </div>
 
-      <el-alert v-if="status.message" :title="status.message" :type="status.type" :closable="false" show-icon style="margin-bottom: 18px;"></el-alert>
+      {% raw %}
+      <div class="alert" :class="'alert-' + status.type" v-if="status.message">
+        {{ status.message }}
+      </div>
 
       <div class="grid">
         <section class="card">
           <h2>缺口修补</h2>
           <p>按系统规则修补当前 tracked coins 的尾部缺口，只处理 5m 周期。</p>
-          <el-form label-position="top">
-            <el-form-item label="跟踪币种">
-              <el-input type="textarea" v-model="repairForm.trackedSymbols" :rows="3" readonly></el-input>
-              <div class="help-text">修补对象固定来自当前已跟踪币种，页面会自动加载并展示。</div>
-            </el-form-item>
-            <el-form-item label="修补序列类型">
-              <el-input type="textarea" v-model="repairForm.seriesTypes" :rows="2"></el-input>
-              <div class="help-text">默认会填充全部支持的 5 个序列，也可以手动删减后再执行。</div>
-            </el-form-item>
-            <div class="help-text">修补按尾部缺口分页推进，适合补停机期间缺失的数据；不适合替代临时采集。</div>
-            <div style="margin-top: 10px;">
-              <el-button type="primary" @click="submitRepair" :loading="loading.repair">执行缺口修补</el-button>
-              <el-button @click="reloadRepairTracked">刷新跟踪币种</el-button>
-            </div>
-          </el-form>
+          <div class="form-group">
+            <label class="form-label">跟踪币种</label>
+            <textarea class="form-textarea" v-model="repairForm.trackedSymbols" :rows="3" readonly></textarea>
+            <div class="help-text">修补对象固定来自当前已跟踪币种，页面会自动加载并展示。</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">修补序列类型</label>
+            <textarea class="form-textarea" v-model="repairForm.seriesTypes" :rows="2"></textarea>
+            <div class="help-text">默认会填充全部支持的 5 个序列，也可以手动删减后再执行。</div>
+          </div>
+          <div class="help-text">修补按尾部缺口分页推进，适合补停机期间缺失的数据；不适合替代临时采集。</div>
+          <div style="margin-top: 12px;">
+            <button class="btn btn-primary" @click="submitRepair" :disabled="loading.repair"><span v-if="loading.repair">执行中...</span><span v-else>执行缺口修补</span></button>
+            <button class="btn btn-default" @click="reloadRepairTracked">刷新跟踪币种</button>
+          </div>
         </section>
 
         <section class="card">
           <h2>手动采集</h2>
           <p>按单个接口类型、交易对和周期触发一次采集。</p>
-          <el-form label-position="top">
-            <el-form-item label="序列类型">
-              <el-select v-model="singleForm.seriesType" style="width: 100%;">
-                <el-option v-for="t in config.seriesTypes" :key="t" :label="t" :value="t"></el-option>
-              </el-select>
-            </el-form-item>
-            <el-form-item label="交易对">
-              <el-input v-model="singleForm.symbol" placeholder="将自动填充第一个跟踪币种"></el-input>
-            </el-form-item>
-            <el-form-item label="周期">
-              <el-input v-model="singleForm.period"></el-input>
-            </el-form-item>
-            <el-form-item label="抓取条数">
-              <el-input-number v-model="singleForm.limit" :min="1" :max="1000"></el-input-number>
-            </el-form-item>
-            <div class="help-text">适合验证单个接口是否能正常抓取并入库。</div>
-            <div style="margin-top: 10px;">
-              <el-button type="primary" @click="submitSingle" :loading="loading.single">执行单条采集</el-button>
-            </div>
-          </el-form>
+          <div class="form-group">
+            <label class="form-label">序列类型</label>
+            <select class="form-select" v-model="singleForm.seriesType">
+              <option v-for="t in config.seriesTypes" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">交易对</label>
+            <input type="text" class="form-input" v-model="singleForm.symbol" placeholder="将自动填充第一个跟踪币种">
+          </div>
+          <div class="form-group">
+            <label class="form-label">周期</label>
+            <input type="text" class="form-input" v-model="singleForm.period">
+          </div>
+          <div class="form-group">
+            <label class="form-label">抓取条数</label>
+            <input type="number" class="form-input" v-model.number="singleForm.limit" min="1" max="1000">
+          </div>
+          <div class="help-text">适合验证单个接口是否能正常抓取并入库。</div>
+          <div style="margin-top: 12px;">
+            <button class="btn btn-primary" @click="submitSingle" :disabled="loading.single"><span v-if="loading.single">执行中...</span><span v-else>执行单条采集</span></button>
+          </div>
         </section>
 
         <section class="card" style="grid-column: 1 / -1;">
           <h2>批量采集</h2>
           <p>一次触发多个交易对、多个周期、多个序列类型的组合采集。</p>
-          <el-form label-position="top">
-            <el-form-item label="交易对列表">
-              <el-input type="textarea" v-model="batchForm.symbols" :rows="3"></el-input>
-              <div class="help-text">默认会自动填充当前已跟踪币种，也可以手动编辑，使用英文逗号分隔。</div>
-            </el-form-item>
-            <el-form-item label="周期列表">
-              <el-input type="textarea" v-model="batchForm.periods" :rows="2"></el-input>
-            </el-form-item>
-            <el-form-item label="序列类型列表">
-              <el-input type="textarea" v-model="batchForm.seriesTypes" :rows="2"></el-input>
-            </el-form-item>
-            <el-form-item label="抓取条数">
-              <el-input-number v-model="batchForm.limit" :min="1" :max="1000"></el-input-number>
-            </el-form-item>
-            <div style="margin-top: 10px;">
-              <el-button type="primary" @click="submitBatch" :loading="loading.batch">执行批量采集</el-button>
-              <el-button @click="fillTrackedSymbols">填充跟踪币种</el-button>
-            </div>
-          </el-form>
+          <div class="form-group">
+            <label class="form-label">交易对列表</label>
+            <textarea class="form-textarea" v-model="batchForm.symbols" :rows="3"></textarea>
+            <div class="help-text">默认会自动填充当前已跟踪币种，也可以手动编辑，使用英文逗号分隔。</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">周期列表</label>
+            <textarea class="form-textarea" v-model="batchForm.periods" :rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">序列类型列表</label>
+            <textarea class="form-textarea" v-model="batchForm.seriesTypes" :rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">抓取条数</label>
+            <input type="number" class="form-input" v-model.number="batchForm.limit" min="1" max="1000">
+          </div>
+          <div style="margin-top: 12px;">
+            <button class="btn btn-primary" @click="submitBatch" :disabled="loading.batch"><span v-if="loading.batch">执行中...</span><span v-else>执行批量采集</span></button>
+            <button class="btn btn-default" @click="fillTrackedSymbols">填充跟踪币种</button>
+          </div>
         </section>
       </div>
 
-{% raw %}
       <section class="result-panel" v-if="result">
         <h3>执行结果</h3>
         <div class="result-meta">
@@ -176,7 +356,6 @@
 
   <script>
     const { createApp, ref, reactive, computed, onMounted } = Vue;
-    const { ElMessage } = ElementPlus;
 
     const App = {
       setup() {
@@ -185,7 +364,7 @@
           periods: [],
           limit: 30
         });
-        
+
         const repairConfig = reactive({
           period: '5m',
           bootstrapDays: 7,
@@ -194,19 +373,19 @@
         });
 
         const trackedSymbols = ref([]);
-        
+
         const repairForm = reactive({
           trackedSymbols: '',
           seriesTypes: ''
         });
-        
+
         const singleForm = reactive({
           seriesType: '',
           symbol: '',
           period: '',
           limit: 30
         });
-        
+
         const batchForm = reactive({
           symbols: '',
           periods: '',
@@ -220,7 +399,7 @@
         });
 
         const result = ref(null);
-        
+
         const activeMenu = computed(() => '/binance-series');
 
         const loading = reactive({
@@ -235,13 +414,13 @@
 
         const showStatus = (message, type = 'info') => {
           status.message = message;
-          status.type = type;
+          status.type = type === 'info' ? 'info' : type;
         };
 
         const renderResult = (data, mode) => {
           let badgeText = '';
           let badgeType = 'success';
-          
+
           if (mode === 'batch') {
             badgeText = `成功 ${data.success_count} | 失败 ${data.failure_count} | limit ${data.limit}`;
             badgeType = data.failure_count > 0 ? 'warning' : 'success';
@@ -251,7 +430,7 @@
           } else {
             badgeText = `影响 ${data.affected} | ${data.series_type} | ${data.symbol} | ${data.period}`;
           }
-          
+
           result.value = {
             badgeText,
             badgeType,
@@ -296,14 +475,14 @@
           config.seriesTypes = data.collect?.series_types || [];
           config.periods = data.collect?.periods || [];
           config.limit = data.collect?.limit || 30;
-          
+
           if (data.repair) {
             repairConfig.period = data.repair.period || '5m';
             repairConfig.bootstrapDays = data.repair.bootstrap_days || 7;
             repairConfig.klinesPageLimit = data.repair.klines_page_limit || 1000;
             repairConfig.futuresPageLimit = data.repair.futures_page_limit || 500;
           }
-          
+
           applyPageConfig();
           return data;
         };
@@ -457,31 +636,7 @@
     };
 
     const app = createApp(App);
-    app.use(ElementPlus);
     app.mount('#app');
   </script>
-  <style>
-    .help-text {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .badge {
-      padding: 6px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      background: rgba(255, 255, 255, 0.1);
-      color: #e2e8f0;
-    }
-    .badge.success {
-      background: rgba(22, 163, 74, 0.18);
-      color: #86efac;
-    }
-    .badge.warning {
-      background: rgba(234, 88, 12, 0.18);
-      color: #fdba74;
-    }
-  </style>
 </body>
 </html>

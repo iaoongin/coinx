@@ -4,296 +4,401 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>对冲计算器</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <style>
     :root {
       --page-max-width: 1200px;
       --page-padding: 20px;
-      --page-bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      --page-bg-a: #667eea;
-      --page-bg-b: #764ba2;
-      --panel: rgba(255, 255, 255, 0.94);
-      --panel-border: rgba(255, 255, 255, 0.28);
-      --text: #0f172a;
-      --muted: #475569;
-      --line: #d7e0ee;
-      --soft-blue: #eff6ff;
-      --soft-blue-line: #bfdbfe;
-      --soft-blue-text: #1d4ed8;
-      --soft-green: #f0fdf4;
-      --soft-green-line: #86efac;
-      --soft-green-text: #15803d;
-      --soft-red: #fef2f2;
-      --soft-red-line: #fca5a5;
-      --soft-red-text: #dc2626;
-      --soft-amber: #fffbeb;
-      --soft-amber-line: #fcd34d;
-      --soft-amber-text: #b45309;
-      --positive: #15803d;
-      --negative: #dc2626;
-      --warning: #b45309;
-      --card-height: 440px;
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       min-height: 100vh;
       padding: var(--page-padding);
-      color: var(--text);
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(255, 255, 255, 0.16), transparent 26%),
-        var(--page-bg-gradient);
+      font-family: 'Noto Sans SC', sans-serif;
     }
-    #app { max-width: var(--page-max-width); margin: 0 auto; }
+
+    #app { max-width: var(--page-max-width); margin: 20px auto; }
+
     .shell {
-      background: var(--panel);
-      border: 1px solid var(--panel-border);
-      border-radius: var(--page-surface-radius);
-      padding: 18px;
-      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.2);
-      backdrop-filter: blur(8px);
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius-lg);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow-card);
+      animation: fadeInUp 0.5s ease;
     }
+
     .hero {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
       gap: 12px;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
     }
+
     .hero h1 {
       margin: 0 0 4px;
-      text-align: left;
-      color: var(--text);
-      font-size: 26px;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
     }
+
+    .hero h1 span {
+      color: var(--gold-primary);
+    }
+
     .hero p {
       margin: 0;
-      max-width: 760px;
-      color: var(--muted);
+      max-width: 600px;
+      color: var(--text-muted);
       font-size: 12px;
       line-height: 1.45;
     }
-    .toolbar,
-    .actions-mobile {
+
+    .toolbar {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
     }
+
     .actions-mobile {
       display: none;
-      margin-bottom: 10px;
-    }
-    .workspace {
-      display: grid;
-      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr) minmax(300px, 0.9fr);
-      gap: 12px;
-      align-items: start;
       margin-bottom: 12px;
     }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1.45fr 0.95fr 0.9fr;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 16px;
+    }
+
     .panel-card,
     .result-card,
     .formula-block {
-      border-radius: 18px;
-      padding: 14px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+      border-radius: var(--card-radius);
+      padding: 16px;
     }
+
     .panel-card,
     .formula-block {
-      background: rgba(255, 255, 255, 0.9);
-      border: 1px solid var(--line);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
     }
-    .panel-card,
+
     .result-card {
-      min-height: var(--card-height);
-      max-height: var(--card-height);
-      overflow: hidden;
+      background: var(--bg-secondary);
+      border: 1px solid rgba(212, 175, 55, 0.2);
     }
+
     .panel-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
+
     .panel-head h2,
     .result-card h2,
     .formula-block h3 {
       margin: 0;
-      font-size: 18px;
+      font-size: 15px;
     }
+
     .panel-note,
     .result-card p,
     .formula-list {
       margin: 0;
-      color: var(--muted);
+      color: var(--text-muted);
       font-size: 12px;
       line-height: 1.45;
     }
+
     .mini-label,
     .metric .label {
-      color: var(--muted);
-      font-size: 12px;
+      color: var(--text-muted);
+      font-size: 11px;
     }
+
     .input-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
       align-items: start;
-      margin-top: 8px;
+      margin-top: 10px;
     }
+
     .input-side {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 10px;
-      background: rgba(248, 250, 252, 0.8);
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius);
+      padding: 12px;
     }
+
     .input-side h3 {
       margin: 0 0 6px;
-      font-size: 15px;
+      font-size: 14px;
     }
+
     .input-side p {
       margin: 0 0 8px;
-      color: var(--muted);
+      color: var(--text-muted);
       font-size: 11px;
       line-height: 1.35;
     }
+
     .side-badge {
       display: inline-flex;
       align-items: center;
-      padding: 4px 9px;
-      border-radius: 999px;
+      padding: 4px 10px;
+      border-radius: 6px;
       font-size: 11px;
       font-weight: 700;
       margin-bottom: 6px;
     }
+
     .side-badge.long {
-      background: rgba(21, 128, 61, 0.12);
+      background: var(--positive-dim);
       color: var(--positive);
     }
+
     .side-badge.short {
-      background: rgba(220, 38, 38, 0.12);
+      background: var(--negative-dim);
       color: var(--negative);
     }
-    .compact-input :is(.el-input__wrapper, .el-input-number__wrapper) {
-      min-height: 34px;
+
+    .compact-input input {
+      min-height: 36px;
     }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      color: #080808;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.4);
+    }
+
+    .btn-success {
+      background: transparent;
+      border: 1px solid var(--positive);
+      color: var(--positive);
+    }
+
+    .btn-success:hover {
+      background: var(--positive-dim);
+    }
+
+    .btn-success:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-default {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-default);
+    }
+
+    .btn-default:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .btn-danger {
+      background: transparent;
+      border: none;
+      color: var(--negative);
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+
+    .btn-danger:hover {
+      text-decoration: underline;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 14px;
+      transition: all var(--transition-fast);
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--gold-primary);
+      box-shadow: 0 0 0 3px var(--gold-dim);
+    }
+
+    .form-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
     .input-footer {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(2, 1fr);
       gap: 10px;
-      margin-top: 10px;
+      margin-top: 12px;
     }
+
     .input-tip {
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 10px;
-      background: rgba(15, 23, 42, 0.04);
-      border: 1px dashed rgba(30, 64, 175, 0.25);
+      background: var(--bg-card);
+      border: 1px dashed var(--border-default);
       font-size: 11px;
       line-height: 1.4;
-      color: var(--muted);
+      color: var(--text-muted);
     }
+
     .input-tip strong {
       display: block;
       margin-bottom: 4px;
-      color: var(--text);
+      color: var(--text-secondary);
       font-size: 12px;
     }
-    .result-card {
-      background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98));
-      border: 1px solid rgba(191, 219, 254, 0.85);
-      color: var(--text);
-      box-shadow: 0 10px 28px rgba(37, 99, 235, 0.08);
-      display: flex;
-      flex-direction: column;
+
+    .result-card p {
+      color: var(--text-muted);
     }
-    .result-card p { color: var(--muted); }
+
     .result-banner {
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 8px;
+      padding: 12px;
       font-size: 12px;
       line-height: 1.45;
-      background: var(--soft-blue);
-      border: 1px solid var(--soft-blue-line);
-      color: var(--soft-blue-text);
-      margin-top: 8px;
+      background: var(--gold-dim);
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      color: var(--gold-primary);
+      margin-top: 10px;
     }
+
     .result-banner.warning {
-      background: var(--soft-amber);
-      border-color: var(--soft-amber-line);
-      color: var(--soft-amber-text);
+      background: var(--gold-dim);
+      border-color: rgba(212, 175, 55, 0.2);
+      color: var(--gold-primary);
     }
+
     .result-banner.error {
-      background: var(--soft-red);
-      border-color: var(--soft-red-line);
-      color: var(--soft-red-text);
+      background: var(--negative-dim);
+      border-color: rgba(239, 68, 68, 0.2);
+      color: var(--negative);
     }
+
     .position-summary {
       display: grid;
       gap: 8px;
-      margin-top: 10px;
+      margin-top: 12px;
     }
+
     .summary-chip {
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 10px;
-      background: rgba(255, 255, 255, 0.88);
-      border: 1px solid rgba(203, 213, 225, 0.9);
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
       font-size: 12px;
       line-height: 1.45;
-      color: var(--text);
     }
+
     .summary-chip strong {
       display: block;
       margin-bottom: 4px;
-      color: #0f172a;
+      color: var(--text-secondary);
     }
+
     .result-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(2, 1fr);
       gap: 8px;
-      margin-top: 10px;
+      margin-top: 12px;
     }
+
     .metric {
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 10px;
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid rgba(203, 213, 225, 0.92);
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
     }
+
     .metric .value {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
-      color: #0f172a;
+      font-family: var(--font-mono);
+      color: var(--text-primary);
       word-break: break-word;
       margin-top: 4px;
     }
+
     .metric .value.positive { color: var(--positive); }
     .metric .value.negative { color: var(--negative); }
-    .metric .value.zero { color: #334155; }
+    .metric .value.zero { color: var(--text-muted); }
+
     .history-card {
       display: flex;
       flex-direction: column;
     }
+
     .history-toolbar {
       display: flex;
       align-items: center;
       gap: 8px;
     }
+
     .history-list {
       display: grid;
       gap: 8px;
-      margin-top: 8px;
+      margin-top: 10px;
       overflow: auto;
       padding-right: 2px;
     }
+
     .history-item {
       padding: 10px;
-      border-radius: 12px;
-      background: rgba(148, 163, 184, 0.1);
-      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 8px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
     }
+
     .history-meta,
     .history-values {
       display: flex;
@@ -302,39 +407,47 @@
       font-size: 11px;
       line-height: 1.35;
     }
+
     .history-meta {
-      margin-bottom: 5px;
-      color: var(--muted);
+      margin-bottom: 6px;
+      color: var(--text-muted);
     }
+
     .history-values {
-      color: var(--text);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
     }
+
     .history-actions {
       display: flex;
       gap: 8px;
-      margin-top: 6px;
-    }
-    .history-empty {
       margin-top: 8px;
-      font-size: 12px;
-      color: var(--muted);
     }
+
+    .history-empty {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
     .rules {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(2, 1fr);
       gap: 12px;
     }
+
     .formula-code {
       display: block;
-      margin-top: 4px;
+      margin-top: 6px;
       padding: 8px 10px;
-      border-radius: 12px;
-      background: #f8fafc;
-      color: #0f172a;
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 12px;
+      border-radius: 6px;
+      background: var(--bg-primary);
+      color: var(--gold-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
       overflow-x: auto;
     }
+
     @media (max-width: 1100px) {
       .workspace {
         grid-template-columns: 1fr 1fr;
@@ -342,16 +455,9 @@
       .workspace > :first-child {
         grid-column: 1 / -1;
       }
-      .panel-card,
-      .result-card {
-        min-height: auto;
-        max-height: none;
-      }
-      .input-grid {
-        height: auto;
-      }
     }
-    @media (max-width: 820px) {
+
+    @media (max-width: 768px) {
       .hero {
         flex-direction: column;
         align-items: flex-start;
@@ -372,13 +478,11 @@
         flex: 1;
       }
       .shell {
-        padding: 14px;
-      }
-      body {
-        padding: 14px;
+        padding: 16px;
       }
     }
-    @media (max-width: 640px) {
+
+    @media (max-width: 480px) {
       .input-grid,
       .input-footer {
         grid-template-columns: 1fr;
@@ -394,20 +498,20 @@
 {% raw %}
       <section class="hero">
         <div>
-          <h1>对冲计算器</h1>
+          <h1><span>△</span> 对冲计算器</h1>
           <p>USDT 本位线性合约，只输入多单和空单的数量、开仓价格，实时计算净未实现盈亏为 0 的市场价格。</p>
         </div>
         <div class="toolbar">
-          <el-button type="primary" @click="fillExample">填入示例</el-button>
-          <el-button type="success" plain @click="saveCurrentRecord" :disabled="!canPersistHistory">保存记录</el-button>
-          <el-button @click="resetForm">清空</el-button>
+          <button class="btn btn-primary" @click="fillExample">填入示例</button>
+          <button class="btn btn-success" @click="saveCurrentRecord" :disabled="!canPersistHistory">保存记录</button>
+          <button class="btn btn-default" @click="resetForm">清空</button>
         </div>
       </section>
 
       <div class="actions-mobile">
-        <el-button type="primary" @click="fillExample">填入示例</el-button>
-        <el-button type="success" plain @click="saveCurrentRecord" :disabled="!canPersistHistory">保存记录</el-button>
-        <el-button @click="resetForm">清空</el-button>
+        <button class="btn btn-primary" @click="fillExample">填入示例</button>
+        <button class="btn btn-success" @click="saveCurrentRecord" :disabled="!canPersistHistory">保存记录</button>
+        <button class="btn btn-default" @click="resetForm">清空</button>
       </div>
 
       <section class="workspace">
@@ -422,28 +526,28 @@
               <div class="side-badge long">多单</div>
               <h3>Long</h3>
               <p>价格上涨时盈利，价格下跌时亏损。</p>
-              <el-form label-position="top">
-                <el-form-item label="数量">
-                  <el-input v-model="longForm.quantity" clearable inputmode="decimal" placeholder="例如 0.5" class="compact-input" data-testid="long-quantity"></el-input>
-                </el-form-item>
-                <el-form-item label="开仓价格">
-                  <el-input v-model="longForm.entryPrice" clearable inputmode="decimal" placeholder="例如 100000" class="compact-input" data-testid="long-entry-price"></el-input>
-                </el-form-item>
-              </el-form>
+              <div class="form-group">
+                <label class="form-label">数量</label>
+                <input type="text" v-model="longForm.quantity" class="form-input" placeholder="例如 0.5" data-testid="long-quantity">
+              </div>
+              <div class="form-group">
+                <label class="form-label">开仓价格</label>
+                <input type="text" v-model="longForm.entryPrice" class="form-input" placeholder="例如 100000" data-testid="long-entry-price">
+              </div>
             </section>
 
             <section class="input-side">
               <div class="side-badge short">空单</div>
               <h3>Short</h3>
               <p>价格下跌时盈利，价格上涨时亏损。</p>
-              <el-form label-position="top">
-                <el-form-item label="数量">
-                  <el-input v-model="shortForm.quantity" clearable inputmode="decimal" placeholder="例如 0.3" class="compact-input" data-testid="short-quantity"></el-input>
-                </el-form-item>
-                <el-form-item label="开仓价格">
-                  <el-input v-model="shortForm.entryPrice" clearable inputmode="decimal" placeholder="例如 110000" class="compact-input" data-testid="short-entry-price"></el-input>
-                </el-form-item>
-              </el-form>
+              <div class="form-group">
+                <label class="form-label">数量</label>
+                <input type="text" v-model="shortForm.quantity" class="form-input" placeholder="例如 0.3" data-testid="short-quantity">
+              </div>
+              <div class="form-group">
+                <label class="form-label">开仓价格</label>
+                <input type="text" v-model="shortForm.entryPrice" class="form-input" placeholder="例如 110000" data-testid="short-entry-price">
+              </div>
             </section>
           </div>
           <div class="input-footer">
@@ -507,10 +611,10 @@
           <div class="panel-head">
             <h2>历史记录 <span v-if="historyRecords.length > 0">({{ historyRecords.length }})</span></h2>
             <div class="history-toolbar" v-if="historyRecords.length > 0">
-              <el-button link type="danger" @click="clearHistory">清空</el-button>
+              <button class="btn btn-danger" @click="clearHistory">清空</button>
             </div>
           </div>
-          <p class="panel-note">点击“保存记录”后写入本地缓存。</p>
+          <p class="panel-note">点击保存记录后写入本地缓存。</p>
           <div class="history-list" v-if="historyRecords.length > 0">
             <div class="history-item" v-for="record in historyRecords" :key="record.id">
               <div class="history-meta">
@@ -524,8 +628,8 @@
                 <span>空 {{ record.shortForm.quantity }} @ {{ record.shortForm.entryPrice }}</span>
               </div>
               <div class="history-actions">
-                <el-button size="small" @click="applyHistoryRecord(record)">回填</el-button>
-                <el-button size="small" link type="danger" @click="removeHistoryRecord(record.id)">删除</el-button>
+                <button class="btn btn-default btn-small" @click="applyHistoryRecord(record)">回填</button>
+                <button class="btn btn-danger" @click="removeHistoryRecord(record.id)">删除</button>
               </div>
             </div>
           </div>
@@ -535,7 +639,7 @@
 
       <section class="rules">
         <article class="formula-block">
-          <h3>使用公式</h3>
+          <h3>使用��式</h3>
           <div class="formula-list">
             <div>多单未实现盈亏<span class="formula-code">(市场价 - 多单开仓价) × 多单数量</span></div>
             <div>空单未实现盈亏<span class="formula-code">(空单开仓价 - 市场价) × 空单数量</span></div>
@@ -757,7 +861,6 @@
           if (historyRecords.value[0] && historyRecords.value[0].signature === signature) {
             return;
           }
-
           const deduped = historyRecords.value.filter((item) => item.signature !== signature);
           const record = buildHistoryRecord();
           record.signature = signature;
@@ -828,7 +931,7 @@
       }
     };
 
-    createApp(App).use(ElementPlus).mount('#app');
+    createApp(App).mount('#app');
   </script>
 </body>
 </html>

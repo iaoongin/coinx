@@ -4,152 +4,311 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>行情榜</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <style>
-    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: var(--page-padding); background: var(--page-bg-gradient); font-size: 14px; color: #333; }
-    #app { max-width: var(--page-max-width); margin: 0 auto; }
-    .container { background-color: var(--page-surface-bg); padding: var(--page-surface-padding); border-radius: var(--page-surface-radius); box-shadow: var(--page-surface-shadow); }
-    h1 { color: #2c3e50; font-size: 28px; margin: 0; font-weight: 600; }
-    .header-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; padding: 0 0 15px; border-bottom: 1px solid #ecf0f1; }
-    .right-header-section { display: flex; align-items: center; gap: 15px; }
-    .time-info { display: flex; flex-direction: column; align-items: flex-end; text-align: right; font-size: 13px; color: #7f8c8d; }
-    .rank-type-selector { margin: 15px 0; display: flex; gap: 10px; align-items: center; }
-    .rank-type-btn { padding: 8px 16px; border: 1px solid #ddd; background: #fff; color: #333; border-radius: 20px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
-    .rank-type-btn:hover { background: #f0f0f0; }
-    .rank-type-btn.active { background: #e74c3c; color: #fff; border-color: #e74c3c; }
-    .positive { color: #27ae60; font-weight: 600; }
-    .negative { color: #e74c3c; font-weight: 600; }
-    .table-wrapper { margin-top: 25px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08); background: white; }
-    .el-table {
-      --el-table-header-bg-color: transparent;
-      --el-table-border-color: transparent;
-      --el-table-row-hover-bg-color: #eef2ff;
+    :root {
+      --page-max-width: 1200px;
+      --page-padding: 20px;
     }
-    .el-table::before,
-    .el-table__inner-wrapper::before {
-      display: none;
+
+    body {
+      margin: 0;
+      padding: var(--page-padding);
+      font-family: 'Noto Sans SC', sans-serif;
     }
-    .el-table__header-wrapper,
-    .el-table__header-wrapper thead,
-    .el-table__header thead,
-    .el-table__header tr,
-    thead {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+    #app { max-width: var(--page-max-width); margin: 20px auto; }
+
+    .shell {
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 20px;
+      margin-bottom: 20px;
+      animation: fadeInUp 0.5s ease;
     }
-    .el-table__header-wrapper {
-      overflow: hidden;
-      border-top-left-radius: 12px;
-      border-top-right-radius: 12px;
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
     }
-    th,
-    .el-table th.el-table__cell {
-      background: transparent !important;
-      padding: 16px 14px;
-      text-align: center;
+
+    .header-left {
+      flex: 1;
+    }
+
+    .header-row h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+
+    .header-row h1 span {
+      color: var(--gold-primary);
+    }
+
+    .header-subtitle {
       font-size: 12px;
-      font-weight: 700;
-      color: #f8fafc !important;
-      border: none;
-      white-space: nowrap;
-      text-shadow: 0 1px 1px rgba(15, 23, 42, 0.28);
+      color: var(--text-muted);
     }
-    .el-table th.el-table__cell > .cell {
-      color: #f8fafc !important;
-      font-weight: 700;
+
+    .right-header-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .time-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      text-align: right;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .time-info .label {
+      opacity: 0.7;
+    }
+
+    .time-info .value {
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    .positive { color: var(--positive) !important; font-weight: 600; font-family: var(--font-mono); }
+    .negative { color: var(--negative) !important; font-weight: 600; font-family: var(--font-mono); }
+
+    .rank-type-selector {
+      margin: 16px 0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .rank-type-selector .label {
+      font-weight: 500;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .rank-type-btn {
+      padding: 8px 16px;
+      border: 1px solid var(--border-default);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all var(--transition-fast);
+    }
+
+    .rank-type-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .rank-type-btn.active {
+      background: var(--gold-primary);
+      color: #080808;
+      border-color: var(--gold-primary);
+    }
+
+    .rank-type-btn.active:hover {
+      background: var(--gold-bright);
+    }
+
+    .rank-badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      min-width: 26px;
+      height: 26px;
+      padding: 0 6px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+
+    .rank-badge.top-3 {
+      background: var(--negative);
+      color: white;
+    }
+
+    .rank-badge.other {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      color: #080808;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.4);
+    }
+
+    /* 表格样式 */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--bg-secondary);
+      border-radius: var(--card-radius);
+      overflow: hidden;
+    }
+
+    .data-table th {
+      background: var(--bg-elevated);
+      padding: 14px 12px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-primary);
+      border: none;
       white-space: nowrap;
-      line-height: 1;
     }
-    .el-table th.el-table__cell .caret-wrapper {
-      margin-left: 0;
-      flex: 0 0 auto;
+
+    .data-table th:first-child {
+      text-align: center;
     }
-    .el-table th.el-table__cell.is-leaf {
-      border-bottom: none;
+
+    .data-table td {
+      padding: 12px;
+      text-align: center;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13px;
     }
-    td { padding: 14px; text-align: center; font-size: 14px; color: #4b5563; border-bottom: 1px solid #f3f4f6; }
-    tbody tr:hover { background-color: #eef2ff; }
-    .rank-badge { display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center; border-radius: 50%; color: white; font-weight: bold; font-size: 12px; }
-    .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-    .btn-primary { background: linear-gradient(135deg, #3498db, #2980b9); color: white; }
-    .btn-success { background: linear-gradient(135deg, #4caf50, #45a049); color: white; }
-    .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+
+    .data-table td:first-child {
+      text-align: center;
+    }
+
+    .data-table tbody tr:hover {
+      background: var(--bg-hover);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .loading-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
     @media (max-width: 768px) {
-      .header-row { align-items: flex-start; }
-      .right-header-section { flex-direction: column; align-items: flex-end; }
+      .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .right-header-section {
+        align-self: flex-end;
+      }
     }
   </style>
 </head>
 <body>
   <div id="app">
     {% include 'components/nav.html' %}
-    
-    <div class="container">
+
+    <div class="shell">
 {% raw %}
       <div class="header-row">
-        <h1>行情榜</h1>
+        <div class="header-left">
+          <h1><span>◉</span> 行情榜</h1>
+          <div class="header-subtitle">24h 涨跌幅 · 成交额 · 成交量</div>
+        </div>
         <div class="right-header-section">
           <div class="time-info">
-            <div>最后更新时间: {{ lastUpdateTime || '--' }}</div>
-            <div>下次刷新倒计时: <span class="countdown">{{ countdown }}</span></div>
+            <div><span class="label">最后更新</span></div>
+            <div class="value">{{ lastUpdateTime || '--' }}</div>
+            <div style="margin-top: 4px;"><span class="label">刷新倒计时</span></div>
+            <div class="value countdown">{{ countdown }}</div>
           </div>
-          <el-button type="primary" @click="loadData(true)">↻ 刷新</el-button>
+          <button class="btn btn-primary" @click="loadData(true)">
+            ↻ 刷新
+          </button>
         </div>
       </div>
 
       <div class="rank-type-selector">
-        <span style="font-weight: 600;">排行类型:</span>
+        <span class="label">排行类型:</span>
         <button class="rank-type-btn" :class="{ active: currentRankType === 'price_change' && currentDirection === 'down' }" @click="changeRankType('price_change', 'down')">跌幅榜</button>
         <button class="rank-type-btn" :class="{ active: currentRankType === 'price_change' && currentDirection === 'up' }" @click="changeRankType('price_change', 'up')">涨幅榜</button>
         <button class="rank-type-btn" :class="{ active: currentRankType === 'quote_volume' }" @click="changeRankType('quote_volume', 'all')">成交额榜</button>
         <button class="rank-type-btn" :class="{ active: currentRankType === 'volume' }" @click="changeRankType('volume', 'all')">成交量榜</button>
       </div>
 
-      <el-table :data="tableData" style="width: 100%" v-if="tableData.length > 0" :default-sort="{ prop: 'rankIndex', order: 'ascending' }">
-        <el-table-column prop="rankIndex" label="排名" width="88" sortable align="center" header-align="center">
-          <template #default="{ row, $index }">
-            <span class="rank-badge" :style="{ backgroundColor: $index < 3 ? '#e74c3c' : '#bdc3c7' }">
-              {{ row.rank_index || $index + 1 }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="symbol" label="币种" min-width="96" sortable align="center" header-align="center">
-          <template #default="{ row }">
-            <strong><a :href="`/coin-detail?symbol=${row.symbol}`" style="color: #2c3e50; text-decoration: none;">{{ row.symbol }}</a></strong>
-          </template>
-        </el-table-column>
-        <el-table-column prop="price" label="当前价格 (USDT)" width="168" sortable align="center" header-align="center">
-          <template #default="{ row }">
-            {{ formatPrice(row.price || row.current_price) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="price_change_percent" label="24h 涨跌幅" width="128" sortable align="center" header-align="center">
-          <template #default="{ row }">
-            <span :class="row.price_change_percent >= 0 ? 'positive' : 'negative'">
+      <table class="data-table" v-if="tableData.length > 0">
+        <thead>
+          <tr>
+            <th>排名</th>
+            <th>币种</th>
+            <th>当前价格 (USDT)</th>
+            <th>24h 涨跌幅</th>
+            <th>24h 成交量</th>
+            <th>24h 成交额 (USDT)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, index) in tableData" :key="row.symbol">
+            <td>
+              <span class="rank-badge" :class="index < 3 ? 'top-3' : 'other'">
+                {{ row.rank_index || index + 1 }}
+              </span>
+            </td>
+            <td>
+              <strong style="font-family: var(--font-mono); color: var(--text-primary);">
+                <a :href="`/coin-detail?symbol=${row.symbol}`" style="color: inherit; text-decoration: none;">{{ row.symbol }}</a>
+              </strong>
+            </td>
+            <td style="font-family: var(--font-mono);">{{ formatPrice(row.price || row.current_price) }}</td>
+            <td :class="row.price_change_percent >= 0 ? 'positive' : 'negative'">
               {{ formatChange(row.price_change_percent) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="volume" label="24h 成交量" width="136" sortable align="center" header-align="center">
-          <template #default="{ row }">
-            <span style="color: #7f8c8d;">{{ formatVolume(row.volume) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="quote_volume" label="24h 成交额 (USDT)" width="182" sortable align="center" header-align="center">
-          <template #default="{ row }">
-            <span style="color: #7f8c8d;">{{ formatVolume(row.quote_volume) }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
+            </td>
+            <td style="color: var(--text-muted); font-family: var(--font-mono); font-size: 12px;">{{ formatVolume(row.volume) }}</td>
+            <td style="color: var(--text-muted); font-family: var(--font-mono); font-size: 12px;">{{ formatVolume(row.quote_volume) }}</td>
+          </tr>
+        </tbody>
+      </table>
 
-      <el-empty v-else-if="!loading" description="暂无数据"></el-empty>
-      <el-skeleton v-else :rows="5" animated />
+      <div class="empty-state" v-else-if="!loading">暂无数据</div>
+      <div class="loading-state" v-else>加载中...</div>
 {% endraw %}
     </div>
   </div>
@@ -195,7 +354,7 @@
           nextRefreshTime.setMinutes(Math.ceil(nextRefreshTime.getMinutes() / 5) * 5);
           nextRefreshTime.setSeconds(0);
           nextRefreshTime.setMilliseconds(0);
-          
+
           if (nextRefreshTime <= now) {
             nextRefreshTime.setTime(nextRefreshTime.getTime() + 5 * 60 * 1000);
           }
@@ -223,7 +382,7 @@
           try {
             const response = await fetch(getApiUrl());
             const result = await response.json();
-            
+
             if (result.status === 'success') {
               tableData.value = result.data || [];
               if (result.snapshot_time) {
@@ -269,7 +428,6 @@
     };
 
     const app = createApp(App);
-    app.use(ElementPlus);
     app.mount('#app');
   </script>
 </body>

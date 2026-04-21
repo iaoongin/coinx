@@ -33,6 +33,11 @@ except ImportError:
 def create_app():
     # 创建 Flask 应用并注册页面、接口与登录路由
     app = Flask(__name__, template_folder='templates', static_folder='static')
+    
+    # 开发环境：禁用静态文件缓存，启用模板自动重载
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    
     configure_app(app)
 
     app.register_blueprint(auth_bp)

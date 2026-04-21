@@ -4,63 +4,302 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>币种数据监控</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>
-    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: var(--page-padding); background: var(--page-bg-gradient); font-size: 14px; color: #333; }
-    #app { max-width: var(--page-max-width); margin: 0 auto; }
-    .container { background-color: var(--page-surface-bg); padding: var(--page-surface-padding); border-radius: var(--page-surface-radius); box-shadow: var(--page-surface-shadow); }
-    h1 { color: #2c3e50; font-size: 28px; margin: 0; font-weight: 600; }
-    .header-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; padding: 0 0 15px; border-bottom: 1px solid #ecf0f1; }
-    .right-header-section { display: flex; align-items: center; gap: 15px; }
-    .time-info { display: flex; flex-direction: column; align-items: flex-end; text-align: right; font-size: 13px; color: #7f8c8d; }
-    .positive { color: #27ae60; font-weight: 600; }
-    .negative { color: #e74c3c; font-weight: 600; }
-    .table-wrapper { margin-top: 25px; border-radius: 12px; overflow-x: auto; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08); background: white; }
-    .mini-chart { width: 80px; height: 30px; }
-    table { width: 100%; border-collapse: separate; border-spacing: 0; }
-    thead { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    th { background: transparent; padding: 16px 14px; text-align: center; font-size: 12px; font-weight: 700; color: #f8fafc; border: none; white-space: nowrap; text-shadow: 0 1px 1px rgba(15, 23, 42, 0.28); }
-    th:first-child { text-align: left; padding-left: 20px; }
-    td { padding: 12px 8px; text-align: center; font-size: 13px; color: #4b5563; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
-    td.symbol-cell { text-align: left; padding-left: 20px; font-weight: 600; color: #667eea; border-right: 2px solid #e5e7eb; }
-    td.type-cell { color: #6b7280; font-size: 12px; }
-    td.change-cell { font-size: 12px; }
-    td .ratio { font-weight: 600; margin-bottom: 2px; }
-    td .value { font-size: 11px; color: #6b7280; }
-    tbody tr:nth-child(6n+2) td, tbody tr:nth-child(6n+3) td, tbody tr:nth-child(6n+4) td { background: #f9fafb; }
-    tbody tr.coin-group-end td { padding-bottom: 16px !important; border-bottom: 2px solid #d1d5db; }
-    tbody tr:hover td { background-color: #eef2ff !important; }
-    .coin-link { color: #667eea; text-decoration: none; font-weight: 600; }
-    .coin-link:hover { text-decoration: underline; }
-    .countdown { font-weight: bold; color: #e74c3c; }
-    .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-    .btn-primary { background: linear-gradient(135deg, #3498db, #2980b9); color: white; }
-    .btn-success { background: linear-gradient(135deg, #4caf50, #45a049); color: white; }
-    .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    :root {
+      --page-max-width: 1200px;
+      --page-padding: 20px;
+    }
+
+    body {
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+      margin: 0;
+      padding: var(--page-padding);
+    }
+
+    #app { max-width: var(--page-max-width); margin: 20px auto; }
+
+    .shell {
+      background: var(--bg-card);
+      border-radius: var(--card-radius-lg);
+      box-shadow: var(--shadow-card);
+      border: 1px solid var(--border-default);
+      padding: 20px;
+      margin-bottom: 20px;
+      animation: fadeInUp 0.5s ease;
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .header-left {
+      flex: 1;
+    }
+
+    .header-row h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+
+    .header-row h1 span {
+      color: var(--gold-primary);
+    }
+
+    .header-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .right-header-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .time-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      text-align: right;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .time-info .label {
+      opacity: 0.7;
+    }
+
+    .time-info .value {
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    .positive { color: var(--positive) !important; font-weight: 600; font-family: var(--font-mono); }
+    .negative { color: var(--negative) !important; font-weight: 600; font-family: var(--font-mono); }
+
+    .table-wrapper {
+      margin-top: 20px;
+      border-radius: var(--card-radius);
+      overflow-x: auto;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+    }
+
+    .mini-chart {
+      width: 80px;
+      height: 30px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--bg-secondary);
+    }
+
+    thead th {
+      background: var(--bg-elevated);
+      padding: 14px 12px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-primary);
+      border: none;
+      white-space: nowrap;
+    }
+
+    thead th:first-child {
+      text-align: left;
+      padding-left: 16px;
+    }
+
+    tbody td {
+      padding: 11px 10px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: middle;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    tbody td:first-child {
+      text-align: left;
+      padding-left: 16px;
+    }
+
+    td.symbol-cell {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      color: var(--text-primary);
+      background: var(--bg-secondary) !important;
+    }
+
+    td.type-cell {
+      color: var(--text-primary);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      text-align: center !important;
+    }
+
+    td.change-cell {
+      font-size: 12px;
+    }
+
+    td.change-cell .ratio {
+      font-weight: 600;
+      font-family: var(--font-mono);
+      margin-bottom: 2px;
+    }
+
+    td.change-cell .value {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    /* 币种组分隔线 */
+    .coin-group-end td {
+      border-bottom: 2px solid var(--border-default);
+    }
+
+/* 币种组分隔线 */
+    .coin-group-end td {
+      border-bottom: 1px solid var(--border-default);
+    }
+
+    /* 表格统一背景 */
+    tbody td {
+      background: var(--bg-secondary);
+    }
+
+    .coin-group-alt td.symbol-cell {
+      background: var(--bg-card) !important;
+    }
+
+    /* 所有单元格默认背景 */
+    
+
+    .coin-link {
+      color: var(--gold-primary);
+      text-decoration: none;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      transition: all var(--transition-fast);
+    }
+
+    .coin-link:hover {
+      color: var(--gold-bright);
+      text-decoration: underline;
+    }
+
+    .countdown {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--gold-primary);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      color: #080808;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.4);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .no-data, .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .loading::after {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      margin-left: 8px;
+      border: 2px solid var(--border-default);
+      border-top-color: var(--gold-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     @media (max-width: 768px) {
-      .header-row { align-items: flex-start; }
-      .right-header-section { flex-direction: column; align-items: flex-end; }
+      .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .right-header-section {
+        align-self: flex-end;
+      }
     }
   </style>
 </head>
 <body>
   <div id="app">
     {% include 'components/nav.html' %}
-    
-    <div class="container">
+
+    <div class="shell">
 {% raw %}
       <div class="header-row">
-        <h1>币种数据监控</h1>
+        <div class="header-left">
+          <h1><span>◈</span> 币种数据监控</h1>
+          <div class="header-subtitle">USDT 本位合约 · 持仓量与主力净流入</div>
+        </div>
         <div class="right-header-section">
           <div class="time-info">
-            <div>最后更新时间: {{ lastUpdateTime || '--' }}</div>
-            <div>下次刷新倒计时: <span class="countdown">{{ countdown }}</span></div>
+            <div><span class="label">最后更新</span></div>
+            <div class="value">{{ lastUpdateTime || '--' }}</div>
+            <div style="margin-top: 4px;"><span class="label">刷新倒计时</span></div>
+            <div class="value countdown">{{ countdown }}</div>
           </div>
-          <button class="btn btn-primary" @click="loadData(true)">↻ 刷新</button>
+          <button class="btn btn-primary" @click="loadData(true)">
+            ↻ 刷新
+          </button>
         </div>
       </div>
 
@@ -68,7 +307,7 @@
         <table>
           <thead>
             <tr>
-              <th style="position: sticky; left: 0; z-index: 20;">币种</th>
+              <th style="position: sticky; left: 0; z-index: 20; background: inherit;">币种</th>
               <th>类型</th>
               <th>趋势</th>
               <th>当前</th>
@@ -77,8 +316,7 @@
           </thead>
           <tbody>
             <template v-for="(coin, index) in tableData" :key="coin.symbol">
-              <!-- 持仓量行 -->
-              <tr>
+              <tr class="coin-group">
                 <td :rowspan="4" class="symbol-cell">
                   <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-link">{{ coin.symbol.replace('USDT', '') }}</a>
                 </td>
@@ -90,8 +328,7 @@
                   <div class="value">{{ change.open_interest_formatted || 'N/A' }}</div>
                 </td>
               </tr>
-              <!-- 持仓价值行 -->
-              <tr>
+              <tr class="coin-group">
                 <td class="type-cell">持仓价值</td>
                 <td><div :id="'chart-value-' + index" class="mini-chart"></div></td>
                 <td>{{ coin.current_open_interest_value_formatted || 'N/A' }}</td>
@@ -100,8 +337,7 @@
                   <div class="value">{{ change.open_interest_value_formatted || 'N/A' }}</div>
                 </td>
               </tr>
-              <!-- 价格行 -->
-              <tr>
+              <tr class="coin-group">
                 <td class="type-cell">价格</td>
                 <td><div :id="'chart-price-' + index" class="mini-chart"></div></td>
                 <td>{{ coin.current_price_formatted || 'N/A' }}</td>
@@ -110,8 +346,7 @@
                   <div class="value">{{ change.current_price_formatted || 'N/A' }}</div>
                 </td>
               </tr>
-              <!-- 主力净流入行 -->
-              <tr class="coin-group-end">
+              <tr class="coin-group coin-group-end">
                 <td class="type-cell">主力净流入</td>
                 <td><div :id="'chart-inflow-' + index" class="mini-chart"></div></td>
                 <td :class="getNetInflowClass(coin.net_inflow?.['5m'])">{{ formatNetInflow(coin.net_inflow?.['5m']) }}</td>
@@ -125,7 +360,7 @@
       </div>
 
       <div v-else-if="!loading" class="no-data">暂无数据</div>
-      <div v-else class="loading">加载中...</div>
+      <div v-else class="loading">加载中</div>
 {% endraw %}
     </div>
   </div>
@@ -175,7 +410,7 @@
           nextTick(() => {
             coins.forEach((coin, index) => {
               if (!coin.changes || !coin.changes.length) return;
-              
+
               const oiData = coin.changes.map(c => c.ratio ?? 0);
               const valueData = coin.changes.map(c => c.value_ratio ?? 0);
               const priceData = coin.changes.map(c => c.price_change_percent ?? 0);
@@ -186,8 +421,9 @@
                 const dom = document.getElementById(domId);
                 if (!dom || !data || data.length < 2) return;
                 const chart = echarts.init(dom, null, { renderer: 'svg' });
-                
+
                 chart.setOption({
+                  backgroundColor: 'transparent',
                   grid: { left: 0, right: 0, top: 0, bottom: 0 },
                   xAxis: { show: false, type: 'value', min: 0, max: data.length - 1 },
                   yAxis: { show: false, type: 'value' },
@@ -196,39 +432,39 @@
                     renderItem: (params, api) => {
                       const lines = [];
                       const zeroY = api.coord([0, 0])[1];
-                      
+
                       for (let i = 0; i < data.length - 1; i++) {
                         const val1 = data[i];
                         const val2 = data[i + 1];
                         if (val1 === null || val2 === null) continue;
-                        
+
                         const startPoint = api.coord([i, val1]);
                         const endPoint = api.coord([i + 1, val2]);
-                        
+
                         if ((val1 >= 0 && val2 >= 0) || (val1 <= 0 && val2 <= 0)) {
-                          const color = val1 >= 0 ? '#27ae60' : '#e74c3c';
+                          const lineColor = val1 >= 0 ? '#22c55e' : '#ef4444';
                           lines.push({
                             type: 'line',
                             shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
-                            style: { stroke: color, lineWidth: 1.5 }
+                            style: { stroke: lineColor, lineWidth: 1.5 }
                           });
                         } else {
                           const t = Math.abs(val1) / (Math.abs(val1) + Math.abs(val2));
                           const crossX = startPoint[0] + t * (endPoint[0] - startPoint[0]);
-                          
+
                           lines.push({
                             type: 'line',
                             shape: { x1: startPoint[0], y1: startPoint[1], x2: crossX, y2: zeroY },
-                            style: { stroke: '#27ae60', lineWidth: 1.5 }
+                            style: { stroke: '#22c55e', lineWidth: 1.5 }
                           });
                           lines.push({
                             type: 'line',
                             shape: { x1: crossX, y1: zeroY, x2: endPoint[0], y2: endPoint[1] },
-                            style: { stroke: '#e74c3c', lineWidth: 1.5 }
+                            style: { stroke: '#ef4444', lineWidth: 1.5 }
                           });
                         }
                       }
-                      
+
                       return { type: 'group', children: lines };
                     },
                     data: data
@@ -247,15 +483,13 @@
 
         const updateCountdown = () => {
           const now = new Date();
-          // 计算下一个1分钟整点
           const nextRefreshTime = new Date(now);
           nextRefreshTime.setSeconds(0);
           nextRefreshTime.setMilliseconds(0);
           nextRefreshTime.setTime(nextRefreshTime.getTime() + 60000);
-          
+
           const timeDiff = nextRefreshTime - now;
-          
-          // 当剩余时间 <= 1秒时自动刷新数据
+
           if (timeDiff <= 1000) {
             loadData(false);
           }
@@ -277,10 +511,10 @@
               const response = await fetch('/api/update?force=true');
               await response.json();
             }
-            
+
             const dataResponse = await fetch('/api/coins');
             const result = await dataResponse.json();
-            
+
             if (result.status === 'success') {
                 tableData.value = result.data || [];
                 if (result.data && result.data.length > 0 && result.data[0].changes) {
@@ -324,7 +558,6 @@
     };
 
     const app = createApp(App);
-    app.use(ElementPlus);
     app.mount('#app');
   </script>
 </body>

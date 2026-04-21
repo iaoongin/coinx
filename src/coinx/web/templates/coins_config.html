@@ -4,111 +4,366 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>币种配置管理</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
   <style>
-    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: var(--page-padding); background: var(--page-bg-gradient); font-size: 14px; color: #333; }
-    #app { max-width: var(--page-max-width); margin: 0 auto; }
-    .config-container { background-color: var(--page-surface-bg); padding: var(--page-surface-padding); border-radius: var(--page-surface-radius); box-shadow: var(--page-surface-shadow); min-height: 78vh; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid #ecf0f1; }
-    .header h1 { margin: 0; color: #2c3e50; font-size: 28px; font-weight: 600; }
+    :root {
+      --page-max-width: 1200px;
+      --page-padding: 20px;
+    }
+
+    body {
+      margin: 0;
+      padding: var(--page-padding);
+      font-family: 'Noto Sans SC', sans-serif;
+    }
+
+    #app { max-width: var(--page-max-width); margin: 20px auto; }
+
+    .config-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 20px;
+      margin-bottom: 20px;
+      min-height: 70vh;
+      animation: fadeInUp 0.5s ease;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .header h1 span {
+      color: var(--gold-primary);
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-success {
+      background: var(--positive);
+      color: white;
+    }
+
+    .btn-success:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(52, 211, 153, 0.3);
+    }
+
+    .btn-success:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .transfer-container {
+      display: grid;
+      grid-template-columns: 1fr 48px 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
     @media (max-width: 768px) {
-      .header { align-items: flex-start; gap: 12px; }
+      .transfer-container {
+        grid-template-columns: 1fr;
+      }
+      .transfer-buttons {
+        flex-direction: row !important;
+        justify-content: center;
+      }
+      .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+    }
+
+    .transfer-panel {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius);
+      height: calc(100vh - 220px);
+      max-height: 500px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .transfer-panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-default);
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .transfer-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 8px;
+    }
+
+    .transfer-search {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-default);
+      flex-shrink: 0;
+    }
+
+    .transfer-search input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .transfer-search input:focus {
+      outline: none;
+      border-color: var(--gold-primary);
+    }
+
+    .transfer-item {
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-secondary);
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .transfer-item:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .transfer-item.selected {
+      background: var(--gold-dim);
+      color: var(--gold-primary);
+    }
+
+    .transfer-item input[type="checkbox"] {
+      accent-color: var(--gold-primary);
+    }
+
+    .transfer-buttons {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      padding-top: 80px;
+    }
+
+    .transfer-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: all 0.15s ease;
+    }
+
+    .transfer-btn:hover:not(:disabled) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .transfer-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .transfer-count {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 8px 12px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 9999;
+      animation: fadeInUp 0.3s ease;
+    }
+
+    .toast-success {
+      background: var(--positive);
+      color: white;
+    }
+
+    .toast-error {
+      background: var(--negative);
+      color: white;
     }
   </style>
 </head>
 <body>
   <div id="app">
     {% include 'components/nav.html' %}
-    
+
     <div class="config-container">
       <div class="header">
-        <h1>币种配置管理</h1>
-        <el-button type="success" @click="updateFromBinance" :loading="loading.updateBinance">
-          从币安更新币种
-        </el-button>
+        <h1><span>□</span> 币种配置管理</h1>
+        <button class="btn btn-success" @click="updateFromBinance" :disabled="loading.updateBinance">
+          <span v-if="loading.updateBinance">更新中...</span><span v-else>从币安更新币种</span>
+        </button>
       </div>
 
-      <el-transfer
-        v-model="trackedCoins"
-        :data="allCoinsData"
-        :titles="['所有币种', '跟踪的币种']"
-        :filterable="true"
-        :filter-placeholder="筛选占位符"
-        :left-default-checked="leftChecked"
-        :right-default-checked="rightChecked"
-        @change="handleTransferChange"
-        @left-check-change="handleLeftCheckChange"
-        @right-check-change="handleRightCheckChange"
-      >
-      </el-transfer>
+      {% raw %}
+      <div class="transfer-container">
+        <div class="transfer-panel">
+          <div class="transfer-panel-header">所有币种 ({{ filteredUntracked.length }})</div>
+          <div class="transfer-search">
+            <input type="text" v-model="searchLeft" placeholder="搜索币种...">
+          </div>
+          <div class="transfer-panel-body">
+            <label class="transfer-item" v-for="coin in filteredUntracked" :key="coin">
+              <input type="checkbox" :value="coin" v-model="leftChecked">
+              {{ coin }}
+            </label>
+            <div v-if="filteredUntracked.length === 0" style="padding: 20px; text-align: center; color: var(--text-muted);">
+              暂无币种
+            </div>
+          </div>
+        </div>
+
+        <div class="transfer-buttons">
+          <button class="transfer-btn" @click="moveToRight" :disabled="leftChecked.length === 0" title="添加选中">
+            &gt;
+          </button>
+          <button class="transfer-btn" @click="moveToLeft" :disabled="rightChecked.length === 0" title="移除选中">
+            &lt;
+          </button>
+        </div>
+
+        <div class="transfer-panel">
+          <div class="transfer-panel-header">跟踪的币种 ({{ filteredTracked.length }})</div>
+          <div class="transfer-search">
+            <input type="text" v-model="searchRight" placeholder="搜索币种...">
+          </div>
+          <div class="transfer-panel-body">
+            <label class="transfer-item" v-for="coin in filteredTracked" :key="coin">
+              <input type="checkbox" :value="coin" v-model="rightChecked">
+              {{ coin }}
+            </label>
+            <div v-if="filteredTracked.length === 0" style="padding: 20px; text-align: center; color: var(--text-muted);">
+              暂无跟踪币种
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <div class="toast" :class="toastClass" v-if="toastShow">{{ toastMessage }}</div>
   </div>
 
+  {% raw %}
   <script>
-    const { createApp, ref, reactive, computed, onMounted } = Vue;
-    const { ElMessage } = ElementPlus;
+    const { createApp, ref, computed, reactive, onMounted } = Vue;
 
     const App = {
       setup() {
-        const allCoinsData = ref([]);
+        const allCoins = ref([]);
         const trackedCoins = ref([]);
         const leftChecked = ref([]);
         const rightChecked = ref([]);
+        const searchLeft = ref('');
+        const searchRight = ref('');
         const loading = reactive({
           updateBinance: false
         });
-        const 筛选占位符 = ref('搜索币种...');
-        
-        const activeMenu = computed(() => '/coins-config');
+
+        const toastMessage = ref('');
+        const toastClass = ref('');
+        const toastShow = ref(false);
+
+        const showToast = (message, type = 'success') => {
+          toastMessage.value = message;
+          toastClass.value = type === 'success' ? 'toast-success' : 'toast-error';
+          toastShow.value = true;
+          setTimeout(() => {
+            toastShow.value = false;
+          }, 2000);
+        };
+
+        const filteredUntracked = computed(() => {
+          const untracked = allCoins.value.filter(c => !trackedCoins.value.includes(c));
+          if (!searchLeft.value) return untracked;
+          const s = searchLeft.value.toLowerCase();
+          return untracked.filter(c => c.toLowerCase().includes(s));
+        });
+
+        const filteredTracked = computed(() => {
+          const tracked = trackedCoins.value;
+          if (!searchRight.value) return tracked;
+          const s = searchRight.value.toLowerCase();
+          return tracked.filter(c => c.toLowerCase().includes(s));
+        });
 
         const loadCoinsConfig = async () => {
           try {
             const response = await fetch('/api/coins-config');
             const data = await response.json();
-            
+
             if (data.status === 'success') {
               const coinsConfig = data.data;
-              const allCoinsList = [];
-              const trackedList = [];
-              
-              Object.entries(coinsConfig).forEach(([symbol, isTracked]) => {
-                allCoinsList.push({ key: symbol, label: symbol });
-                if (isTracked) {
-                  trackedList.push(symbol);
-                }
-              });
-              
-              allCoinsData.value = allCoinsList;
-              trackedCoins.value = trackedList;
+              allCoins.value = Object.keys(coinsConfig).sort();
+              trackedCoins.value = Object.entries(coinsConfig)
+                .filter(([, isTracked]) => isTracked)
+                .map(([symbol]) => symbol)
+                .sort();
             }
           } catch (error) {
             console.error('获取币种配置失败:', error);
-            ElMessage.error('获取币种配置失败');
+            showToast('获取币种配置失败', 'error');
           }
         };
 
-        const handleTransferChange = async (value, direction, movedKeys) => {
-          if (direction === 'right') {
-            const updates = movedKeys.map(symbol => ({ symbol, tracked: true }));
-            await updateCoinsTracking(updates);
-          } else if (direction === 'left') {
-            const updates = movedKeys.map(symbol => ({ symbol, tracked: false }));
-            await updateCoinsTracking(updates);
-          }
-        };
-
-        const handleLeftCheckChange = (checked) => {
-          leftChecked.value = checked;
-        };
-
-        const handleRightCheckChange = (checked) => {
-          rightChecked.value = checked;
-        };
-
-        const updateCoinsTracking = async (updates) => {
+        const updateCoinsTracking = async (updates, action) => {
           try {
             await Promise.all(
               updates.map(update =>
@@ -119,19 +374,33 @@
                 }).then(res => res.json())
               )
             );
-            ElMessage.success('更新成功');
+            showToast('更新成功');
             await loadCoinsConfig();
           } catch (error) {
             console.error('更新失败:', error);
-            ElMessage.error('更新失败');
+            showToast('更新失败', 'error');
           }
         };
 
+        const moveToRight = async () => {
+          const symbols = [...leftChecked.value];
+          const updates = symbols.map(symbol => ({ symbol, tracked: true }));
+          leftChecked.value = [];
+          await updateCoinsTracking(updates, 'add');
+        };
+
+        const moveToLeft = async () => {
+          const symbols = [...rightChecked.value];
+          const updates = symbols.map(symbol => ({ symbol, tracked: false }));
+          rightChecked.value = [];
+          await updateCoinsTracking(updates, 'remove');
+        };
+
         const updateFromBinance = async () => {
-          if (!confirm('确定要从币安获取最新币种列表吗？\n\n这将添加新上线的交易对到左侧列表（默认不跟踪），现有配置不受影响。')) {
+          if (!confirm('确定要从币安获取最新币种列表吗？\n\n这将添加新上线的交易对到左侧列表（默认不跟踪），原有配置不受影响。')) {
             return;
           }
-          
+
           loading.updateBinance = true;
           try {
             const response = await fetch('/api/coins-config/update-from-binance', {
@@ -139,16 +408,16 @@
               headers: { 'Content-Type': 'application/json' }
             });
             const data = await response.json();
-            
+
             if (data.status === 'success') {
-              ElMessage.success(data.message || '币种配置更新成功');
+              showToast(data.message || '币种配置更新成功');
               await loadCoinsConfig();
             } else {
-              ElMessage.error(data.message || '币种配置更新失败');
+              showToast(data.message || '币种配置更新失败', 'error');
             }
           } catch (error) {
             console.error('更新失败:', error);
-            ElMessage.error('更新失败: ' + error.message);
+            showToast('更新失败: ' + error.message, 'error');
           } finally {
             loading.updateBinance = false;
           }
@@ -158,30 +427,29 @@
           loadCoinsConfig();
         });
 
-        const handleMenuSelect = (index) => {
-          window.location.href = index;
-        };
-
         return {
-          allCoinsData,
+          allCoins,
           trackedCoins,
           leftChecked,
           rightChecked,
+          searchLeft,
+          searchRight,
           loading,
-          筛选占位符,
-          activeMenu,
-          handleMenuSelect,
-          handleTransferChange,
-          handleLeftCheckChange,
-          handleRightCheckChange,
-          updateFromBinance
+          filteredUntracked,
+          filteredTracked,
+          moveToRight,
+          moveToLeft,
+          updateFromBinance,
+          toastMessage,
+          toastClass,
+          toastShow
         };
       }
     };
 
     const app = createApp(App);
-    app.use(ElementPlus);
     app.mount('#app');
   </script>
+  {% endraw %}
 </body>
 </html>
