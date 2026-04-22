@@ -452,15 +452,17 @@
                           const t = Math.abs(val1) / (Math.abs(val1) + Math.abs(val2));
                           const crossX = startPoint[0] + t * (endPoint[0] - startPoint[0]);
 
+                          const firstColor = val1 >= 0 ? '#22c55e' : '#ef4444';
                           lines.push({
                             type: 'line',
                             shape: { x1: startPoint[0], y1: startPoint[1], x2: crossX, y2: zeroY },
-                            style: { stroke: '#22c55e', lineWidth: 1.5 }
+                            style: { stroke: firstColor, lineWidth: 1.5 }
                           });
+                          const secondColor = val2 >= 0 ? '#22c55e' : '#ef4444';
                           lines.push({
                             type: 'line',
                             shape: { x1: crossX, y1: zeroY, x2: endPoint[0], y2: endPoint[1] },
-                            style: { stroke: '#ef4444', lineWidth: 1.5 }
+                            style: { stroke: secondColor, lineWidth: 1.5 }
                           });
                         }
                       }
