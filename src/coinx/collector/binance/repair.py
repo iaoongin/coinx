@@ -217,13 +217,13 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
 
 
 def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_session=None, db_session=None):
-    tracked_symbols = get_active_coins(filter_symbols=symbols) if symbols else get_active_coins()
+    tracked_symbols = symbols if symbols else get_active_coins()
     active_series_types = series_types or DEFAULT_REPAIR_SERIES_TYPES
     results = []
     total_tasks = len(tracked_symbols) * len(active_series_types)
 
     logger.info(
-        f"开始修补已跟踪币种历史序列: 币种数量={len(tracked_symbols)}, "
+        f"开始修补历史序列: 币种数量={len(tracked_symbols)}, "
         f"序列类型={active_series_types}, 总任务数={total_tasks}, 周期={BINANCE_SERIES_REPAIR_PERIOD}"
     )
 
@@ -233,7 +233,7 @@ def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_se
         for series_type in active_series_types:
             task_index += 1
             logger.info(
-                f"已跟踪币种修补进度: 任务={task_index}/{total_tasks}, "
+                f"修补进度: 任务={task_index}/{total_tasks}, "
                 f"币种={symbol}, 类型={series_type}"
             )
             try:
@@ -246,7 +246,7 @@ def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_se
                 )
                 results.append(result)
                 logger.info(
-                    f"已跟踪币种修补结果: 任务={task_index}/{total_tasks}, 币种={symbol}, 类型={series_type}, "
+                    f"修补结果: 任务={task_index}/{total_tasks}, 币种={symbol}, 类型={series_type}, "
                     f"状态={result.get('status')}, 影响行数={result.get('affected', 0)}, 分页数={result.get('pages', 0)}"
                 )
             except Exception as exc:
@@ -266,7 +266,7 @@ def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_se
     skipped_count = sum(1 for item in results if item.get('status') == 'skipped')
 
     logger.info(
-        f"已跟踪币种历史序列修补完成: 总任务数={total_tasks}, 成功={success_count}, "
+        f"历史序列修补完成: 总任务数={total_tasks}, 成功={success_count}, "
         f"失败={failure_count}, 跳过={skipped_count}"
     )
 

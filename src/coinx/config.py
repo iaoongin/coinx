@@ -77,3 +77,11 @@ DB_CHARSET = get_env('DB_CHARSET', 'utf8mb4')
 DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset={DB_CHARSET}"
 
 BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://api.binance.com')
+
+# 币种拉取任务配置
+FETCH_COINS_ENABLED = get_env('FETCH_COINS_ENABLED', True, bool)
+FETCH_COINS_INTERVAL = get_env('FETCH_COINS_INTERVAL', 600, int)
+FETCH_COINS_TOP_VOLUME_COUNT = get_env('FETCH_COINS_TOP_VOLUME_COUNT', 100, int)
+
+# 跟踪币种修补任务配置
+REPAIR_TRACKED_INTERVAL = get_env('REPAIR_TRACKED_INTERVAL', 300, int)
