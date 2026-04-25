@@ -10,6 +10,7 @@ SERIES_ENDPOINTS = {
     'open_interest_hist': '/futures/data/openInterestHist',
     'klines': '/fapi/v1/klines',
     'global_long_short_account_ratio': '/futures/data/globalLongShortAccountRatio',
+    'taker_buy_sell_vol': '/futures/data/takerlongshortRatio',
 }
 
 DEFAULT_SERIES_TYPES = list(SERIES_ENDPOINTS.keys())
@@ -89,6 +90,19 @@ def fetch_global_long_short_account_ratio(symbol, period, limit, session=None, s
         params['endTime'] = end_time
     return _request_series(
         SERIES_ENDPOINTS['global_long_short_account_ratio'],
+        params,
+        session=session,
+    )
+
+
+def fetch_taker_buy_sell_vol(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {'symbol': symbol, 'period': period, 'limit': limit}
+    if start_time is not None:
+        params['startTime'] = start_time
+    if end_time is not None:
+        params['endTime'] = end_time
+    return _request_series(
+        SERIES_ENDPOINTS['taker_buy_sell_vol'],
         params,
         session=session,
     )
@@ -178,6 +192,21 @@ def parse_global_long_short_account_ratio(payload, symbol, period):
     ]
 
 
+def parse_taker_buy_sell_vol(payload, symbol, period):
+    return [
+        {
+            'symbol': item.get('symbol', symbol),
+            'period': period,
+            'event_time': int(item['timestamp']),
+            'buy_sell_ratio': _to_float(item.get('buySellRatio')),
+            'buy_vol': _to_float(item.get('buyVol')),
+            'sell_vol': _to_float(item.get('sellVol')),
+            'raw_json': item,
+        }
+        for item in payload
+    ]
+
+
 def fetch_series_payload(series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
     fetchers = {
         'top_long_short_position_ratio': fetch_top_long_short_position_ratio,
@@ -185,6 +214,7 @@ def fetch_series_payload(series_type, symbol, period, limit, session=None, start
         'open_interest_hist': fetch_open_interest_hist,
         'klines': fetch_klines,
         'global_long_short_account_ratio': fetch_global_long_short_account_ratio,
+        'taker_buy_sell_vol': fetch_taker_buy_sell_vol,
     }
 
     try:
@@ -209,6 +239,7 @@ def parse_series_payload(series_type, payload, symbol, period):
         'open_interest_hist': parse_open_interest_hist,
         'klines': parse_klines,
         'global_long_short_account_ratio': parse_global_long_short_account_ratio,
+        'taker_buy_sell_vol': parse_taker_buy_sell_vol,
     }
 
     try:

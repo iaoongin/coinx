@@ -7,11 +7,11 @@ from sqlalchemy import and_, func, or_
 from coinx.coin_manager import get_active_coins
 from coinx.config import TIME_INTERVALS
 from coinx.database import get_session
-from coinx.models import BinanceKline, BinanceOpenInterestHist
+from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
 
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
-HOMEPAGE_REQUIRED_SERIES_TYPES = ('klines', 'open_interest_hist')
+HOMEPAGE_REQUIRED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
 HOMEPAGE_BULK_QUERY_THRESHOLD = 8
 
 
@@ -30,6 +30,15 @@ class HomepageKlinePoint:
     close_price: Optional[float]
     quote_volume: Optional[float]
     taker_buy_quote_volume: Optional[float]
+
+
+@dataclass(frozen=True)
+class HomepageTakerBuySellVolPoint:
+    symbol: str
+    event_time: int
+    buy_sell_ratio: Optional[float]
+    buy_vol: Optional[float]
+    sell_vol: Optional[float]
 
 
 def format_number(num):
@@ -115,13 +124,17 @@ def _calc_percent_change(current_value, past_value):
     return ((current_value - past_value) / past_value) * 100
 
 
-def _get_exact_window(records_by_time, current_time, points):
+def _get_exact_window(records_by_time, current_time, points, tolerance=10):
     window = []
+    missing = 0
     for offset in range(points):
         record = records_by_time.get(current_time - offset * FIVE_MINUTES_MS)
         if record is None:
-            return None
-        window.append(record)
+            missing += 1
+            if missing > tolerance:
+                return None
+        else:
+            window.append(record)
     return window
 
 
@@ -129,6 +142,17 @@ def _calc_net_inflow_value(window):
     taker_buy_quote = sum(float(item.taker_buy_quote_volume or 0) for item in window)
     quote_volume = sum(float(item.quote_volume or 0) for item in window)
     return (2 * taker_buy_quote) - quote_volume
+
+
+def _calc_net_inflow_from_taker_vol(window, price=None):
+    if not window:
+        return 0
+    buy_vol = sum(float(item.buy_vol or 0) for item in window)
+    sell_vol = sum(float(item.sell_vol or 0) for item in window)
+    net_btc = buy_vol - sell_vol
+    if price:
+        return net_btc * price
+    return net_btc
 
 
 def _build_net_inflow(kline_by_time, current_time):
@@ -141,6 +165,18 @@ def _build_net_inflow(kline_by_time, current_time):
             continue
 
         inflow[interval] = _calc_net_inflow_value(window)
+    return inflow
+
+
+def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time, price=None):
+    inflow = {}
+    for interval in TIME_INTERVALS:
+        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
+        window = _get_exact_window(taker_vol_by_time, current_time, points)
+        if not window:
+            continue
+
+        inflow[interval] = _calc_net_inflow_from_taker_vol(window, price=price)
     return inflow
 
 
@@ -160,6 +196,14 @@ def _has_required_net_inflow_coverage(kline_by_time, current_time):
     return True
 
 
+def _has_required_net_inflow_coverage_vol(taker_vol_by_time, current_time):
+    for interval in TIME_INTERVALS:
+        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
+        if _get_exact_window(taker_vol_by_time, current_time, points) is None:
+            return False
+    return True
+
+
 def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
     common_times = sorted(set(oi_by_time).intersection(kline_by_time))
     if not common_times:
@@ -168,6 +212,17 @@ def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
     current_time = common_times[-1]
     return _has_required_change_coverage(oi_by_time, kline_by_time, current_time) and _has_required_net_inflow_coverage(
         kline_by_time, current_time
+    )
+
+
+def _has_complete_homepage_coverage_full(oi_by_time, kline_by_time, taker_vol_by_time):
+    common_times = sorted(set(oi_by_time).intersection(kline_by_time).intersection(taker_vol_by_time))
+    if not common_times:
+        return False
+
+    current_time = common_times[-1]
+    return _has_required_change_coverage(oi_by_time, kline_by_time, current_time) and _has_required_net_inflow_coverage_vol(
+        taker_vol_by_time, current_time
     )
 
 
@@ -187,6 +242,16 @@ def _build_kline_point(row):
         close_price=float(row.close_price) if row.close_price is not None else None,
         quote_volume=float(row.quote_volume) if row.quote_volume is not None else None,
         taker_buy_quote_volume=float(row.taker_buy_quote_volume) if row.taker_buy_quote_volume is not None else None,
+    )
+
+
+def _build_taker_buy_sell_vol_point(row):
+    return HomepageTakerBuySellVolPoint(
+        symbol=row.symbol,
+        event_time=int(row.event_time),
+        buy_sell_ratio=float(row.buy_sell_ratio) if row.buy_sell_ratio is not None else None,
+        buy_vol=float(row.buy_vol) if row.buy_vol is not None else None,
+        sell_vol=float(row.sell_vol) if row.sell_vol is not None else None,
     )
 
 
@@ -220,15 +285,22 @@ def _build_homepage_lower_bounds(session, symbols):
         symbols=symbols,
         time_field_name='open_time',
     )
+    latest_taker_vol_time_map = _get_latest_series_time_map(
+        session=session,
+        model=BinanceTakerBuySellVol,
+        symbols=symbols,
+        time_field_name='event_time',
+    )
 
     lower_bounds = {}
     for symbol in symbols:
         latest_oi_time = latest_oi_time_map.get(symbol)
         latest_kline_time = latest_kline_time_map.get(symbol)
-        if latest_oi_time is None or latest_kline_time is None:
+        latest_taker_vol_time = latest_taker_vol_time_map.get(symbol)
+        if latest_oi_time is None or latest_kline_time is None or latest_taker_vol_time is None:
             continue
 
-        current_time = min(latest_oi_time, latest_kline_time)
+        current_time = min(latest_oi_time, latest_kline_time, latest_taker_vol_time)
         lower_bounds[symbol] = current_time - _MAX_INTERVAL_MS
 
     return lower_bounds
@@ -341,21 +413,53 @@ def _load_recent_klines(session, symbol):
     return {int(row.open_time): _build_kline_point(row) for row in rows}
 
 
+def _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=None):
+    return _load_recent_series_map(
+        session=session,
+        model=BinanceTakerBuySellVol,
+        symbols=symbols,
+        time_field_name='event_time',
+        lower_bounds=lower_bounds,
+    )
+
+
+def _load_recent_taker_buy_sell_vol(session, symbol):
+    rows = (
+        session.query(
+            BinanceTakerBuySellVol.symbol,
+            BinanceTakerBuySellVol.event_time,
+            BinanceTakerBuySellVol.buy_sell_ratio,
+            BinanceTakerBuySellVol.buy_vol,
+            BinanceTakerBuySellVol.sell_vol,
+        )
+        .filter(
+            BinanceTakerBuySellVol.symbol == symbol,
+            BinanceTakerBuySellVol.period == '5m',
+        )
+        .order_by(BinanceTakerBuySellVol.event_time.desc())
+        .limit(_REQUIRED_POINTS)
+        .all()
+    )
+    return {int(row.event_time): _build_taker_buy_sell_vol_point(row) for row in rows}
+
+
 def _load_homepage_series_maps(session, symbols):
     if len(symbols) < HOMEPAGE_BULK_QUERY_THRESHOLD:
         return (
             {symbol: _load_recent_open_interest(session, symbol) for symbol in symbols},
             {symbol: _load_recent_klines(session, symbol) for symbol in symbols},
+            {symbol: _load_recent_taker_buy_sell_vol(session, symbol) for symbol in symbols},
         )
 
     lower_bounds = _build_homepage_lower_bounds(session, symbols)
     return (
         _load_recent_open_interest_map(session, symbols, lower_bounds=lower_bounds),
         _load_recent_klines_map(session, symbols, lower_bounds=lower_bounds),
+        _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=lower_bounds),
     )
 
 
-def _build_coin_payload(symbol, oi_by_time, kline_by_time):
+def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
     common_times = sorted(set(oi_by_time).intersection(kline_by_time))
     if not common_times:
         return None
@@ -367,6 +471,14 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time):
     current_open_interest = float(current_oi.sum_open_interest or 0)
     current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
     current_price = float(current_kline.close_price or 0)
+
+    has_taker_vol = bool(taker_vol_by_time and any(taker_vol_by_time.values()))
+    if has_taker_vol:
+        taker_times = sorted(taker_vol_by_time.keys())
+        taker_current_time = taker_times[-1]
+        net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, taker_current_time, price=current_price)
+    else:
+        net_inflow = {}
 
     changes = {}
     for interval in TIME_INTERVALS:
@@ -409,7 +521,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time):
         'price_change': day_change['price_change'],
         'price_change_percent': day_change['price_change_percent'],
         'price_change_formatted': day_change['price_change_formatted'],
-        'net_inflow': _build_net_inflow(kline_by_time, current_time),
+        'net_inflow': net_inflow,
         'changes': changes,
         'current_time': current_time,
     }
@@ -431,7 +543,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None):
                 'cache_update_time': None,
             }
 
-        recent_open_interest_map, recent_klines_map = _load_homepage_series_maps(db, target_symbols)
+        recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(db, target_symbols)
         data = []
         update_time = None
 
@@ -440,6 +552,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None):
                 symbol=symbol,
                 oi_by_time=recent_open_interest_map.get(symbol, {}),
                 kline_by_time=recent_klines_map.get(symbol, {}),
+                taker_vol_by_time=recent_taker_vol_map.get(symbol, {}),
             )
             if coin is None:
                 continue
@@ -477,11 +590,12 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         target_time = int(current_time_ms) - (int(current_time_ms) % FIVE_MINUTES_MS)
-        recent_open_interest_map, recent_klines_map = _load_homepage_series_maps(db, target_symbols)
+        recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(db, target_symbols)
 
         for symbol in target_symbols:
             oi_by_time = recent_open_interest_map.get(symbol, {})
             kline_by_time = recent_klines_map.get(symbol, {})
+            taker_vol_by_time = recent_taker_vol_map.get(symbol, {})
             common_times = sorted(set(oi_by_time).intersection(kline_by_time))
 
             if not common_times:
@@ -492,6 +606,10 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
                 return True
 
             if not _has_complete_homepage_coverage(oi_by_time, kline_by_time):
+                return True
+
+            has_taker_vol = bool(taker_vol_by_time and any(taker_vol_by_time.values()))
+            if has_taker_vol and not _has_required_net_inflow_coverage_vol(taker_vol_by_time, current_symbol_time):
                 return True
 
         return False

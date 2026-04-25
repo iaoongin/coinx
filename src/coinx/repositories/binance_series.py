@@ -7,6 +7,7 @@ from coinx.models import (
     BinanceOpenInterestHist,
     BinanceKline,
     BinanceGlobalLongShortAccountRatio,
+    BinanceTakerBuySellVol,
 )
 
 
@@ -16,6 +17,7 @@ SERIES_MODEL_MAP = {
     'open_interest_hist': BinanceOpenInterestHist,
     'klines': BinanceKline,
     'global_long_short_account_ratio': BinanceGlobalLongShortAccountRatio,
+    'taker_buy_sell_vol': BinanceTakerBuySellVol,
 }
 
 SERIES_KEY_FIELDS = {
@@ -24,6 +26,7 @@ SERIES_KEY_FIELDS = {
     'open_interest_hist': ('symbol', 'period', 'event_time'),
     'klines': ('symbol', 'period', 'open_time'),
     'global_long_short_account_ratio': ('symbol', 'period', 'event_time'),
+    'taker_buy_sell_vol': ('symbol', 'period', 'event_time'),
 }
 
 

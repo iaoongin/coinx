@@ -43,7 +43,7 @@ TIME_INTERVALS = get_env(
 BINANCE_SERIES_LIMIT = get_env('BINANCE_SERIES_LIMIT', 30, int)
 BINANCE_SERIES_TYPES = get_env(
     'BINANCE_SERIES_TYPES',
-    'top_long_short_position_ratio,top_long_short_account_ratio,open_interest_hist,klines,global_long_short_account_ratio',
+    'top_long_short_position_ratio,top_long_short_account_ratio,open_interest_hist,klines,global_long_short_account_ratio,taker_buy_sell_vol',
     list
 )
 BINANCE_SERIES_PERIODS = get_env(

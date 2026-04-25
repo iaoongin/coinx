@@ -124,6 +124,22 @@ CREATE TABLE IF NOT EXISTS binance_global_long_short_account_ratio (
     KEY idx_bglsar_symbol_period_time (symbol, period, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Binance 全市场多空账户数比历史数据表';
 
+-- Binance 主动买入卖出量历史数据表
+CREATE TABLE IF NOT EXISTS binance_taker_buy_sell_vol (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    symbol VARCHAR(20) NOT NULL COMMENT '交易对，例如 BTCUSDT',
+    period VARCHAR(10) NOT NULL COMMENT '时间周期，例如 5m、15m、1h',
+    event_time BIGINT NOT NULL COMMENT '数据时间戳，毫秒',
+    buy_sell_ratio DECIMAL(20, 8) DEFAULT NULL COMMENT '主动买入卖出比',
+    buy_vol DECIMAL(30, 8) DEFAULT NULL COMMENT '主动买入成交额',
+    sell_vol DECIMAL(30, 8) DEFAULT NULL COMMENT '主动卖出成交额',
+    raw_json JSON DEFAULT NULL COMMENT '接口原始返回数据',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_btbsv_symbol_period_time (symbol, period, event_time),
+    KEY idx_btbsv_symbol_period_time (symbol, period, event_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Binance 主动买入卖出量历史数据表';
+
 -- 行情快照原始数据表
 CREATE TABLE IF NOT EXISTS market_tickers (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -10,6 +10,7 @@ from coinx.config import (
     BINANCE_SERIES_REPAIR_PERIOD,
     BINANCE_SERIES_REPAIR_SLEEP_MS,
 )
+from coinx.database import get_session
 from coinx.repositories.binance_series import (
     get_earliest_series_timestamp as get_earliest_series_timestamp_from_repo,
     get_latest_series_timestamp as get_latest_series_timestamp_from_repo,
@@ -26,6 +27,7 @@ DEFAULT_REPAIR_SERIES_TYPES = [
     'global_long_short_account_ratio',
     'top_long_short_position_ratio',
     'top_long_short_account_ratio',
+    'taker_buy_sell_vol',
 ]
 
 
@@ -129,6 +131,9 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
             'pages': 0,
         }
 
+    if series_type == 'taker_buy_sell_vol':
+        return _repair_taker_buy_sell_vol(symbol, window, http_session, db_session)
+
     page_limit = _get_page_limit(series_type)
     time_field = _get_time_field(series_type)
     cursor_time = window['start_time']
@@ -214,6 +219,178 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
         'pages': pages,
         'last_repaired_time': last_repaired_time,
     }
+
+
+def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session):
+    from sqlalchemy import func
+    from coinx.models import BinanceTakerBuySellVol
+
+    page_limit = _get_page_limit('taker_buy_sell_vol')
+    target_start = window['start_time']
+    target_end = window['end_time']
+    earliest_local = window.get('earliest_local_timestamp')
+
+    coverage_start = target_end - BINANCE_SERIES_REPAIR_COVERAGE_HOURS * 60 * 60 * 1000
+    needs_backfill = earliest_local is None or earliest_local > coverage_start
+
+    backfill_start = coverage_start if needs_backfill else earliest_local
+    end_time = window['end_time']
+    affected = 0
+    pages = 0
+    request_pages = 0
+    repaired_records = 0
+    last_repaired_time = None
+
+    if needs_backfill:
+        while True:
+            request_pages += 1
+            payload = fetch_series_payload(
+                series_type='taker_buy_sell_vol',
+                symbol=symbol,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+                limit=page_limit,
+                session=http_session,
+                end_time=end_time,
+            )
+            if not payload:
+                logger.info(f"taker_buy_sell_vol 修补完成: 无更多数据")
+                break
+
+            records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+            filtered_records = [r for r in records if r['event_time'] >= backfill_start]
+
+            if not filtered_records:
+                break
+
+            page_affected = upsert_series_records('taker_buy_sell_vol', filtered_records, session=db_session)
+            affected += page_affected
+            repaired_records += len(filtered_records)
+            pages += 1
+            last_repaired_time = max(r['event_time'] for r in filtered_records)
+
+            oldest_time = min(r['event_time'] for r in filtered_records)
+            logger.info(
+                f"taker_buy_sell_vol 修补: 页码={request_pages}, 记录数={len(filtered_records)}, "
+                f"最旧时间={oldest_time}, 最新时间={last_repaired_time}"
+            )
+
+            if oldest_time <= backfill_start:
+                break
+
+            end_time = oldest_time - 1
+
+            if BINANCE_SERIES_REPAIR_SLEEP_MS > 0:
+                time.sleep(BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
+
+    gap_affected = _repair_taker_vol_gaps(symbol, coverage_start, target_end, http_session, db_session)
+    affected += gap_affected
+
+    logger.info(
+        f"taker_buy_sell_vol 修补完成: 币种={symbol}, 分页数={pages}, 记录数={repaired_records}, "
+        f"影响行数={affected}, 最后时间={last_repaired_time}"
+    )
+    return {
+        'symbol': symbol,
+        'series_type': 'taker_buy_sell_vol',
+        'period': BINANCE_SERIES_REPAIR_PERIOD,
+        'status': 'success',
+        'start_time': window['start_time'],
+        'end_time': window['end_time'],
+        'affected': affected,
+        'records': repaired_records,
+        'pages': pages,
+        'last_repaired_time': last_repaired_time,
+    }
+
+
+def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, db_session):
+    from sqlalchemy import func
+    from coinx.models import BinanceTakerBuySellVol
+
+    own_session = db_session is None
+    session = db_session or get_session()
+    gap_affected = 0
+
+    try:
+        rows = (
+            session.query(BinanceTakerBuySellVol.event_time)
+            .filter(
+                BinanceTakerBuySellVol.symbol == symbol,
+                BinanceTakerBuySellVol.event_time >= coverage_start,
+                BinanceTakerBuySellVol.event_time <= coverage_end,
+            )
+            .order_by(BinanceTakerBuySellVol.event_time)
+            .all()
+        )
+
+        if not rows:
+            return 0
+
+        existing_times = set(r[0] for r in rows)
+
+        missing_times = []
+        current = coverage_start
+        while current <= coverage_end:
+            if current not in existing_times:
+                missing_times.append(current)
+            current += FIVE_MINUTES_MS
+
+        if not missing_times:
+            logger.info(f"taker_buy_sell_vol 间隙检测: 无缺失点")
+            return 0
+
+        logger.info(f"taker_buy_sell_vol 间隙检测: 发现 {len(missing_times)} 个缺失点")
+
+        if not missing_times:
+            return 0
+
+        earliest_gap = min(missing_times)
+        latest_gap = max(missing_times)
+        end_time = latest_gap - 1
+        page_count = 0
+
+        while True:
+            page_count += 1
+            payload = fetch_series_payload(
+                series_type='taker_buy_sell_vol',
+                symbol=symbol,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+                limit=500,
+                session=http_session,
+                end_time=end_time,
+            )
+
+            if not payload:
+                break
+
+            records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+
+            new_records = [r for r in records if r['event_time'] >= coverage_start and r['event_time'] <= coverage_end]
+
+            if not new_records:
+                break
+
+            page_affected = upsert_series_records('taker_buy_sell_vol', new_records, session=session)
+            gap_affected += page_affected
+
+            oldest_time = min(r['event_time'] for r in new_records)
+            logger.info(f"taker_buy_sell_vol 间隙修补: 页码={page_count}, 新增={len(new_records)}, 最旧时间={oldest_time}")
+
+            if oldest_time <= earliest_gap:
+                break
+
+            end_time = oldest_time - 1
+
+            if BINANCE_SERIES_REPAIR_SLEEP_MS > 0:
+                time.sleep(BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
+
+        logger.info(f"taker_buy_sell_vol 间隙修补完成: 新增 {gap_affected} 条记录")
+
+    finally:
+        if own_session:
+            session.close()
+
+    return gap_affected
 
 
 def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_session=None, db_session=None):

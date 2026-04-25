@@ -5,7 +5,7 @@ from coinx.repositories.homepage_series import (
     get_homepage_series_update_time,
     should_refresh_homepage_series,
 )
-from coinx.models import BinanceKline, BinanceOpenInterestHist
+from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
 
 
 def seed_series(
@@ -19,6 +19,9 @@ def seed_series(
     price_step=1.0,
     quote_volume_base=1000.0,
     taker_buy_quote_base=600.0,
+    taker_vol_base=1000.0,
+    taker_vol_step=10.0,
+    include_taker_vol=False,
 ):
     for index in range(periods):
         event_time = start_time_ms + index * FIVE_MINUTES_MS
@@ -53,6 +56,18 @@ def seed_series(
                 raw_json=[],
             )
         )
+        if include_taker_vol:
+            session.add(
+                BinanceTakerBuySellVol(
+                    symbol=symbol,
+                    period='5m',
+                    event_time=event_time,
+                    buy_sell_ratio=1.2 + index * 0.001,
+                    buy_vol=taker_vol_base + index * taker_vol_step,
+                    sell_vol=(taker_vol_base + index * taker_vol_step) * 0.8,
+                    raw_json={},
+                )
+            )
     session.commit()
 
 
@@ -79,8 +94,7 @@ def test_get_homepage_series_data_builds_coin_payload_from_5m_series(db_session)
     assert change_15m['price_change'] == 3.0
     assert round(change_15m['price_change_percent'], 2) == round(3.0 / 385.0 * 100, 2)
 
-    assert coin['net_inflow']['5m'] == 488.0
-    assert coin['net_inflow']['15m'] == 1461.0
+    assert coin['net_inflow'] == {}
 
 
 def test_get_homepage_series_data_returns_none_for_missing_interval_points(db_session):
@@ -103,7 +117,7 @@ def test_get_homepage_series_data_returns_none_for_missing_interval_points(db_se
 
     assert coin['changes']['15m']['current_price'] is None
     assert coin['changes']['15m']['price_change_percent'] is None
-    assert coin['net_inflow']['15m'] is None
+    assert coin['net_inflow'] == {}
 
 
 def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session):
@@ -227,3 +241,42 @@ def test_should_refresh_homepage_series_skips_when_latest_is_current_and_coverag
         now_ms=now_ms,
         session=db_session,
     ) is False
+
+
+def test_get_homepage_series_data_without_taker_vol_returns_empty_net_inflow(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 289, include_taker_vol=False)
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert len(coins) == 1
+    assert coins[0]['net_inflow'] == {}
+
+
+def test_get_homepage_series_data_with_taker_vol_returns_net_inflow(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 289, include_taker_vol=True)
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert len(coins) == 1
+    coin = coins[0]
+    assert coin['net_inflow'] is not None
+    assert '5m' in coin['net_inflow']
+    assert coin['net_inflow']['5m'] is not None
+    assert isinstance(coin['net_inflow']['5m'], (int, float))
+
+
+def test_get_homepage_series_data_with_partial_taker_vol_returns_partial_net_inflow(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 10, include_taker_vol=True)
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert len(coins) == 1
+    coin = coins[0]
+    assert coin['net_inflow'] is not None
+    assert '5m' in coin['net_inflow']
+    assert '15m' in coin['net_inflow']
+    assert '30m' in coin['net_inflow']
+    assert '1h' not in coin['net_inflow']

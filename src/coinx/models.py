@@ -201,6 +201,31 @@ class MarketTickers(Base):
         return f"<MarketTickers(symbol='{self.symbol}', close_time={self.close_time})>"
 
 
+class BinanceTakerBuySellVol(Base):
+    """Binance 主动买入卖出量历史表"""
+
+    __tablename__ = 'binance_taker_buy_sell_vol'
+    __table_args__ = (
+        UniqueConstraint('symbol', 'period', 'event_time', name='uk_btbsv_symbol_period_time'),
+        Index('idx_btbsv_symbol_period_time', 'symbol', 'period', 'event_time'),
+        {'comment': 'Binance 主动买入卖出量历史数据表'},
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
+    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
+    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
+    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
+    buy_sell_ratio = Column(DECIMAL(20, 8), comment='主动买入卖出比')
+    buy_vol = Column(DECIMAL(30, 8), comment='主动买入成交额')
+    sell_vol = Column(DECIMAL(30, 8), comment='主动卖出成交额')
+    raw_json = Column(JSON, comment='接口原始返回数据')
+    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+    def __repr__(self):
+        return f"<BinanceTakerBuySellVol(symbol='{self.symbol}', period='{self.period}')>"
+
+
 class BinanceGlobalLongShortAccountRatio(Base):
     """Binance 全市场多空账户数比历史表"""
 
