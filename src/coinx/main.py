@@ -17,8 +17,8 @@ def signal_handler(sig, frame):
     try:
         # 关闭调度器
         if scheduler.running:
-            scheduler.shutdown()
-            logger.info("调度器已关闭")
+            scheduler.shutdown(wait=False)
+            logger.info("调度器已强制关闭")
     except Exception as e:
         logger.error(f"关闭调度器时出错: {e}")
     
@@ -55,8 +55,8 @@ def main():
         # 确保调度器被正确关闭
         try:
             if scheduler.running:
-                scheduler.shutdown()
-                logger.info("调度器已关闭")
+                scheduler.shutdown(wait=False)
+                logger.info("调度器已强制关闭")
         except Exception as e:
             logger.error(f"关闭调度器时出错: {e}")
 
