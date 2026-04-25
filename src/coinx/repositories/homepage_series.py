@@ -138,37 +138,15 @@ def _get_exact_window(records_by_time, current_time, points, tolerance=10):
     return window
 
 
-def _calc_net_inflow_value(window):
-    taker_buy_quote = sum(float(item.taker_buy_quote_volume or 0) for item in window)
-    quote_volume = sum(float(item.quote_volume or 0) for item in window)
-    return (2 * taker_buy_quote) - quote_volume
-
-
 def _calc_net_inflow_from_taker_vol(window, price=None):
     if not window:
         return 0
     buy_vol = sum(float(item.buy_vol or 0) for item in window)
     sell_vol = sum(float(item.sell_vol or 0) for item in window)
-    net_btc = buy_vol - sell_vol
-    if price:
-        return net_btc * price
-    return net_btc
+    return buy_vol - sell_vol
 
 
-def _build_net_inflow(kline_by_time, current_time):
-    inflow = {}
-    for interval in TIME_INTERVALS:
-        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
-        window = _get_exact_window(kline_by_time, current_time, points)
-        if not window:
-            inflow[interval] = None
-            continue
-
-        inflow[interval] = _calc_net_inflow_value(window)
-    return inflow
-
-
-def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time, price=None):
+def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time):
     inflow = {}
     for interval in TIME_INTERVALS:
         points = _interval_to_ms(interval) // FIVE_MINUTES_MS
@@ -176,7 +154,7 @@ def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time, price=None
         if not window:
             continue
 
-        inflow[interval] = _calc_net_inflow_from_taker_vol(window, price=price)
+        inflow[interval] = _calc_net_inflow_from_taker_vol(window)
     return inflow
 
 
@@ -476,7 +454,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
     if has_taker_vol:
         taker_times = sorted(taker_vol_by_time.keys())
         taker_current_time = taker_times[-1]
-        net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, taker_current_time, price=current_price)
+        net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, taker_current_time)
     else:
         net_inflow = {}
 

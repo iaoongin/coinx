@@ -11,7 +11,6 @@ from coinx.collector import (
     get_funding_rate,
     get_latest_price,
     get_long_short_ratio,
-    get_net_inflow_data as get_net_inflow_data_real,
     get_open_interest,
     repair_tracked_symbols,
     update_market_tickers,
@@ -205,7 +204,6 @@ def get_coin_detail(symbol):
             'open_interest_data': get_open_interest(symbol),
             'long_short_ratio': get_long_short_ratio(symbol),
             'exchange_distribution': get_exchange_distribution_real(symbol),
-            'net_inflow_data': get_net_inflow_data_real(symbol),
         }
         return jsonify({'status': 'success', 'message': 'coin detail loaded', 'data': detail_data})
     except Exception as e:

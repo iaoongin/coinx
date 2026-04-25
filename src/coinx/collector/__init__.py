@@ -14,7 +14,6 @@ from coinx.collector.binance.market import (
     get_exchange_info,
 )
 from coinx.collector.binance.indicators import (
-    get_net_inflow_data,
     get_exchange_distribution_real,
 )
 from coinx.collector.binance.service import (

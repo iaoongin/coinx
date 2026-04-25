@@ -11,7 +11,7 @@ from .market import (
     get_exchange_info,
     get_all_24hr_tickers
 )
-from .indicators import get_net_inflow_data
+from .indicators import get_exchange_distribution_real
 from .cache import should_update_cache, save_cached_data, get_cache_key
 
 def get_all_coins_list():
@@ -106,7 +106,6 @@ def update_single_coin_data(symbol):
             'current': current_data,
             'intervals': intervals_data,
             'price_change': price_change_data,  # 添加价格变化数据
-            'net_inflow': get_net_inflow_data(symbol),  # 添加主力净流入数据
             'update_time': int(time.time() * 1000)
         }
         
