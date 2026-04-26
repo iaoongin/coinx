@@ -15,6 +15,7 @@ from coinx.repositories.binance_series import (
     get_earliest_series_timestamp as get_earliest_series_timestamp_from_repo,
     get_latest_series_timestamp as get_latest_series_timestamp_from_repo,
     upsert_series_records,
+    get_series_model,
 )
 from coinx.utils import logger
 from coinx.collector.binance.series import fetch_series_payload, parse_series_payload
@@ -33,6 +34,11 @@ DEFAULT_REPAIR_SERIES_TYPES = [
 
 def floor_to_completed_5m(now_ms):
     return now_ms - (now_ms % FIVE_MINUTES_MS)
+
+
+def latest_closed_5m_open_time(now_ms):
+    """Return the latest fully closed 5m candle open time."""
+    return max(0, floor_to_completed_5m(now_ms) - FIVE_MINUTES_MS)
 
 
 def get_latest_series_timestamp(symbol, series_type, session=None):
@@ -54,12 +60,12 @@ def get_earliest_series_timestamp(symbol, series_type, session=None):
 
 
 def build_repair_window(symbol, series_type, now_ms, session=None):
-    target_end_time = floor_to_completed_5m(now_ms)
+    target_end_time = latest_closed_5m_open_time(now_ms)
     latest_local_timestamp = get_latest_series_timestamp(symbol, series_type, session=session)
     earliest_local_timestamp = get_earliest_series_timestamp(symbol, series_type, session=session)
     bootstrap_start_time = target_end_time - BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS * 24 * 60 * 60 * 1000
     coverage_start_time = target_end_time - BINANCE_SERIES_REPAIR_COVERAGE_HOURS * 60 * 60 * 1000
-    desired_start_time = min(bootstrap_start_time, coverage_start_time)
+    desired_start_time = max(0, min(bootstrap_start_time, coverage_start_time))
 
     needs_head_backfill = (
         earliest_local_timestamp is None
@@ -90,6 +96,36 @@ def build_repair_window(symbol, series_type, now_ms, session=None):
     }
 
 
+def _trim_series_after_target_end(symbol, series_type, target_end_time, session=None):
+    """Delete local records that are newer than the latest closed 5m anchor."""
+    model = get_series_model(series_type)
+    time_field_name = _get_time_field(series_type)
+    time_field = getattr(model, time_field_name)
+
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        deleted = (
+            db.query(model)
+            .filter(
+                model.symbol == symbol,
+                model.period == BINANCE_SERIES_REPAIR_PERIOD,
+                time_field > target_end_time,
+            )
+            .delete(synchronize_session=False)
+        )
+        if deleted:
+            db.commit()
+        return deleted
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if own_session:
+            db.close()
+
+
 def _get_time_field(series_type):
     return 'open_time' if series_type == 'klines' else 'event_time'
 
@@ -108,6 +144,21 @@ def _get_page_end_time(cursor_time, end_time, page_limit):
 def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db_session=None):
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     window = build_repair_window(symbol, series_type, current_time_ms, session=db_session)
+
+    latest_local_timestamp = window.get('latest_local_timestamp')
+    end_time = window.get('end_time')
+    if latest_local_timestamp is not None and end_time is not None and latest_local_timestamp > end_time:
+        deleted = _trim_series_after_target_end(
+            symbol=symbol,
+            series_type=series_type,
+            target_end_time=end_time,
+            session=db_session,
+        )
+        logger.info(
+            f"修补前清理未收盘序列: 币种={symbol}, 类型={series_type}, "
+            f"清理数量={deleted}, 目标结束时间={end_time}"
+        )
+        window = build_repair_window(symbol, series_type, current_time_ms, session=db_session)
 
     logger.info(
         f"开始修补历史序列: 币种={symbol}, 类型={series_type}, 周期={BINANCE_SERIES_REPAIR_PERIOD}, "

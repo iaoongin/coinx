@@ -1,6 +1,8 @@
 from coinx.collector.binance.repair import (
+    FIVE_MINUTES_MS,
     build_repair_window,
     floor_to_completed_5m,
+    latest_closed_5m_open_time,
     get_earliest_series_timestamp,
     get_latest_series_timestamp,
 )
@@ -10,6 +12,11 @@ from coinx.repositories.binance_series import upsert_series_records
 def test_floor_to_completed_5m_aligns_timestamp():
     assert floor_to_completed_5m(601234) == 600000
     assert floor_to_completed_5m(600000) == 600000
+
+
+def test_latest_closed_5m_open_time_lags_one_full_interval():
+    assert latest_closed_5m_open_time(601234) == 300000
+    assert latest_closed_5m_open_time(600000) == 300000
 
 
 def test_get_latest_series_timestamp_returns_none_for_empty_table(db_session):
@@ -196,8 +203,8 @@ def test_build_repair_window_bootstraps_recent_seven_days_when_empty(db_session,
     )
 
     assert window['has_gap'] is True
-    assert window['end_time'] == 600000
-    assert window['start_time'] == 600000 - 7 * 24 * 60 * 60 * 1000
+    assert window['end_time'] == 300000
+    assert window['start_time'] == 0
 
 
 def test_build_repair_window_starts_after_latest_local_record(db_session, monkeypatch):
@@ -234,7 +241,7 @@ def test_build_repair_window_starts_after_latest_local_record(db_session, monkey
 
     assert window['has_gap'] is True
     assert window['start_time'] == 600000
-    assert window['end_time'] == 900000
+    assert window['end_time'] == 600000
 
 
 def test_build_repair_window_backfills_when_coverage_is_short(db_session, monkeypatch):
@@ -280,7 +287,7 @@ def test_build_repair_window_backfills_when_coverage_is_short(db_session, monkey
 
     assert window['has_gap'] is True
     assert window['start_time'] == 0
-    assert window['end_time'] == 24 * 60 * 60 * 1000
+    assert window['end_time'] == 24 * 60 * 60 * 1000 - FIVE_MINUTES_MS
 
 
 def test_build_repair_window_returns_no_gap_when_series_is_caught_up(db_session, monkeypatch):
@@ -292,7 +299,7 @@ def test_build_repair_window_returns_no_gap_when_series_is_caught_up(db_session,
         'coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS',
         0,
     )
-    for event_time in (0, 900000):
+    for event_time in (0, 600000):
         upsert_series_records(
             'global_long_short_account_ratio',
             [
@@ -317,8 +324,8 @@ def test_build_repair_window_returns_no_gap_when_series_is_caught_up(db_session,
     )
 
     assert window['has_gap'] is False
-    assert window['start_time'] == 1200000
-    assert window['end_time'] == 900000
+    assert window['start_time'] == 900000
+    assert window['end_time'] == 600000
 
 
 def test_build_repair_window_repairs_tail_when_coverage_is_sufficient(db_session, monkeypatch):
@@ -358,7 +365,7 @@ def test_build_repair_window_repairs_tail_when_coverage_is_sufficient(db_session
     window = build_repair_window(
         symbol='BTCUSDT',
         series_type='global_long_short_account_ratio',
-        now_ms=600000,
+        now_ms=900000,
         session=db_session,
     )
 

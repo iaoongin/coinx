@@ -17,7 +17,8 @@
 其中：
 
 - 持仓量、持仓价值来自 `binance_open_interest_hist`
-- 价格、区间价格变化、24h 变化、净流入来自 `binance_klines`
+- 价格、区间价格变化、24h 变化来自 `binance_klines`
+- 主力净流入来自 `binance_taker_buy_sell_vol`
 
 本次实施采用 **TDD（Test-Driven Development）** 推进：
 
@@ -188,9 +189,9 @@
 
 ### 4.4 主力净流入
 
-继续沿用当前净流入定义，但改为完全从历史 K 线计算：
+继续沿用当前净流入定义，但改为完全从历史主动买卖量历史表计算：
 
-- `net_inflow = 2 * taker_buy_quote_volume - quote_volume`
+- `net_inflow = buy_vol - sell_vol`
 
 区间聚合方式：
 
@@ -210,7 +211,13 @@
 - `latest_kline_time = max(open_time)`
 - `current_time = min(latest_oi_time, latest_kline_time)`
 
-这样可以确保同一币种首页当前值来自同一个可对齐时间点。
+当前实现进一步把这个基准时间收敛到“最新已收盘 5m”：
+
+- `current_time` 先对齐到 `latest_closed_5m_open_time`
+- 再和 OI、K 线、主力净流入的可用时间做交集
+- 首页不会使用正在形成的 candle
+
+这样可以确保同一币种首页当前值来自同一个已收盘时间点，而不是正在变化的 5m。
 
 ### 5.2 历史点匹配规则
 
@@ -228,7 +235,17 @@
 
 - 当前所有 tracked 币种中可用于首页展示的最小 `current_time`
 
+这里的 `cache_update_time` 实际表示“最新已收盘 5m open_time”，不是系统当前时钟，也不是当前正在形成的 candle。
+
 这样页面显示的“最后更新时间”能够真实反映首页当前这一屏数据的有效时间。
+
+### 5.4 页面倒计时
+
+首页倒计时不再按“下一分钟”刷新，而是按“下一个 5m 收盘点”计算。
+
+- 页面展示的“当前”和 `5m` 仍保持同值
+- 这个值代表上一根已收盘 5m candle
+- 下一次自动刷新目标是下一根 5m 收盘
 
 ## 6. 后端改造范围
 

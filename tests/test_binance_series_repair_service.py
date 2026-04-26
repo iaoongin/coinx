@@ -4,6 +4,7 @@ from coinx.collector.binance.repair import (
     run_series_repair_job,
 )
 from coinx.models import BinanceKline, BinanceOpenInterestHist
+from coinx.repositories.binance_series import upsert_series_records
 
 
 def _make_kline_payload(open_time):
@@ -68,6 +69,47 @@ def test_repair_single_series_pages_and_upserts_records(db_session, monkeypatch)
         ('klines', 'BTCUSDT', '5m', 2, 0, 300000),
         ('klines', 'BTCUSDT', '5m', 2, 600000, 600000),
     ]
+
+
+def test_repair_single_series_trims_unclosed_kline_records(db_session, monkeypatch):
+    upsert_series_records(
+        'klines',
+        [
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 600000,
+                'close_time': 899999,
+                'open_price': 1,
+                'high_price': 2,
+                'low_price': 1,
+                'close_price': 2,
+                'volume': 10,
+                'quote_volume': 20,
+                'trade_count': 3,
+                'taker_buy_base_volume': 4,
+                'taker_buy_quote_volume': 5,
+                'raw_json': [],
+            }
+        ],
+        session=db_session,
+    )
+
+    monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_SLEEP_MS', 0)
+    monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT', 2)
+    monkeypatch.setattr('coinx.collector.binance.repair.fetch_series_payload', lambda *args, **kwargs: [])
+
+    summary = repair_single_series(
+        symbol='BTCUSDT',
+        series_type='klines',
+        now_ms=600000,
+        db_session=db_session,
+    )
+
+    rows = db_session.query(BinanceKline).all()
+
+    assert summary['status'] == 'success'
+    assert len(rows) == 0
 
 
 def test_repair_single_series_skips_when_no_gap(monkeypatch):
@@ -391,10 +433,10 @@ def test_repair_tracked_symbols_logs_batch_progress(monkeypatch):
         now_ms=900000,
     )
 
-    assert any('开始修补已跟踪币种历史序列: 币种数量=2' in message for message in info_logs)
-    assert any('已跟踪币种修补进度: 任务=1/4, 币种=BTCUSDT, 类型=klines' in message for message in info_logs)
-    assert any('已跟踪币种修补结果: 任务=4/4, 币种=ETHUSDT, 类型=open_interest_hist, 状态=success' in message for message in info_logs)
-    assert any('已跟踪币种历史序列修补完成: 总任务数=4, 成功=4, 失败=0, 跳过=0' in message for message in info_logs)
+    assert any('开始修补历史序列: 币种数量=2' in message for message in info_logs)
+    assert any('修补进度: 任务=1/4, 币种=BTCUSDT, 类型=klines' in message for message in info_logs)
+    assert any('修补结果: 任务=4/4, 币种=ETHUSDT, 类型=open_interest_hist, 状态=success' in message for message in info_logs)
+    assert any('历史序列修补完成: 总任务数=4, 成功=4, 失败=0, 跳过=0' in message for message in info_logs)
 
 
 def test_run_series_repair_job_respects_enabled_flag(monkeypatch):

@@ -375,6 +375,7 @@
         const lastUpdateTime = ref('');
         const countdown = ref('--');
         const intervals = ref([]);
+        const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
         let countdownInterval = null;
 
@@ -484,19 +485,15 @@
         };
 
         const updateCountdown = () => {
-          const now = new Date();
-          const nextRefreshTime = new Date(now);
-          nextRefreshTime.setSeconds(0);
-          nextRefreshTime.setMilliseconds(0);
-          nextRefreshTime.setTime(nextRefreshTime.getTime() + 60000);
-
-          const timeDiff = nextRefreshTime - now;
+          const now = Date.now();
+          const nextCloseTime = now - (now % FIVE_MINUTES_MS) + FIVE_MINUTES_MS;
+          const timeDiff = nextCloseTime - now;
 
           if (timeDiff <= 1000) {
             loadData(false);
           }
 
-          const seconds = Math.floor(timeDiff / 1000);
+          const seconds = Math.max(0, Math.floor(timeDiff / 1000));
           countdown.value = `${seconds}秒`;
         };
 

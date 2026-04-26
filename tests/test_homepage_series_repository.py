@@ -97,6 +97,26 @@ def test_get_homepage_series_data_builds_coin_payload_from_5m_series(db_session)
     assert coin['net_inflow'] == {}
 
 
+def test_get_homepage_series_data_uses_common_anchor_when_taker_vol_lags(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 20, include_taker_vol=True)
+    db_session.query(BinanceTakerBuySellVol).filter(
+        BinanceTakerBuySellVol.symbol == 'BTCUSDT',
+        BinanceTakerBuySellVol.period == '5m',
+        BinanceTakerBuySellVol.event_time == start_time + 19 * FIVE_MINUTES_MS,
+    ).delete()
+    db_session.commit()
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert len(coins) == 1
+    coin = coins[0]
+
+    assert coin['current_open_interest'] == 1180.0
+    assert coin['current_price'] == 118.0
+    assert coin['net_inflow']['5m'] is not None
+
+
 def test_get_homepage_series_data_returns_none_for_missing_interval_points(db_session):
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 12)
@@ -232,9 +252,10 @@ def test_should_refresh_homepage_series_when_latest_is_current_but_long_history_
 
 def test_should_refresh_homepage_series_skips_when_latest_is_current_and_coverage_is_complete(db_session):
     start_time = 1_700_000_000_000
-    seed_series(db_session, 'BTCUSDT', start_time, 2017)
+    aligned_start_time = start_time - (start_time % FIVE_MINUTES_MS)
+    seed_series(db_session, 'BTCUSDT', aligned_start_time, 2017)
 
-    now_ms = start_time + 2016 * FIVE_MINUTES_MS
+    now_ms = aligned_start_time + 2017 * FIVE_MINUTES_MS
 
     assert should_refresh_homepage_series(
         symbols=['BTCUSDT'],
@@ -279,4 +300,4 @@ def test_get_homepage_series_data_with_partial_taker_vol_returns_partial_net_inf
     assert '5m' in coin['net_inflow']
     assert '15m' in coin['net_inflow']
     assert '30m' in coin['net_inflow']
-    assert '1h' not in coin['net_inflow']
+    assert '1h' in coin['net_inflow']

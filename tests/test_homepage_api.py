@@ -98,5 +98,5 @@ def test_update_data_uses_homepage_series_refresh(monkeypatch):
     assert payload['status'] == 'success'
     assert captured['target'] is not None
     assert captured['kwargs']['symbols'] == ['BTCUSDT']
-    assert captured['kwargs']['series_types'] == ['klines', 'open_interest_hist']
+    assert captured['kwargs']['series_types'] == ['klines', 'open_interest_hist', 'taker_buy_sell_vol']
     assert captured['started'] is True

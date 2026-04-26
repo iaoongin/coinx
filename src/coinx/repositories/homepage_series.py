@@ -8,6 +8,7 @@ from coinx.coin_manager import get_active_coins
 from coinx.config import TIME_INTERVALS
 from coinx.database import get_session
 from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
+from coinx.collector.binance.repair import latest_closed_5m_open_time
 
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
@@ -188,9 +189,7 @@ def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
         return False
 
     current_time = common_times[-1]
-    return _has_required_change_coverage(oi_by_time, kline_by_time, current_time) and _has_required_net_inflow_coverage(
-        kline_by_time, current_time
-    )
+    return _has_required_change_coverage(oi_by_time, kline_by_time, current_time)
 
 
 def _has_complete_homepage_coverage_full(oi_by_time, kline_by_time, taker_vol_by_time):
@@ -233,41 +232,42 @@ def _build_taker_buy_sell_vol_point(row):
     )
 
 
-def _get_latest_series_time_map(session, model, symbols, time_field_name):
+def _get_latest_series_time_map(session, model, symbols, time_field_name, upper_bound=None):
     if not symbols:
         return {}
 
     time_field = getattr(model, time_field_name)
-    rows = (
-        session.query(model.symbol, func.max(time_field))
-        .filter(
-            model.symbol.in_(symbols),
-            model.period == '5m',
-        )
-        .group_by(model.symbol)
-        .all()
+    query = session.query(model.symbol, func.max(time_field)).filter(
+        model.symbol.in_(symbols),
+        model.period == '5m',
     )
+    if upper_bound is not None:
+        query = query.filter(time_field <= upper_bound)
+    rows = query.group_by(model.symbol).all()
     return {symbol: int(latest_time) for symbol, latest_time in rows if latest_time is not None}
 
 
-def _build_homepage_lower_bounds(session, symbols):
+def _build_homepage_lower_bounds(session, symbols, upper_bound=None):
     latest_oi_time_map = _get_latest_series_time_map(
         session=session,
         model=BinanceOpenInterestHist,
         symbols=symbols,
         time_field_name='event_time',
+        upper_bound=upper_bound,
     )
     latest_kline_time_map = _get_latest_series_time_map(
         session=session,
         model=BinanceKline,
         symbols=symbols,
         time_field_name='open_time',
+        upper_bound=upper_bound,
     )
     latest_taker_vol_time_map = _get_latest_series_time_map(
         session=session,
         model=BinanceTakerBuySellVol,
         symbols=symbols,
         time_field_name='event_time',
+        upper_bound=upper_bound,
     )
 
     lower_bounds = {}
@@ -284,7 +284,7 @@ def _build_homepage_lower_bounds(session, symbols):
     return lower_bounds
 
 
-def _load_recent_series_map(session, model, symbols, time_field_name, lower_bounds=None):
+def _load_recent_series_map(session, model, symbols, time_field_name, lower_bounds=None, upper_bound=None):
     if not symbols:
         return {}
 
@@ -316,14 +316,13 @@ def _load_recent_series_map(session, model, symbols, time_field_name, lower_boun
         )
     )
 
-    rows = (
-        session.query(*selected_columns)
-        .filter(
-            model.period == '5m',
-            or_(*conditions),
-        )
-        .all()
+    query = session.query(*selected_columns).filter(
+        model.period == '5m',
+        or_(*conditions),
     )
+    if upper_bound is not None:
+        query = query.filter(time_field <= upper_bound)
+    rows = query.all()
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in rows:
@@ -332,108 +331,102 @@ def _load_recent_series_map(session, model, symbols, time_field_name, lower_boun
     return records_by_symbol
 
 
-def _load_recent_open_interest_map(session, symbols, lower_bounds=None):
+def _load_recent_open_interest_map(session, symbols, lower_bounds=None, upper_bound=None):
     return _load_recent_series_map(
         session=session,
         model=BinanceOpenInterestHist,
         symbols=symbols,
         time_field_name='event_time',
         lower_bounds=lower_bounds,
+        upper_bound=upper_bound,
     )
 
 
-def _load_recent_klines_map(session, symbols, lower_bounds=None):
+def _load_recent_klines_map(session, symbols, lower_bounds=None, upper_bound=None):
     return _load_recent_series_map(
         session=session,
         model=BinanceKline,
         symbols=symbols,
         time_field_name='open_time',
         lower_bounds=lower_bounds,
+        upper_bound=upper_bound,
     )
 
 
-def _load_recent_open_interest(session, symbol):
-    rows = (
-        session.query(
-            BinanceOpenInterestHist.symbol,
-            BinanceOpenInterestHist.event_time,
-            BinanceOpenInterestHist.sum_open_interest,
-            BinanceOpenInterestHist.sum_open_interest_value,
-        )
-        .filter(
-            BinanceOpenInterestHist.symbol == symbol,
-            BinanceOpenInterestHist.period == '5m',
-        )
-        .order_by(BinanceOpenInterestHist.event_time.desc())
-        .limit(_REQUIRED_POINTS)
-        .all()
+def _load_recent_open_interest(session, symbol, upper_bound=None):
+    query = session.query(
+        BinanceOpenInterestHist.symbol,
+        BinanceOpenInterestHist.event_time,
+        BinanceOpenInterestHist.sum_open_interest,
+        BinanceOpenInterestHist.sum_open_interest_value,
+    ).filter(
+        BinanceOpenInterestHist.symbol == symbol,
+        BinanceOpenInterestHist.period == '5m',
     )
+    if upper_bound is not None:
+        query = query.filter(BinanceOpenInterestHist.event_time <= upper_bound)
+    rows = query.order_by(BinanceOpenInterestHist.event_time.desc()).limit(_REQUIRED_POINTS).all()
     return {int(row.event_time): _build_open_interest_point(row) for row in rows}
 
 
-def _load_recent_klines(session, symbol):
-    rows = (
-        session.query(
-            BinanceKline.symbol,
-            BinanceKline.open_time,
-            BinanceKline.close_price,
-            BinanceKline.quote_volume,
-            BinanceKline.taker_buy_quote_volume,
-        )
-        .filter(
-            BinanceKline.symbol == symbol,
-            BinanceKline.period == '5m',
-        )
-        .order_by(BinanceKline.open_time.desc())
-        .limit(_REQUIRED_POINTS)
-        .all()
+def _load_recent_klines(session, symbol, upper_bound=None):
+    query = session.query(
+        BinanceKline.symbol,
+        BinanceKline.open_time,
+        BinanceKline.close_price,
+        BinanceKline.quote_volume,
+        BinanceKline.taker_buy_quote_volume,
+    ).filter(
+        BinanceKline.symbol == symbol,
+        BinanceKline.period == '5m',
     )
+    if upper_bound is not None:
+        query = query.filter(BinanceKline.open_time <= upper_bound)
+    rows = query.order_by(BinanceKline.open_time.desc()).limit(_REQUIRED_POINTS).all()
     return {int(row.open_time): _build_kline_point(row) for row in rows}
 
 
-def _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=None):
+def _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=None, upper_bound=None):
     return _load_recent_series_map(
         session=session,
         model=BinanceTakerBuySellVol,
         symbols=symbols,
         time_field_name='event_time',
         lower_bounds=lower_bounds,
+        upper_bound=upper_bound,
     )
 
 
-def _load_recent_taker_buy_sell_vol(session, symbol):
-    rows = (
-        session.query(
-            BinanceTakerBuySellVol.symbol,
-            BinanceTakerBuySellVol.event_time,
-            BinanceTakerBuySellVol.buy_sell_ratio,
-            BinanceTakerBuySellVol.buy_vol,
-            BinanceTakerBuySellVol.sell_vol,
-        )
-        .filter(
-            BinanceTakerBuySellVol.symbol == symbol,
-            BinanceTakerBuySellVol.period == '5m',
-        )
-        .order_by(BinanceTakerBuySellVol.event_time.desc())
-        .limit(_REQUIRED_POINTS)
-        .all()
+def _load_recent_taker_buy_sell_vol(session, symbol, upper_bound=None):
+    query = session.query(
+        BinanceTakerBuySellVol.symbol,
+        BinanceTakerBuySellVol.event_time,
+        BinanceTakerBuySellVol.buy_sell_ratio,
+        BinanceTakerBuySellVol.buy_vol,
+        BinanceTakerBuySellVol.sell_vol,
+    ).filter(
+        BinanceTakerBuySellVol.symbol == symbol,
+        BinanceTakerBuySellVol.period == '5m',
     )
+    if upper_bound is not None:
+        query = query.filter(BinanceTakerBuySellVol.event_time <= upper_bound)
+    rows = query.order_by(BinanceTakerBuySellVol.event_time.desc()).limit(_REQUIRED_POINTS).all()
     return {int(row.event_time): _build_taker_buy_sell_vol_point(row) for row in rows}
 
 
-def _load_homepage_series_maps(session, symbols):
+def _load_homepage_series_maps(session, symbols, upper_bound=None):
     if len(symbols) < HOMEPAGE_BULK_QUERY_THRESHOLD:
         return (
-            {symbol: _load_recent_open_interest(session, symbol) for symbol in symbols},
-            {symbol: _load_recent_klines(session, symbol) for symbol in symbols},
-            {symbol: _load_recent_taker_buy_sell_vol(session, symbol) for symbol in symbols},
+            {symbol: _load_recent_open_interest(session, symbol, upper_bound=upper_bound) for symbol in symbols},
+            {symbol: _load_recent_klines(session, symbol, upper_bound=upper_bound) for symbol in symbols},
+            {symbol: _load_recent_taker_buy_sell_vol(session, symbol, upper_bound=upper_bound) for symbol in symbols},
         )
 
-    lower_bounds = _build_homepage_lower_bounds(session, symbols)
+    lower_bounds = _build_homepage_lower_bounds(session, symbols, upper_bound=upper_bound)
     return (
-        _load_recent_open_interest_map(session, symbols, lower_bounds=lower_bounds),
-        _load_recent_klines_map(session, symbols, lower_bounds=lower_bounds),
-        _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=lower_bounds),
+        _load_recent_open_interest_map(session, symbols, lower_bounds=lower_bounds, upper_bound=upper_bound),
+        _load_recent_klines_map(session, symbols, lower_bounds=lower_bounds, upper_bound=upper_bound),
+        _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=lower_bounds, upper_bound=upper_bound),
     )
 
 
@@ -443,20 +436,20 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
         return None
 
     current_time = common_times[-1]
+    net_inflow = {}
+
+    if taker_vol_by_time and any(taker_vol_by_time.values()):
+        taker_common_times = sorted(set(common_times).intersection(taker_vol_by_time))
+        if taker_common_times:
+            current_time = taker_common_times[-1]
+            net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
+
     current_oi = oi_by_time[current_time]
     current_kline = kline_by_time[current_time]
 
     current_open_interest = float(current_oi.sum_open_interest or 0)
     current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
     current_price = float(current_kline.close_price or 0)
-
-    has_taker_vol = bool(taker_vol_by_time and any(taker_vol_by_time.values()))
-    if has_taker_vol:
-        taker_times = sorted(taker_vol_by_time.keys())
-        taker_current_time = taker_times[-1]
-        net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, taker_current_time)
-    else:
-        net_inflow = {}
 
     changes = {}
     for interval in TIME_INTERVALS:
@@ -509,7 +502,7 @@ def _get_symbols(symbols):
     return symbols if symbols is not None else get_active_coins()
 
 
-def _build_homepage_series_snapshot(symbols=None, session=None):
+def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
     target_symbols = _get_symbols(symbols)
     own_session = session is None
     db = session or get_session()
@@ -521,7 +514,13 @@ def _build_homepage_series_snapshot(symbols=None, session=None):
                 'cache_update_time': None,
             }
 
-        recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(db, target_symbols)
+        current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
+        anchor_time = latest_closed_5m_open_time(int(current_time_ms))
+        recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(
+            db,
+            target_symbols,
+            upper_bound=anchor_time,
+        )
         data = []
         update_time = None
 
@@ -548,16 +547,16 @@ def _build_homepage_series_snapshot(symbols=None, session=None):
             db.close()
 
 
-def get_homepage_series_snapshot(symbols=None, session=None):
-    return _build_homepage_series_snapshot(symbols=symbols, session=session)
+def get_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
+    return _build_homepage_series_snapshot(symbols=symbols, session=session, now_ms=now_ms)
 
 
-def get_homepage_series_data(symbols=None, session=None):
-    return get_homepage_series_snapshot(symbols=symbols, session=session)['data']
+def get_homepage_series_data(symbols=None, session=None, now_ms=None):
+    return get_homepage_series_snapshot(symbols=symbols, session=session, now_ms=now_ms)['data']
 
 
-def get_homepage_series_update_time(symbols=None, session=None):
-    return get_homepage_series_snapshot(symbols=symbols, session=session)['cache_update_time']
+def get_homepage_series_update_time(symbols=None, session=None, now_ms=None):
+    return get_homepage_series_snapshot(symbols=symbols, session=session, now_ms=now_ms)['cache_update_time']
 
 
 def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
@@ -567,14 +566,30 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
 
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
-        target_time = int(current_time_ms) - (int(current_time_ms) % FIVE_MINUTES_MS)
+        target_time = latest_closed_5m_open_time(int(current_time_ms))
         recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(db, target_symbols)
 
         for symbol in target_symbols:
             oi_by_time = recent_open_interest_map.get(symbol, {})
             kline_by_time = recent_klines_map.get(symbol, {})
             taker_vol_by_time = recent_taker_vol_map.get(symbol, {})
-            common_times = sorted(set(oi_by_time).intersection(kline_by_time))
+            raw_common_times = sorted(set(oi_by_time).intersection(kline_by_time))
+
+            if not raw_common_times:
+                return True
+
+            if raw_common_times[-1] > target_time:
+                return True
+
+            filtered_open_interest_map, filtered_klines_map, filtered_taker_vol_map = _load_homepage_series_maps(
+                db,
+                [symbol],
+                upper_bound=target_time,
+            )
+            filtered_oi_by_time = filtered_open_interest_map.get(symbol, {})
+            filtered_kline_by_time = filtered_klines_map.get(symbol, {})
+            filtered_taker_vol_by_time = filtered_taker_vol_map.get(symbol, {})
+            common_times = sorted(set(filtered_oi_by_time).intersection(filtered_kline_by_time))
 
             if not common_times:
                 return True
@@ -583,11 +598,11 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
             if current_symbol_time < target_time:
                 return True
 
-            if not _has_complete_homepage_coverage(oi_by_time, kline_by_time):
+            if not _has_complete_homepage_coverage(filtered_oi_by_time, filtered_kline_by_time):
                 return True
 
-            has_taker_vol = bool(taker_vol_by_time and any(taker_vol_by_time.values()))
-            if has_taker_vol and not _has_required_net_inflow_coverage_vol(taker_vol_by_time, current_symbol_time):
+            has_taker_vol = bool(filtered_taker_vol_by_time and any(filtered_taker_vol_by_time.values()))
+            if has_taker_vol and not _has_required_net_inflow_coverage_vol(filtered_taker_vol_by_time, current_symbol_time):
                 return True
 
         return False
