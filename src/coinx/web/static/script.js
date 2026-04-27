@@ -9,6 +9,27 @@ setInterval(loadCoinsData, 300000);
 // 缓存所有币种数据
 let allCoinsData = [];
 let isDataLoading = false;
+const REFRESH_TIMEOUT_MS = 15000;
+
+function normalizeChanges(changes) {
+  if (!Array.isArray(changes)) {
+    return changes || {};
+  }
+
+  return changes.reduce((acc, change) => {
+    acc[change.interval] = change;
+    return acc;
+  }, {});
+}
+
+function fetchJsonWithTimeout(url, options = {}, timeoutMs = REFRESH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, { ...options, signal: controller.signal })
+    .then((response) => response.json())
+    .finally(() => clearTimeout(timer));
+}
 
 // 获取币种数据
 function loadCoinsData() {
@@ -26,17 +47,15 @@ function loadCoinsData() {
   }
 
   // 在后台更新数据
-  fetch("/api/update")
-    .then((response) => response.json())
+  fetchJsonWithTimeout("/api/update?force=true&wait=true")
     .then((updateResult) => {
       if (updateResult.status === "success") {
         // 更新成功后再获取数据
-        return fetch("/api/coins");
+        return fetchJsonWithTimeout("/api/coins?wait=true");
       } else {
         throw new Error(updateResult.message);
       }
     })
-    .then((response) => response.json())
     .then((result) => {
       if (result.status === "success") {
         // 更新缓存
@@ -84,12 +103,13 @@ function renderCoinsTable(coinsData) {
 
     // 各时间间隔的变化比例
     const intervals = ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h"];
+    const changes = normalizeChanges(coin.changes);
 
     intervals.forEach((interval) => {
       if (interval === "5m") return; // 跳过5m自身
 
       const cell = document.createElement("td");
-      const change = coin.changes[interval];
+      const change = changes[interval];
 
       if (change !== null && change !== undefined) {
         cell.textContent = change.toFixed(2);
@@ -149,17 +169,15 @@ function updateData() {
   isDataLoading = true;
   showLoading(true);
 
-  fetch("/api/update")
-    .then((response) => response.json())
+  fetchJsonWithTimeout("/api/update?force=true&wait=true")
     .then((updateResult) => {
       if (updateResult.status === "success") {
         // 更新成功后再获取数据
-        return fetch("/api/coins");
+        return fetchJsonWithTimeout("/api/coins?wait=true");
       } else {
         throw new Error(updateResult.message);
       }
     })
-    .then((response) => response.json())
     .then((result) => {
       if (result.status === "success") {
         // 更新缓存

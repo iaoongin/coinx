@@ -370,14 +370,19 @@
 
     const App = {
       setup() {
+        const REQUIRED_INTERVALS = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h'];
         const tableData = ref([]);
         const loading = ref(false);
         const lastUpdateTime = ref('');
         const countdown = ref('--');
         const intervals = ref([]);
         const FIVE_MINUTES_MS = 5 * 60 * 1000;
+        const REFRESH_TIMEOUT_MS = 15000;
+        const CHART_BATCH_SIZE = 2;
 
         let countdownInterval = null;
+        let chartRenderToken = 0;
+        let chartInstances = [];
 
         const formatNetInflow = (value) => {
           if (typeof value !== 'number') return 'N/A';
@@ -407,80 +412,195 @@
           return coin.changes.map(c => ({ ...c, type }));
         };
 
-        const initCharts = (coins) => {
+        const normalizeChanges = (changes) => {
+          if (!Array.isArray(changes)) {
+            return changes || {};
+          }
+
+          return changes.reduce((acc, change) => {
+            acc[change.interval] = change;
+            return acc;
+          }, {});
+        };
+
+        const isCompleteHomepagePayload = (coins) => {
+          if (!Array.isArray(coins) || coins.length === 0) {
+            return false;
+          }
+
+          const coin = coins[0];
+          const changes = normalizeChanges(coin.changes);
+          if (!coin.current_open_interest_formatted || coin.current_open_interest_formatted === 'N/A') return false;
+          if (!coin.current_open_interest_value_formatted || coin.current_open_interest_value_formatted === 'N/A') return false;
+          if (!coin.current_price_formatted || coin.current_price_formatted === 'N/A') return false;
+
+          return REQUIRED_INTERVALS.every((interval) => {
+            const change = changes[interval];
+            return (
+              change &&
+              change.current_price_formatted !== 'N/A' &&
+              change.open_interest_formatted !== 'N/A' &&
+              change.open_interest_value_formatted !== 'N/A' &&
+              typeof coin.net_inflow?.[interval] === 'number'
+            );
+          });
+        };
+
+        const refreshHomepageSeries = async () => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+
+          try {
+            const response = await fetch('/api/update?force=true&wait=true', { signal: controller.signal });
+            const updateResult = await response.json();
+
+            if (updateResult.status !== 'success') {
+              throw new Error(updateResult.message || '首页序列刷新失败');
+            }
+
+            return updateResult;
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
+        const fetchHomepageCoins = async () => {
+          const dataResponse = await fetch('/api/coins');
+          return dataResponse.json();
+        };
+
+        const disposeCharts = () => {
+          chartInstances.forEach((chart) => {
+            try {
+              chart.dispose();
+            } catch (error) {
+              console.warn('销毁图表失败:', error);
+            }
+          });
+          chartInstances = [];
+        };
+
+        const applyHomepageResult = (result) => {
+          const refreshedCoins = result.data || [];
+          tableData.value = refreshedCoins;
+          if (refreshedCoins.length > 0 && refreshedCoins[0].changes) {
+            intervals.value = refreshedCoins[0].changes.map(c => c.interval);
+          }
+          if (result.cache_update_time) {
+            lastUpdateTime.value = new Date(result.cache_update_time).toLocaleString('zh-CN');
+            startCountdown();
+          }
+          scheduleChartRender(refreshedCoins);
+        };
+
+        const createChart = (domId, data) => {
+          const dom = document.getElementById(domId);
+          if (!dom || !data || data.length < 2) return;
+
+          const existingChart = echarts.getInstanceByDom(dom);
+          if (existingChart) {
+            existingChart.dispose();
+          }
+
+          const chart = echarts.init(dom, null, { renderer: 'canvas' });
+          chartInstances.push(chart);
+
+          chart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 0, right: 0, top: 0, bottom: 0 },
+            xAxis: { show: false, type: 'value', min: 0, max: data.length - 1 },
+            yAxis: { show: false, type: 'value' },
+            series: [{
+              type: 'custom',
+              renderItem: (params, api) => {
+                const lines = [];
+                const zeroY = api.coord([0, 0])[1];
+
+                for (let i = 0; i < data.length - 1; i++) {
+                  const val1 = data[i];
+                  const val2 = data[i + 1];
+                  if (val1 === null || val2 === null) continue;
+
+                  const startPoint = api.coord([i, val1]);
+                  const endPoint = api.coord([i + 1, val2]);
+
+                  if ((val1 >= 0 && val2 >= 0) || (val1 <= 0 && val2 <= 0)) {
+                    const lineColor = val1 >= 0 ? '#22c55e' : '#ef4444';
+                    lines.push({
+                      type: 'line',
+                      shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
+                      style: { stroke: lineColor, lineWidth: 1.5 }
+                    });
+                  } else {
+                    const t = Math.abs(val1) / (Math.abs(val1) + Math.abs(val2));
+                    const crossX = startPoint[0] + t * (endPoint[0] - startPoint[0]);
+
+                    const firstColor = val1 >= 0 ? '#22c55e' : '#ef4444';
+                    lines.push({
+                      type: 'line',
+                      shape: { x1: startPoint[0], y1: startPoint[1], x2: crossX, y2: zeroY },
+                      style: { stroke: firstColor, lineWidth: 1.5 }
+                    });
+                    const secondColor = val2 >= 0 ? '#22c55e' : '#ef4444';
+                    lines.push({
+                      type: 'line',
+                      shape: { x1: crossX, y1: zeroY, x2: endPoint[0], y2: endPoint[1] },
+                      style: { stroke: secondColor, lineWidth: 1.5 }
+                    });
+                  }
+                }
+
+                return { type: 'group', children: lines };
+              },
+              data: data
+            }],
+            tooltip: { show: false }
+          });
+        };
+
+        const renderChartBatch = (coins, startIndex, token) => {
+          if (token !== chartRenderToken) return;
+
+          const endIndex = Math.min(startIndex + CHART_BATCH_SIZE, coins.length);
+          for (let index = startIndex; index < endIndex; index += 1) {
+            const coin = coins[index];
+            if (!coin.changes || !coin.changes.length) continue;
+
+            const oiData = coin.changes.map(c => c.ratio ?? 0);
+            const valueData = coin.changes.map(c => c.value_ratio ?? 0);
+            const priceData = coin.changes.map(c => c.price_change_percent ?? 0);
+            const intervalsList = coin.changes.map(c => c.interval);
+            const inflowData = intervalsList.map(intv => coin.net_inflow?.[intv] ?? 0);
+
+            createChart(`chart-oi-${index}`, oiData);
+            createChart(`chart-value-${index}`, valueData);
+            createChart(`chart-price-${index}`, priceData);
+            createChart(`chart-inflow-${index}`, inflowData);
+          }
+
+          if (endIndex < coins.length) {
+            const scheduleNext = () => renderChartBatch(coins, endIndex, token);
+            if (typeof requestAnimationFrame === 'function') {
+              requestAnimationFrame(scheduleNext);
+            } else {
+              setTimeout(scheduleNext, 16);
+            }
+          }
+        };
+
+        const scheduleChartRender = (coins) => {
+          chartRenderToken += 1;
+          const token = chartRenderToken;
+          disposeCharts();
+
           nextTick(() => {
-            coins.forEach((coin, index) => {
-              if (!coin.changes || !coin.changes.length) return;
-
-              const oiData = coin.changes.map(c => c.ratio ?? 0);
-              const valueData = coin.changes.map(c => c.value_ratio ?? 0);
-              const priceData = coin.changes.map(c => c.price_change_percent ?? 0);
-              const intervalsList = coin.changes.map(c => c.interval);
-              const inflowData = intervalsList.map(intv => coin.net_inflow?.[intv] ?? 0);
-
-              const createChart = (domId, data, color) => {
-                const dom = document.getElementById(domId);
-                if (!dom || !data || data.length < 2) return;
-                const chart = echarts.init(dom, null, { renderer: 'svg' });
-
-                chart.setOption({
-                  backgroundColor: 'transparent',
-                  grid: { left: 0, right: 0, top: 0, bottom: 0 },
-                  xAxis: { show: false, type: 'value', min: 0, max: data.length - 1 },
-                  yAxis: { show: false, type: 'value' },
-                  series: [{
-                    type: 'custom',
-                    renderItem: (params, api) => {
-                      const lines = [];
-                      const zeroY = api.coord([0, 0])[1];
-
-                      for (let i = 0; i < data.length - 1; i++) {
-                        const val1 = data[i];
-                        const val2 = data[i + 1];
-                        if (val1 === null || val2 === null) continue;
-
-                        const startPoint = api.coord([i, val1]);
-                        const endPoint = api.coord([i + 1, val2]);
-
-                        if ((val1 >= 0 && val2 >= 0) || (val1 <= 0 && val2 <= 0)) {
-                          const lineColor = val1 >= 0 ? '#22c55e' : '#ef4444';
-                          lines.push({
-                            type: 'line',
-                            shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
-                            style: { stroke: lineColor, lineWidth: 1.5 }
-                          });
-                        } else {
-                          const t = Math.abs(val1) / (Math.abs(val1) + Math.abs(val2));
-                          const crossX = startPoint[0] + t * (endPoint[0] - startPoint[0]);
-
-                          const firstColor = val1 >= 0 ? '#22c55e' : '#ef4444';
-                          lines.push({
-                            type: 'line',
-                            shape: { x1: startPoint[0], y1: startPoint[1], x2: crossX, y2: zeroY },
-                            style: { stroke: firstColor, lineWidth: 1.5 }
-                          });
-                          const secondColor = val2 >= 0 ? '#22c55e' : '#ef4444';
-                          lines.push({
-                            type: 'line',
-                            shape: { x1: crossX, y1: zeroY, x2: endPoint[0], y2: endPoint[1] },
-                            style: { stroke: secondColor, lineWidth: 1.5 }
-                          });
-                        }
-                      }
-
-                      return { type: 'group', children: lines };
-                    },
-                    data: data
-                  }],
-                  tooltip: { show: false }
-                });
-              };
-
-              createChart(`chart-oi-${index}`, oiData);
-              createChart(`chart-value-${index}`, valueData);
-              createChart(`chart-price-${index}`, priceData);
-              createChart(`chart-inflow-${index}`, inflowData);
-            });
+            if (token !== chartRenderToken) return;
+            const scheduleStart = () => renderChartBatch(coins, 0, token);
+            if (typeof requestAnimationFrame === 'function') {
+              requestAnimationFrame(scheduleStart);
+            } else {
+              setTimeout(scheduleStart, 0);
+            }
           });
         };
 
@@ -507,24 +627,18 @@
           loading.value = true;
           try {
             if (force) {
-              const response = await fetch('/api/update?force=true');
-              await response.json();
+              try {
+                await refreshHomepageSeries();
+              } catch (error) {
+                console.warn('强制刷新首页序列超时或失败:', error);
+              }
             }
 
-            const dataResponse = await fetch('/api/coins');
-            const result = await dataResponse.json();
+            const result = await fetchHomepageCoins();
 
             if (result.status === 'success') {
-                tableData.value = result.data || [];
-                if (result.data && result.data.length > 0 && result.data[0].changes) {
-                  intervals.value = result.data[0].changes.map(c => c.interval);
-                }
-                if (result.cache_update_time) {
-                  lastUpdateTime.value = new Date(result.cache_update_time).toLocaleString('zh-CN');
-                  startCountdown();
-                }
-                initCharts(result.data || []);
-              }
+              applyHomepageResult(result);
+            }
           } catch (error) {
             console.error('加载数据失败:', error);
           } finally {
@@ -538,6 +652,8 @@
 
         onUnmounted(() => {
           if (countdownInterval) clearInterval(countdownInterval);
+          chartRenderToken += 1;
+          disposeCharts();
         });
 
         return {

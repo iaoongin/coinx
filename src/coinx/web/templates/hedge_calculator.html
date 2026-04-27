@@ -157,6 +157,33 @@
       line-height: 1.35;
     }
 
+    .position-status {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border-default);
+      background: var(--bg-card);
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--text-muted);
+    }
+
+    .position-status.valid {
+      color: var(--positive);
+      border-color: rgba(52, 211, 153, 0.2);
+      background: var(--positive-dim);
+    }
+
+    .position-status.pending {
+      color: var(--text-muted);
+    }
+
+    .position-status.error {
+      color: var(--negative);
+      border-color: rgba(239, 68, 68, 0.2);
+      background: var(--negative-dim);
+    }
+
     .side-badge {
       display: inline-flex;
       align-items: center;
@@ -534,6 +561,9 @@
                 <label class="form-label">开仓价格</label>
                 <input type="text" v-model="longForm.entryPrice" class="form-input" placeholder="例如 100000" data-testid="long-entry-price">
               </div>
+              <div class="position-status" :class="longResolved.status" data-testid="long-status" aria-live="polite">
+                {{ longResolved.message }}
+              </div>
             </section>
 
             <section class="input-side">
@@ -547,6 +577,9 @@
               <div class="form-group">
                 <label class="form-label">开仓价格</label>
                 <input type="text" v-model="shortForm.entryPrice" class="form-input" placeholder="例如 110000" data-testid="short-entry-price">
+              </div>
+              <div class="position-status" :class="shortResolved.status" data-testid="short-status" aria-live="polite">
+                {{ shortResolved.message }}
               </div>
             </section>
           </div>
