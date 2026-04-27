@@ -27,6 +27,7 @@ from coinx.config import (
     BINANCE_SERIES_REPAIR_PERIOD,
     BINANCE_SERIES_REPAIR_SLEEP_MS,
     BINANCE_SERIES_TYPES,
+    TIME_INTERVALS,
 )
 from coinx.repositories.homepage_series import (
     HOMEPAGE_REQUIRED_SERIES_TYPES,
@@ -39,6 +40,7 @@ from coinx.utils import logger
 
 
 api_data_bp = Blueprint('api_data', __name__)
+HOME_PAGE_REFRESH_LOCK = threading.Lock()
 
 SUPPORTED_SERIES_TYPES = {
     'top_long_short_position_ratio',
@@ -47,6 +49,76 @@ SUPPORTED_SERIES_TYPES = {
     'klines',
     'global_long_short_account_ratio',
 }
+
+
+def _run_homepage_refresh(symbols, series_types):
+    if not HOME_PAGE_REFRESH_LOCK.acquire(blocking=False):
+        logger.info('首页历史序列补全正在执行，跳过重复触发')
+        return {
+            'status': 'skipped',
+            'message': 'homepage series refresh already running',
+            'symbols': symbols,
+            'series_types': series_types,
+            'success_count': 0,
+            'failure_count': 0,
+            'skipped_count': 0,
+            'results': [],
+        }
+
+    try:
+        return repair_tracked_symbols(
+            symbols=symbols,
+            series_types=series_types,
+        )
+    finally:
+        HOME_PAGE_REFRESH_LOCK.release()
+
+
+def _is_complete_homepage_payload(coins_data):
+    if not coins_data:
+        return False
+
+    coin = coins_data[0]
+    changes = coin.get('changes') or {}
+    if isinstance(changes, list):
+        changes = {item.get('interval'): item for item in changes if item.get('interval')}
+
+    for field in (
+        'current_open_interest_formatted',
+        'current_open_interest_value_formatted',
+        'current_price_formatted',
+    ):
+        if not coin.get(field) or coin.get(field) == 'N/A':
+            return False
+
+    for interval in TIME_INTERVALS:
+        change = changes.get(interval)
+        if not change:
+            return False
+        if change.get('current_price_formatted') == 'N/A':
+            return False
+        if change.get('open_interest_formatted') == 'N/A':
+            return False
+        if change.get('open_interest_value_formatted') == 'N/A':
+            return False
+
+    return True
+
+
+def _start_homepage_refresh_async(symbols, series_types=None):
+    if not symbols:
+        return False
+
+    refresh_thread = threading.Thread(
+        target=_run_homepage_refresh,
+        kwargs={
+            'symbols': symbols,
+            'series_types': series_types or list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+        },
+    )
+    refresh_thread.daemon = True
+    refresh_thread.start()
+    return True
 
 
 def _format_homepage_coins_payload(coins_data):
@@ -144,6 +216,14 @@ def get_coins():
     try:
         active_coins = get_active_coins()
         snapshot = get_homepage_series_snapshot(active_coins)
+
+        if active_coins and not _is_complete_homepage_payload(snapshot.get('data') or []):
+            logger.info('首页历史序列不完整，开始后台补全')
+            _start_homepage_refresh_async(
+                active_coins,
+                series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            )
+
         formatted_data = _format_homepage_coins_payload(snapshot['data'])
 
         return jsonify(
@@ -152,6 +232,7 @@ def get_coins():
                 'message': 'homepage data loaded',
                 'data': formatted_data,
                 'cache_update_time': snapshot['cache_update_time'],
+                'homepage_complete': _is_complete_homepage_payload(snapshot.get('data') or []),
             }
         )
     except Exception as e:
@@ -165,23 +246,38 @@ def update_data():
     logger.info('开始触发首页历史序列刷新')
     try:
         force = request.args.get('force', 'false').lower() == 'true'
+        wait_for_completion = request.args.get('wait', 'false').lower() == 'true'
         try:
             symbols = get_active_coins()
         except Exception as e:
             logger.error(f'加载首页刷新所需的跟踪币种失败: {e}')
             symbols = []
 
-        if not force and not should_refresh_homepage_series(symbols):
-            logger.info('首页历史序列已是最新，无需刷新')
-            return jsonify({'status': 'success', 'message': 'homepage series already up to date'})
+        if not force:
+            if not should_refresh_homepage_series(symbols):
+                logger.info('首页历史序列已是最新，无需刷新')
+                return jsonify({'status': 'success', 'message': 'homepage series already up to date'})
 
-        update_thread = threading.Thread(
-            target=repair_tracked_symbols,
-            kwargs={
-                'symbols': symbols,
-                'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-            },
-        )
+            if not wait_for_completion:
+                _start_homepage_refresh_async(symbols, series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES))
+                return jsonify({'status': 'success', 'message': 'homepage series refresh triggered'})
+
+        refresh_kwargs = {
+            'symbols': symbols,
+            'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+        }
+
+        if wait_for_completion:
+            summary = _run_homepage_refresh(**refresh_kwargs)
+            return jsonify(
+                {
+                    'status': 'success',
+                    'message': 'homepage series refresh completed',
+                    'data': summary,
+                }
+            )
+
+        update_thread = threading.Thread(target=_run_homepage_refresh, kwargs=refresh_kwargs)
         update_thread.daemon = True
         update_thread.start()
 

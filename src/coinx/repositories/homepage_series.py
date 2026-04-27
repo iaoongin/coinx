@@ -439,10 +439,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
     net_inflow = {}
 
     if taker_vol_by_time and any(taker_vol_by_time.values()):
-        taker_common_times = sorted(set(common_times).intersection(taker_vol_by_time))
-        if taker_common_times:
-            current_time = taker_common_times[-1]
-            net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
+        net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
 
     current_oi = oi_by_time[current_time]
     current_kline = kline_by_time[current_time]
@@ -599,10 +596,6 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
                 return True
 
             if not _has_complete_homepage_coverage(filtered_oi_by_time, filtered_kline_by_time):
-                return True
-
-            has_taker_vol = bool(filtered_taker_vol_by_time and any(filtered_taker_vol_by_time.values()))
-            if has_taker_vol and not _has_required_net_inflow_coverage_vol(filtered_taker_vol_by_time, current_symbol_time):
                 return True
 
         return False

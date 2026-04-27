@@ -1,5 +1,6 @@
 from coinx.repositories.homepage_series import (
     FIVE_MINUTES_MS,
+    TIME_INTERVALS,
     get_homepage_series_snapshot,
     get_homepage_series_data,
     get_homepage_series_update_time,
@@ -97,7 +98,7 @@ def test_get_homepage_series_data_builds_coin_payload_from_5m_series(db_session)
     assert coin['net_inflow'] == {}
 
 
-def test_get_homepage_series_data_uses_common_anchor_when_taker_vol_lags(db_session):
+def test_get_homepage_series_data_uses_oi_kline_anchor_when_taker_vol_lags(db_session):
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 20, include_taker_vol=True)
     db_session.query(BinanceTakerBuySellVol).filter(
@@ -112,9 +113,30 @@ def test_get_homepage_series_data_uses_common_anchor_when_taker_vol_lags(db_sess
     assert len(coins) == 1
     coin = coins[0]
 
-    assert coin['current_open_interest'] == 1180.0
-    assert coin['current_price'] == 118.0
-    assert coin['net_inflow']['5m'] is not None
+    assert coin['current_open_interest'] == 1190.0
+    assert coin['current_price'] == 119.0
+    assert '5m' not in coin['net_inflow']
+    assert coin['net_inflow']['15m'] is not None
+
+
+def test_get_homepage_series_data_keeps_168h_changes_when_taker_vol_lags_by_one_point(db_session):
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 2017, include_taker_vol=True)
+    db_session.query(BinanceTakerBuySellVol).filter(
+        BinanceTakerBuySellVol.symbol == 'BTCUSDT',
+        BinanceTakerBuySellVol.period == '5m',
+        BinanceTakerBuySellVol.event_time == start_time + 2016 * FIVE_MINUTES_MS,
+    ).delete()
+    db_session.commit()
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    assert len(coins) == 1
+    coin = coins[0]
+
+    assert set(coin['changes'].keys()) == set(TIME_INTERVALS)
+    assert coin['changes']['168h']['current_price'] == 100.0
+    assert coin['changes']['168h']['open_interest'] == 1000.0
 
 
 def test_get_homepage_series_data_returns_none_for_missing_interval_points(db_session):
