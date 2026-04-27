@@ -214,6 +214,7 @@ coinx/
 - 拆分前端模板中的内联 CSS / JS
 - 补齐详情页的真实分周期数据
 - 增加测试
+- Playwright 测试契约规范见 [tests/playwright/README.md](/Users/xhx-mbp/Code/project/coinx/tests/playwright/README.md)
 - 增加告警能力
 - 统一缓存策略
 - 校准 `compose.yml` 与当前真实入口
@@ -276,6 +277,18 @@ coinx/
   - `48h`
   - `72h`
   - `168h`
+
+### 数据口径注意事项
+
+- `current_open_interest`、`current_open_interest_value`、`current_price` 只依赖单点最新已完成 `5m` 数据，不需要拼窗口
+- `changes[*]` 也只做单点对照，缺少对照点时该区间显示 `N/A`，不会影响其他区间
+- `net_inflow[*]` 仍然依赖 5 分钟窗口累计，窗口不完整时允许为空，不再阻断首页展示
+- 采集和修补阶段都会裁剪未成型 `5m` 数据，避免把正在形成的记录写入数据库
+- 复测时需要注意：
+  - `klines` 在同一 `5m` 窗口内会变化，未收盘 candle 不应作为最终值入库
+  - `open_interest_hist` 与 `klines` 的最新已完成时间通常对齐
+  - `taker_buy_sell_vol` 可能比前两者滞后一个 `5m` 窗口，甚至暂时没有当前窗口数据
+  - 因此首页不再要求 `net_inflow['168h']` 必须完整，最多只影响对应区间是否显示 `N/A`
 
 ### 首页查询优化
 

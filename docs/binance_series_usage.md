@@ -125,6 +125,22 @@ curl -X POST http://127.0.0.1:5000/api/binance-series/repair-tracked \
 - `open_interest_hist` 等 futures 历史接口按固定时间窗分页，避免 `48h / 72h / 168h` 长周期缺口补不回来
 - 本地无数据时，会按 `bootstrap_days` 与 `coverage_hours` 推导起始时间后回补
 - 本地已有数据但覆盖不足时会向前回补，覆盖足够时才只追尾
+- 采集和修补阶段都会先裁剪未成型 `5m` 数据，再入库
+
+## 4.1 数据口径注意事项
+
+下面这些是最近实际联调时需要特别注意的点：
+
+- `klines` 会暴露当前正在形成的 candle，同一个 `5m` 窗口内再次拉取时数值可能变化
+- `open_interest_hist` 的最新已完成时间通常和 `klines` 对齐
+- `taker_buy_sell_vol` 可能落后于前两者，出现当前 `5m` 窗口还没有记录的情况
+- 因此：
+  - `current_open_interest`
+  - `current_open_interest_value`
+  - `current_price`
+  这三个首页当前值只需要单点，不需要等窗口拼齐
+- `net_inflow` 继续走 5 分钟窗口累计，窗口不完整时允许为空
+- 首页展示不再要求 `net_inflow['168h']` 必须完整，缺失时只影响该区间显示 `N/A`
 
 ## 4. 配置说明
 
