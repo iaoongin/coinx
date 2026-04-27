@@ -11,6 +11,7 @@ if project_root not in sys.path:
 
 from coinx.config import WEB_DEBUG, WEB_HOST, WEB_PORT
 from coinx.database import db_session
+from coinx.runtime import start_runtime_services
 from coinx.utils import logger
 from coinx.web.auth import configure_app, is_authenticated, log_startup_credentials, unauthorized_response
 
@@ -85,4 +86,6 @@ log_startup_credentials()
 
 
 if __name__ == '__main__':
+    if not WEB_DEBUG or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        start_runtime_services(with_startup_repair=True, startup_delay_seconds=1)
     app.run(host=WEB_HOST, port=WEB_PORT, debug=WEB_DEBUG)

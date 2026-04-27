@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
-import time
 import signal
-import threading
+import sys
+
 from coinx.config import WEB_DEBUG, WEB_HOST, WEB_PORT
-from coinx.scheduler import start_scheduler, scheduler
+from coinx.runtime import start_runtime_services
 from coinx.web.app import app
+from coinx.scheduler import scheduler
 from coinx.utils import logger
 
 def signal_handler(sig, frame):
@@ -33,17 +33,10 @@ def main():
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     try:
-        # 在单独的线程中启动调度器
-        scheduler_thread = threading.Thread(target=start_scheduler)
-        scheduler_thread.daemon = True
-        scheduler_thread.start()
-        
-        # 等待调度器启动
-        time.sleep(1)
-        
-        # 在主线程中启动Web服务
+        if not WEB_DEBUG or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            start_runtime_services(with_startup_repair=True, startup_delay_seconds=1)
         logger.info(f"启动Web服务: http://{WEB_HOST}:{WEB_PORT}")
         app.run(debug=WEB_DEBUG, host=WEB_HOST, port=WEB_PORT, use_reloader=WEB_DEBUG)
     except KeyboardInterrupt:

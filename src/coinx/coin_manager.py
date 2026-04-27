@@ -18,6 +18,7 @@ from coinx.config import DATA_DIR, TIME_INTERVALS
 
 # 币种配置文件路径
 COINS_CONFIG_FILE = os.path.join(DATA_DIR, 'coins_config.json')
+DEFAULT_TRACKED_COINS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
 
 def load_coins_config():
     """
@@ -35,19 +36,19 @@ def load_coins_config():
             if os.path.exists(COINS_CONFIG_FILE):
                 migrate_from_file()
                 coins = db_session.query(Coin).filter(Coin.is_tracking == True).all()
-            else:
-                # 默认配置
-                default_coins = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
-                for symbol in default_coins:
-                    add_coin(symbol, True)
-                return default_coins
+            if not coins:
+                logger.warning("当前没有任何启用跟踪的币种，回退到默认币种以保证首页可用")
+                if not os.path.exists(COINS_CONFIG_FILE):
+                    for symbol in DEFAULT_TRACKED_COINS:
+                        add_coin(symbol, True)
+                return DEFAULT_TRACKED_COINS
 
         return [coin.symbol for coin in coins]
         
     except Exception as e:
         logger.error(f"加载币种配置失败: {e}")
         # 出错时回退到默认
-        return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+        return DEFAULT_TRACKED_COINS
 
 def load_coins_config_dict():
     """
@@ -64,7 +65,7 @@ def load_coins_config_dict():
         return {coin.symbol: coin.is_tracking for coin in coins}
     except Exception as e:
         logger.error(f"加载币种配置字典失败: {e}")
-        return {'BTCUSDT': True, 'ETHUSDT': True, 'BNBUSDT': True}
+        return {symbol: True for symbol in DEFAULT_TRACKED_COINS}
 
 def save_coins_config_dict(coins_dict):
     """
