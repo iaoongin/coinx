@@ -68,7 +68,7 @@ mysql -u root -p coinx < sql/schema.sql
 - `DB_PASSWORD`
 - `DB_NAME`
 
-本地开发可直接修改 [application-dev.yml](/z:/Resource/Code/project/coinx/application-dev.yml)。
+本地开发可直接修改 [application-dev.yml](./application-dev.yml)。
 
 ### 环境变量说明
 
@@ -214,7 +214,7 @@ coinx/
 - 拆分前端模板中的内联 CSS / JS
 - 补齐详情页的真实分周期数据
 - 增加测试
-- Playwright 测试契约规范见 [tests/playwright/README.md](/Users/xhx-mbp/Code/project/coinx/tests/playwright/README.md)
+- Playwright 测试契约规范见 [tests/playwright/README.md](./tests/playwright/README.md)
 - 增加告警能力
 - 统一缓存策略
 - 校准 `compose.yml` 与当前真实入口
