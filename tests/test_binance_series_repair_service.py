@@ -3,7 +3,7 @@ from coinx.collector.binance.repair import (
     repair_tracked_symbols,
     run_series_repair_job,
 )
-from coinx.models import BinanceKline, BinanceOpenInterestHist
+from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
 from coinx.repositories.binance_series import upsert_series_records
 
 
@@ -61,10 +61,10 @@ def test_repair_single_series_pages_and_upserts_records(db_session, monkeypatch)
     rows = db_session.query(BinanceKline).order_by(BinanceKline.open_time.asc()).all()
 
     assert summary['status'] == 'success'
-    assert summary['pages'] == 2
-    assert summary['affected'] == 3
-    assert len(rows) == 3
-    assert rows[-1].open_time == 600000
+    assert summary['pages'] == 1
+    assert summary['affected'] == 2
+    assert len(rows) == 2
+    assert rows[-1].open_time == 300000
     assert calls == [
         ('klines', 'BTCUSDT', '5m', 2, 0, 300000),
         ('klines', 'BTCUSDT', '5m', 2, 600000, 600000),
@@ -197,9 +197,9 @@ def test_repair_single_series_can_overlap_for_coverage_backfill(db_session, monk
     rows = db_session.query(BinanceKline).order_by(BinanceKline.open_time.asc()).all()
 
     assert summary['status'] == 'success'
-    assert summary['affected'] == 3
-    assert len(rows) == 3
-    assert [row.open_time for row in rows] == [0, 300000, 600000]
+    assert summary['affected'] == 2
+    assert len(rows) == 2
+    assert [row.open_time for row in rows] == [0, 300000]
     assert calls == [(0, 600000)]
 
 
@@ -221,7 +221,7 @@ def test_repair_single_series_pages_futures_history_by_time_windows(db_session, 
     monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_SLEEP_MS', 0)
     monkeypatch.setattr(
         'coinx.collector.binance.repair.parse_series_payload',
-        lambda *args, **kwargs: kwargs['payload'],
+        lambda *args, **kwargs: kwargs.get('payload', args[1] if len(args) > 1 else None),
     )
 
     calls = []
@@ -259,9 +259,9 @@ def test_repair_single_series_pages_futures_history_by_time_windows(db_session, 
     )
 
     assert summary['status'] == 'success'
-    assert summary['affected'] == 4
-    assert summary['records'] == 4
-    assert [row.event_time for row in rows] == [0, 300000, 600000, 900000]
+    assert summary['affected'] == 3
+    assert summary['records'] == 3
+    assert [row.event_time for row in rows] == [0, 300000, 600000]
     assert calls == [
         (0, 300000),
         (600000, 900000),
@@ -286,7 +286,7 @@ def test_repair_single_series_continues_after_empty_head_page(db_session, monkey
     monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_SLEEP_MS', 0)
     monkeypatch.setattr(
         'coinx.collector.binance.repair.parse_series_payload',
-        lambda *args, **kwargs: kwargs['payload'],
+        lambda *args, **kwargs: kwargs.get('payload', args[1] if len(args) > 1 else None),
     )
 
     calls = []
@@ -332,12 +332,74 @@ def test_repair_single_series_continues_after_empty_head_page(db_session, monkey
     )
 
     assert summary['status'] == 'success'
-    assert summary['affected'] == 2
-    assert [row.event_time for row in rows] == [600000, 900000]
+    assert summary['affected'] == 1
+    assert [row.event_time for row in rows] == [600000]
     assert calls == [
         (0, 300000),
         (600000, 900000),
     ]
+
+
+def test_repair_single_series_trims_unclosed_taker_buy_sell_vol_records(db_session, monkeypatch):
+    monkeypatch.setattr(
+        'coinx.collector.binance.repair.build_repair_window',
+        lambda *args, **kwargs: {
+            'start_time': 0,
+            'end_time': 600000,
+            'has_gap': True,
+            'earliest_local_timestamp': None,
+            'latest_local_timestamp': None,
+        },
+    )
+    monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_SLEEP_MS', 0)
+    monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT', 10)
+
+    calls = []
+
+    def fake_fetch(*args, **kwargs):
+        calls.append(kwargs.get('end_time'))
+        if len(calls) == 1:
+            return [
+                {
+                    'symbol': 'BTCUSDT',
+                    'period': '5m',
+                    'event_time': 300000,
+                    'buy_sell_ratio': 1.0,
+                    'buy_vol': 10.0,
+                    'sell_vol': 5.0,
+                    'raw_json': {},
+                },
+                {
+                    'symbol': 'BTCUSDT',
+                    'period': '5m',
+                    'event_time': 600000,
+                    'buy_sell_ratio': 1.0,
+                    'buy_vol': 11.0,
+                    'sell_vol': 6.0,
+                    'raw_json': {},
+                },
+            ]
+        return []
+
+    monkeypatch.setattr('coinx.collector.binance.repair.fetch_series_payload', fake_fetch)
+    monkeypatch.setattr(
+        'coinx.collector.binance.repair.parse_series_payload',
+        lambda *args, **kwargs: kwargs.get('payload', args[1] if len(args) > 1 else None),
+    )
+
+    summary = repair_single_series(
+        symbol='BTCUSDT',
+        series_type='taker_buy_sell_vol',
+        now_ms=600000,
+        db_session=db_session,
+    )
+
+    rows = db_session.query(BinanceTakerBuySellVol).order_by(BinanceTakerBuySellVol.event_time.asc()).all()
+
+    assert summary['status'] == 'success'
+    assert summary['affected'] == 1
+    assert [row.event_time for row in rows] == [300000]
+    assert calls == [600000, 299999, 599999]
 
 
 def test_repair_single_series_logs_progress(db_session, monkeypatch):

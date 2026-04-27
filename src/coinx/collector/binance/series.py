@@ -1,3 +1,5 @@
+import time
+
 from coinx.config import BINANCE_BASE_URL
 from coinx.utils import logger
 from coinx.collector.binance.client import get_session, request_with_retry
@@ -250,11 +252,22 @@ def parse_series_payload(series_type, payload, symbol, period):
     return parser(payload, symbol, period)
 
 
-def collect_and_store_series(series_type, symbol, period, limit, http_session=None, db_session=None):
+def collect_and_store_series(series_type, symbol, period, limit, http_session=None, db_session=None, now_ms=None):
     """抓取、解析并写入指定序列数据。"""
     logger.info(f"开始采集序列数据: type={series_type}, symbol={symbol}, period={period}, limit={limit}")
     payload = fetch_series_payload(series_type, symbol, period, limit, session=http_session)
     records = parse_series_payload(series_type, payload, symbol, period)
+    if now_ms is None:
+        now_ms = int(time.time() * 1000)
+
+    from coinx.collector.binance.repair import trim_unclosed_series_records
+
+    records = trim_unclosed_series_records(
+        series_type=series_type,
+        records=records,
+        now_ms=now_ms,
+        period=period,
+    )
     affected = upsert_series_records(series_type, records, session=db_session)
     logger.info(f"序列数据采集完成: type={series_type}, symbol={symbol}, affected={affected}")
     return {

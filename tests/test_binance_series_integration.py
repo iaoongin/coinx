@@ -44,3 +44,41 @@ def test_collect_and_store_series_fetches_parses_and_saves(db_session, monkeypat
     assert rows[0].symbol == "BTCUSDT"
     assert rows[0].period == "5m"
     assert rows[0].open_time == 1711526400000
+
+
+def test_collect_and_store_series_trims_unclosed_kline_records(db_session, monkeypatch):
+    payload = [
+        [
+            1711526400000,
+            "68000.10",
+            "68100.20",
+            "67950.30",
+            "68020.40",
+            "123.45",
+            1711526699999,
+            "8398765.43",
+            9876,
+            "60.70",
+            "4123456.78",
+            "0",
+        ]
+    ]
+
+    def fake_fetch(series_type, symbol, period, limit, session=None):
+        return payload
+
+    monkeypatch.setattr("coinx.collector.binance.series.fetch_series_payload", fake_fetch)
+
+    result = collect_and_store_series(
+        series_type="klines",
+        symbol="BTCUSDT",
+        period="5m",
+        limit=1,
+        db_session=db_session,
+        now_ms=1711526400000,
+    )
+
+    rows = db_session.query(BinanceKline).all()
+
+    assert result["affected"] == 0
+    assert len(rows) == 0

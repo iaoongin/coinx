@@ -290,6 +290,61 @@ def test_build_repair_window_backfills_when_coverage_is_short(db_session, monkey
     assert window['end_time'] == 24 * 60 * 60 * 1000 - FIVE_MINUTES_MS
 
 
+def test_build_repair_window_detects_internal_gap_in_coverage_window(db_session, monkeypatch):
+    monkeypatch.setattr(
+        'coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_COVERAGE_HOURS',
+        24,
+    )
+    monkeypatch.setattr(
+        'coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS',
+        0,
+    )
+    upsert_series_records(
+        'open_interest_hist',
+        [
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'event_time': 0,
+                'sum_open_interest': 100,
+                'sum_open_interest_value': 200,
+                'cmc_circulating_supply': 300,
+                'raw_json': {},
+            },
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'event_time': 300000,
+                'sum_open_interest': 101,
+                'sum_open_interest_value': 201,
+                'cmc_circulating_supply': 300,
+                'raw_json': {},
+            },
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'event_time': 900000,
+                'sum_open_interest': 103,
+                'sum_open_interest_value': 203,
+                'cmc_circulating_supply': 300,
+                'raw_json': {},
+            },
+        ],
+        session=db_session,
+    )
+
+    window = build_repair_window(
+        symbol='BTCUSDT',
+        series_type='open_interest_hist',
+        now_ms=900000,
+        session=db_session,
+    )
+
+    assert window['has_gap'] is True
+    assert window['start_time'] == 600000
+    assert window['end_time'] == 600000
+
+
 def test_build_repair_window_returns_no_gap_when_series_is_caught_up(db_session, monkeypatch):
     monkeypatch.setattr(
         'coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_COVERAGE_HOURS',

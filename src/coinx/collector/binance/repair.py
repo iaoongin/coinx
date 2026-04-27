@@ -41,6 +41,31 @@ def latest_closed_5m_open_time(now_ms):
     return max(0, floor_to_completed_5m(now_ms) - FIVE_MINUTES_MS)
 
 
+def trim_unclosed_series_records(series_type, records, now_ms, period=BINANCE_SERIES_REPAIR_PERIOD):
+    """Trim records that belong to the current in-flight 5m window."""
+    if not records or period != BINANCE_SERIES_REPAIR_PERIOD:
+        return records
+
+    if series_type == 'klines':
+        trimmed = []
+        for record in records:
+            close_time = record.get('close_time')
+            if close_time is None or close_time > now_ms:
+                continue
+            trimmed.append(record)
+        return trimmed
+
+    cutoff_time = latest_closed_5m_open_time(now_ms)
+    time_field = _get_time_field(series_type)
+    trimmed = []
+    for record in records:
+        event_time = record.get(time_field)
+        if event_time is None or event_time > cutoff_time:
+            continue
+        trimmed.append(record)
+    return trimmed
+
+
 def get_latest_series_timestamp(symbol, series_type, session=None):
     return get_latest_series_timestamp_from_repo(
         series_type=series_type,
@@ -67,23 +92,23 @@ def build_repair_window(symbol, series_type, now_ms, session=None):
     coverage_start_time = target_end_time - BINANCE_SERIES_REPAIR_COVERAGE_HOURS * 60 * 60 * 1000
     desired_start_time = max(0, min(bootstrap_start_time, coverage_start_time))
 
-    needs_head_backfill = (
-        earliest_local_timestamp is None
-        or earliest_local_timestamp > coverage_start_time
-    )
-    needs_tail_repair = (
-        latest_local_timestamp is None
-        or latest_local_timestamp < target_end_time
+    gap_start_time = _find_first_missing_series_timestamp(
+        symbol=symbol,
+        series_type=series_type,
+        start_time=desired_start_time,
+        end_time=target_end_time,
+        session=session,
     )
 
-    if latest_local_timestamp is None:
+    if gap_start_time is not None:
+        start_time = gap_start_time
+        has_gap = True
+    elif latest_local_timestamp is None:
         start_time = desired_start_time
-    elif needs_head_backfill:
-        start_time = desired_start_time
+        has_gap = True
     else:
         start_time = latest_local_timestamp + FIVE_MINUTES_MS
-
-    has_gap = needs_head_backfill or needs_tail_repair
+        has_gap = False
 
     return {
         'symbol': symbol,
@@ -94,6 +119,44 @@ def build_repair_window(symbol, series_type, now_ms, session=None):
         'earliest_local_timestamp': earliest_local_timestamp,
         'latest_local_timestamp': latest_local_timestamp,
     }
+
+
+def _find_first_missing_series_timestamp(symbol, series_type, start_time, end_time, session=None):
+    """Return the first missing 5m timestamp in the requested range, if any."""
+    if start_time > end_time:
+        return None
+
+    model = get_series_model(series_type)
+    time_field_name = _get_time_field(series_type)
+    time_field = getattr(model, time_field_name)
+
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        rows = (
+            db.query(time_field)
+            .filter(
+                model.symbol == symbol,
+                model.period == BINANCE_SERIES_REPAIR_PERIOD,
+                time_field >= start_time,
+                time_field <= end_time,
+            )
+            .order_by(time_field.asc())
+            .all()
+        )
+        timestamps = {int(row[0]) for row in rows if row[0] is not None}
+        expected_time = start_time
+
+        while expected_time <= end_time:
+            if expected_time not in timestamps:
+                return expected_time
+            expected_time += FIVE_MINUTES_MS
+
+        return None
+    finally:
+        if own_session:
+            db.close()
 
 
 def _trim_series_after_target_end(symbol, series_type, target_end_time, session=None):
@@ -183,7 +246,7 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
         }
 
     if series_type == 'taker_buy_sell_vol':
-        return _repair_taker_buy_sell_vol(symbol, window, http_session, db_session)
+        return _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current_time_ms)
 
     page_limit = _get_page_limit(series_type)
     time_field = _get_time_field(series_type)
@@ -214,6 +277,12 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
             series_type=series_type,
             payload=payload,
             symbol=symbol,
+            period=BINANCE_SERIES_REPAIR_PERIOD,
+        )
+        records = trim_unclosed_series_records(
+            series_type=series_type,
+            records=records,
+            now_ms=current_time_ms,
             period=BINANCE_SERIES_REPAIR_PERIOD,
         )
         filtered_records = [
@@ -272,7 +341,7 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
     }
 
 
-def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session):
+def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current_time_ms):
     from sqlalchemy import func
     from coinx.models import BinanceTakerBuySellVol
 
@@ -308,6 +377,12 @@ def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session):
                 break
 
             records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+            records = trim_unclosed_series_records(
+                series_type='taker_buy_sell_vol',
+                records=records,
+                now_ms=current_time_ms,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+            )
             filtered_records = [r for r in records if r['event_time'] >= backfill_start]
 
             if not filtered_records:
@@ -333,7 +408,7 @@ def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session):
             if BINANCE_SERIES_REPAIR_SLEEP_MS > 0:
                 time.sleep(BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
 
-    gap_affected = _repair_taker_vol_gaps(symbol, coverage_start, target_end, http_session, db_session)
+    gap_affected = _repair_taker_vol_gaps(symbol, coverage_start, target_end, http_session, db_session, current_time_ms)
     affected += gap_affected
 
     logger.info(
@@ -354,7 +429,7 @@ def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session):
     }
 
 
-def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, db_session):
+def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, db_session, current_time_ms):
     from sqlalchemy import func
     from coinx.models import BinanceTakerBuySellVol
 
@@ -415,6 +490,12 @@ def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, d
                 break
 
             records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+            records = trim_unclosed_series_records(
+                series_type='taker_buy_sell_vol',
+                records=records,
+                now_ms=current_time_ms,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+            )
 
             new_records = [r for r in records if r['event_time'] >= coverage_start and r['event_time'] <= coverage_end]
 
