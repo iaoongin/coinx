@@ -5,9 +5,16 @@ from typing import Optional
 from sqlalchemy import and_, func, or_
 
 from coinx.coin_manager import get_active_coins
-from coinx.config import TIME_INTERVALS
+from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS
 from coinx.database import get_session
-from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
+from coinx.models import (
+    BinanceKline,
+    BinanceOpenInterestHist,
+    BinanceTakerBuySellVol,
+    MarketKline,
+    MarketOpenInterestHist,
+    MarketTakerBuySellVol,
+)
 from coinx.collector.binance.repair import latest_closed_5m_open_time
 
 
@@ -96,7 +103,7 @@ def _interval_to_ms(interval):
         return int(interval[:-1]) * 60 * 60 * 1000
     if interval.endswith('d'):
         return int(interval[:-1]) * 24 * 60 * 60 * 1000
-    raise ValueError(f'Unsupported interval: {interval}')
+    raise ValueError(f'不支持的时间周期: {interval}')
 
 
 _MAX_INTERVAL_MS = max(_interval_to_ms(interval) for interval in TIME_INTERVALS)
@@ -229,6 +236,76 @@ def _build_taker_buy_sell_vol_point(row):
         buy_sell_ratio=float(row.buy_sell_ratio) if row.buy_sell_ratio is not None else None,
         buy_vol=float(row.buy_vol) if row.buy_vol is not None else None,
         sell_vol=float(row.sell_vol) if row.sell_vol is not None else None,
+    )
+
+
+def _get_enabled_exchanges():
+    return [exchange.strip().lower() for exchange in ENABLED_EXCHANGES if exchange and exchange.strip()]
+
+
+def _merge_time_points(*points):
+    existing_points = [point for point in points if point is not None]
+    if not existing_points:
+        return None
+
+    symbol = existing_points[0].symbol
+    event_time = existing_points[0].event_time
+    total_open_interest = sum(float(point.sum_open_interest or 0) for point in existing_points)
+    total_open_interest_value = sum(float(point.sum_open_interest_value or 0) for point in existing_points)
+    return HomepageOpenInterestPoint(
+        symbol=symbol,
+        event_time=event_time,
+        sum_open_interest=total_open_interest,
+        sum_open_interest_value=total_open_interest_value,
+    )
+
+
+def _with_estimated_open_interest_value(point, reference_kline):
+    if point is None:
+        return None
+    if reference_kline is None or reference_kline.close_price in (None, 0):
+        return point
+    price = float(reference_kline.close_price)
+    if point.sum_open_interest_value in (None, 0) and point.sum_open_interest is not None:
+        return HomepageOpenInterestPoint(
+            symbol=point.symbol,
+            event_time=point.event_time,
+            sum_open_interest=point.sum_open_interest,
+            sum_open_interest_value=float(point.sum_open_interest) * price,
+        )
+    if point.sum_open_interest in (None, 0) and point.sum_open_interest_value is not None:
+        return HomepageOpenInterestPoint(
+            symbol=point.symbol,
+            event_time=point.event_time,
+            sum_open_interest=float(point.sum_open_interest_value) / price,
+            sum_open_interest_value=point.sum_open_interest_value,
+        )
+    return HomepageOpenInterestPoint(
+        symbol=point.symbol,
+        event_time=point.event_time,
+        sum_open_interest=point.sum_open_interest,
+        sum_open_interest_value=point.sum_open_interest_value,
+    )
+
+
+def _merge_taker_points(*points):
+    existing_points = [point for point in points if point is not None]
+    if not existing_points:
+        return None
+
+    symbol = existing_points[0].symbol
+    event_time = existing_points[0].event_time
+    total_buy_vol = sum(float(point.buy_vol or 0) for point in existing_points)
+    total_sell_vol = sum(float(point.sell_vol or 0) for point in existing_points)
+    ratio = None
+    if total_sell_vol:
+        ratio = total_buy_vol / total_sell_vol
+    return HomepageTakerBuySellVolPoint(
+        symbol=symbol,
+        event_time=event_time,
+        buy_sell_ratio=ratio,
+        buy_vol=total_buy_vol,
+        sell_vol=total_sell_vol,
     )
 
 
@@ -414,39 +491,223 @@ def _load_recent_taker_buy_sell_vol(session, symbol, upper_bound=None):
     return {int(row.event_time): _build_taker_buy_sell_vol_point(row) for row in rows}
 
 
-def _load_homepage_series_maps(session, symbols, upper_bound=None):
-    if len(symbols) < HOMEPAGE_BULK_QUERY_THRESHOLD:
-        return (
-            {symbol: _load_recent_open_interest(session, symbol, upper_bound=upper_bound) for symbol in symbols},
-            {symbol: _load_recent_klines(session, symbol, upper_bound=upper_bound) for symbol in symbols},
-            {symbol: _load_recent_taker_buy_sell_vol(session, symbol, upper_bound=upper_bound) for symbol in symbols},
-        )
+def _get_recent_lower_bound(session, model, symbols, time_field_name, upper_bound=None, exchange=None):
+    time_field = getattr(model, time_field_name)
+    query = session.query(func.max(time_field)).filter(
+        model.symbol.in_(symbols),
+        model.period == '5m',
+    )
+    if hasattr(model, 'exchange') and exchange is not None:
+        query = query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        query = query.filter(time_field <= upper_bound)
 
-    lower_bounds = _build_homepage_lower_bounds(session, symbols, upper_bound=upper_bound)
-    return (
-        _load_recent_open_interest_map(session, symbols, lower_bounds=lower_bounds, upper_bound=upper_bound),
-        _load_recent_klines_map(session, symbols, lower_bounds=lower_bounds, upper_bound=upper_bound),
-        _load_recent_taker_buy_sell_vol_map(session, symbols, lower_bounds=lower_bounds, upper_bound=upper_bound),
+    latest_time = query.scalar()
+    if latest_time is None:
+        return None
+    return max(0, int(latest_time) - _MAX_INTERVAL_MS)
+
+
+def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exchange=None):
+    if not symbols:
+        return {}
+
+    lower_bound = _get_recent_lower_bound(
+        session=session,
+        model=model,
+        symbols=symbols,
+        time_field_name='event_time',
+        upper_bound=upper_bound,
+        exchange=exchange,
+    )
+    query = session.query(model).filter(model.symbol.in_(symbols), model.period == '5m')
+    if hasattr(model, 'exchange') and exchange is not None:
+        query = query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        query = query.filter(model.event_time <= upper_bound)
+    if lower_bound is not None:
+        query = query.filter(model.event_time >= lower_bound)
+
+    records_by_symbol = {symbol: {} for symbol in symbols}
+    for row in query.all():
+        point = _build_open_interest_point(row)
+        records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+    return records_by_symbol
+
+
+def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=None):
+    if not symbols:
+        return {}
+
+    lower_bound = _get_recent_lower_bound(
+        session=session,
+        model=model,
+        symbols=symbols,
+        time_field_name='open_time',
+        upper_bound=upper_bound,
+        exchange=exchange,
+    )
+    query = session.query(model).filter(model.symbol.in_(symbols), model.period == '5m')
+    if hasattr(model, 'exchange') and exchange is not None:
+        query = query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        query = query.filter(model.open_time <= upper_bound)
+    if lower_bound is not None:
+        query = query.filter(model.open_time >= lower_bound)
+
+    records_by_symbol = {symbol: {} for symbol in symbols}
+    for row in query.all():
+        point = _build_kline_point(row)
+        records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
+    return records_by_symbol
+
+
+def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchange=None):
+    if not symbols:
+        return {}
+
+    lower_bound = _get_recent_lower_bound(
+        session=session,
+        model=model,
+        symbols=symbols,
+        time_field_name='event_time',
+        upper_bound=upper_bound,
+        exchange=exchange,
+    )
+    query = session.query(model).filter(model.symbol.in_(symbols), model.period == '5m')
+    if hasattr(model, 'exchange') and exchange is not None:
+        query = query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        query = query.filter(model.event_time <= upper_bound)
+    if lower_bound is not None:
+        query = query.filter(model.event_time >= lower_bound)
+
+    records_by_symbol = {symbol: {} for symbol in symbols}
+    for row in query.all():
+        point = _build_taker_buy_sell_vol_point(row)
+        records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+    return records_by_symbol
+
+
+def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
+    exchange = exchange.lower()
+    oi_map = _load_open_interest_model_map(
+        session,
+        MarketOpenInterestHist,
+        symbols,
+        upper_bound=upper_bound,
+        exchange=exchange,
+    )
+    kline_map = _load_kline_model_map(
+        session,
+        MarketKline,
+        symbols,
+        upper_bound=upper_bound,
+        exchange=exchange,
+    )
+    taker_map = _load_taker_vol_model_map(
+        session,
+        MarketTakerBuySellVol,
+        symbols,
+        upper_bound=upper_bound,
+        exchange=exchange,
     )
 
+    if exchange == 'binance':
+        legacy_oi_map = _load_open_interest_model_map(session, BinanceOpenInterestHist, symbols, upper_bound=upper_bound)
+        legacy_kline_map = _load_kline_model_map(session, BinanceKline, symbols, upper_bound=upper_bound)
+        legacy_taker_map = _load_taker_vol_model_map(session, BinanceTakerBuySellVol, symbols, upper_bound=upper_bound)
+        for symbol in symbols:
+            if not oi_map.get(symbol):
+                oi_map[symbol] = legacy_oi_map.get(symbol, {})
+            if not kline_map.get(symbol):
+                kline_map[symbol] = legacy_kline_map.get(symbol, {})
+            if not taker_map.get(symbol):
+                taker_map[symbol] = legacy_taker_map.get(symbol, {})
 
-def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
+    return oi_map, kline_map, taker_map
+
+
+def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
+    exchanges = _get_enabled_exchanges()
+    exchange_maps = {}
+    for exchange in exchanges:
+        exchange_maps[exchange] = _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=upper_bound)
+
+    primary_exchange = PRIMARY_PRICE_EXCHANGE.lower()
+    if primary_exchange not in exchange_maps:
+        exchange_maps[primary_exchange] = _load_exchange_homepage_maps(
+            session,
+            primary_exchange,
+            symbols,
+            upper_bound=upper_bound,
+        )
+    primary_kline_map = exchange_maps[primary_exchange][1]
+
+    aggregate_oi_map = {symbol: {} for symbol in symbols}
+    aggregate_taker_map = {symbol: {} for symbol in symbols}
+    coverage_map = {
+        symbol: {'source_exchanges': [], 'missing_exchanges': []}
+        for symbol in symbols
+    }
+
+    for symbol in symbols:
+        oi_times = set()
+        taker_times = set()
+        for exchange, (oi_map, _kline_map, taker_map) in exchange_maps.items():
+            symbol_oi = oi_map.get(symbol, {})
+            symbol_taker = taker_map.get(symbol, {})
+            if symbol_oi or symbol_taker:
+                coverage_map[symbol]['source_exchanges'].append(exchange)
+            else:
+                coverage_map[symbol]['missing_exchanges'].append(exchange)
+            oi_times.update(symbol_oi.keys())
+            taker_times.update(symbol_taker.keys())
+
+        for event_time in oi_times:
+            aggregate_oi_map[symbol][event_time] = _merge_time_points(
+                *[
+                    _with_estimated_open_interest_value(
+                        exchange_maps[exchange][0].get(symbol, {}).get(event_time),
+                        primary_kline_map.get(symbol, {}).get(event_time),
+                    )
+                    for exchange in exchange_maps
+                ]
+            )
+
+        for event_time in taker_times:
+            aggregate_taker_map[symbol][event_time] = _merge_taker_points(
+                *[
+                    exchange_maps[exchange][2].get(symbol, {}).get(event_time)
+                    for exchange in exchange_maps
+                ]
+            )
+
+    return aggregate_oi_map, primary_kline_map, aggregate_taker_map, coverage_map
+
+
+def _load_homepage_series_maps(session, symbols, upper_bound=None):
+    return _aggregate_homepage_series_maps(session, symbols, upper_bound=upper_bound)
+
+
+def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, coverage=None):
     common_times = sorted(set(oi_by_time).intersection(kline_by_time))
-    if not common_times:
+    oi_times = sorted(oi_by_time)
+    if not common_times and not oi_times:
         return None
 
-    current_time = common_times[-1]
+    current_time = common_times[-1] if common_times else oi_times[-1]
     net_inflow = {}
 
     if taker_vol_by_time and any(taker_vol_by_time.values()):
         net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
 
     current_oi = oi_by_time[current_time]
-    current_kline = kline_by_time[current_time]
+    current_kline = kline_by_time.get(current_time)
 
     current_open_interest = float(current_oi.sum_open_interest or 0)
     current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
-    current_price = float(current_kline.close_price or 0)
+    current_price = float(current_kline.close_price) if current_kline and current_kline.close_price is not None else None
 
     changes = {}
     for interval in TIME_INTERVALS:
@@ -460,8 +721,8 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
 
         past_open_interest = float(target_oi.sum_open_interest or 0)
         past_open_interest_value = float(target_oi.sum_open_interest_value or 0)
-        past_price = float(target_kline.close_price or 0)
-        price_change = current_price - past_price
+        past_price = float(target_kline.close_price) if target_kline.close_price is not None else None
+        price_change = current_price - past_price if current_price is not None and past_price is not None else None
 
         changes[interval] = {
             'ratio': _calc_percent_change(current_open_interest, past_open_interest),
@@ -480,6 +741,8 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time):
     day_change = changes.get('24h', _empty_change())
     return {
         'symbol': symbol,
+        'source_exchanges': (coverage or {}).get('source_exchanges', []),
+        'missing_exchanges': (coverage or {}).get('missing_exchanges', []),
         'current_open_interest': current_open_interest,
         'current_open_interest_formatted': format_number(current_open_interest),
         'current_open_interest_value': current_open_interest_value,
@@ -513,7 +776,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
 
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         anchor_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(
+        recent_open_interest_map, recent_klines_map, recent_taker_vol_map, coverage_map = _load_homepage_series_maps(
             db,
             target_symbols,
             upper_bound=anchor_time,
@@ -527,6 +790,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
                 oi_by_time=recent_open_interest_map.get(symbol, {}),
                 kline_by_time=recent_klines_map.get(symbol, {}),
                 taker_vol_by_time=recent_taker_vol_map.get(symbol, {}),
+                coverage=coverage_map.get(symbol, {}),
             )
             if coin is None:
                 continue
@@ -564,7 +828,11 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         target_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, recent_taker_vol_map = _load_homepage_series_maps(db, target_symbols)
+        recent_open_interest_map, recent_klines_map, recent_taker_vol_map, _coverage_map = _load_homepage_series_maps(
+            db,
+            target_symbols,
+            upper_bound=target_time,
+        )
 
         for symbol in target_symbols:
             oi_by_time = recent_open_interest_map.get(symbol, {})
@@ -578,7 +846,7 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
             if raw_common_times[-1] > target_time:
                 return True
 
-            filtered_open_interest_map, filtered_klines_map, filtered_taker_vol_map = _load_homepage_series_maps(
+            filtered_open_interest_map, filtered_klines_map, filtered_taker_vol_map, _filtered_coverage_map = _load_homepage_series_maps(
                 db,
                 [symbol],
                 upper_bound=target_time,

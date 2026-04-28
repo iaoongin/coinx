@@ -60,6 +60,7 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
             'cache_update_time': 1234567890000,
         },
     )
+    monkeypatch.setattr('coinx.web.routes.api_data._start_homepage_refresh_async', lambda *args, **kwargs: False)
     client = create_test_client()
 
     response = client.get('/api/coins?wait=true')

@@ -126,6 +126,8 @@ def _format_homepage_coins_payload(coins_data):
     for coin in coins_data:
         formatted_coin = {
             'symbol': coin['symbol'],
+            'source_exchanges': coin.get('source_exchanges', []),
+            'missing_exchanges': coin.get('missing_exchanges', []),
             'current_open_interest': coin['current_open_interest'],
             'current_open_interest_formatted': coin['current_open_interest_formatted'],
             'current_open_interest_value': coin['current_open_interest_value'],

@@ -249,3 +249,81 @@ class BinanceGlobalLongShortAccountRatio(Base):
 
     def __repr__(self):
         return f"<BinanceGlobalLongShortAccountRatio(symbol='{self.symbol}', period='{self.period}')>"
+
+
+class MarketOpenInterestHist(Base):
+    """多交易所持仓量历史表，用于首页累计展示。"""
+
+    __tablename__ = 'market_open_interest_hist'
+    __table_args__ = (
+        UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_moih_exchange_symbol_period_time'),
+        Index('idx_moih_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
+        {'comment': '多交易所持仓量历史数据表'},
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
+    exchange = Column(String(20), nullable=False, comment='交易所标识，例如 binance、okx')
+    symbol = Column(String(20), nullable=False, comment='内部交易对符号，例如 BTCUSDT')
+    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
+    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
+    sum_open_interest = Column(DECIMAL(30, 8), comment='持仓量')
+    sum_open_interest_value = Column(DECIMAL(30, 8), comment='持仓价值')
+    raw_json = Column(JSON, comment='交易所原始返回数据')
+    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+
+class MarketKline(Base):
+    """多交易所K线历史表，用于首页参考价格与累计展示。"""
+
+    __tablename__ = 'market_klines'
+    __table_args__ = (
+        UniqueConstraint('exchange', 'symbol', 'period', 'open_time', name='uk_mk_exchange_symbol_period_open_time'),
+        Index('idx_mk_exchange_symbol_period_open_time', 'exchange', 'symbol', 'period', 'open_time'),
+        {'comment': '多交易所K线历史数据表'},
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
+    exchange = Column(String(20), nullable=False, comment='交易所标识，例如 binance、okx')
+    symbol = Column(String(20), nullable=False, comment='内部交易对符号，例如 BTCUSDT')
+    period = Column(String(10), nullable=False, comment='K线周期，例如 5m、15m、1h')
+    open_time = Column(BigInteger, nullable=False, comment='开盘时间戳，毫秒')
+    close_time = Column(BigInteger, nullable=False, comment='收盘时间戳，毫秒')
+    open_price = Column(DECIMAL(30, 8), nullable=False, comment='开盘价')
+    high_price = Column(DECIMAL(30, 8), nullable=False, comment='最高价')
+    low_price = Column(DECIMAL(30, 8), nullable=False, comment='最低价')
+    close_price = Column(DECIMAL(30, 8), nullable=False, comment='收盘价')
+    volume = Column(DECIMAL(30, 8), comment='成交量')
+    quote_volume = Column(DECIMAL(30, 8), comment='成交额')
+    trade_count = Column(BigInteger, comment='成交笔数')
+    taker_buy_base_volume = Column(DECIMAL(30, 8), comment='主动买入基础资产成交量')
+    taker_buy_quote_volume = Column(DECIMAL(30, 8), comment='主动买入计价资产成交额')
+    raw_json = Column(JSON, comment='交易所原始返回数据')
+    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+
+class MarketTakerBuySellVol(Base):
+    """多交易所主动买入卖出量历史表，用于首页净流入累计展示。"""
+
+    __tablename__ = 'market_taker_buy_sell_vol'
+    __table_args__ = (
+        UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_mtbsv_exchange_symbol_period_time'),
+        Index('idx_mtbsv_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
+        {'comment': '多交易所主动买入卖出量历史数据表'},
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
+    exchange = Column(String(20), nullable=False, comment='交易所标识，例如 binance、okx')
+    symbol = Column(String(20), nullable=False, comment='内部交易对符号，例如 BTCUSDT')
+    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
+    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
+    buy_sell_ratio = Column(DECIMAL(20, 8), comment='主动买入卖出比')
+    buy_vol = Column(DECIMAL(30, 8), comment='主动买入成交量或成交额')
+    sell_vol = Column(DECIMAL(30, 8), comment='主动卖出成交量或成交额')
+    raw_json = Column(JSON, comment='交易所原始返回数据')
+    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+    def __repr__(self):
+        return f"<MarketTakerBuySellVol(exchange='{self.exchange}', symbol='{self.symbol}', period='{self.period}')>"

@@ -6,7 +6,13 @@ from coinx.repositories.homepage_series import (
     get_homepage_series_update_time,
     should_refresh_homepage_series,
 )
-from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
+from coinx.models import (
+    BinanceKline,
+    BinanceOpenInterestHist,
+    BinanceTakerBuySellVol,
+    MarketOpenInterestHist,
+    MarketTakerBuySellVol,
+)
 
 
 def seed_series(
@@ -323,3 +329,142 @@ def test_get_homepage_series_data_with_partial_taker_vol_returns_partial_net_inf
     assert '15m' in coin['net_inflow']
     assert '30m' in coin['net_inflow']
     assert '1h' in coin['net_inflow']
+
+
+def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across_exchanges(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        289,
+        oi_base=1000.0,
+        oi_step=10.0,
+        taker_vol_base=1000.0,
+        taker_vol_step=10.0,
+        include_taker_vol=True,
+    )
+
+    for index in range(289):
+        event_time = start_time + index * FIVE_MINUTES_MS
+        okx_oi = 2000.0 + index * 20.0
+        okx_buy = 500.0 + index * 5.0
+        okx_sell = 200.0 + index * 2.0
+        db_session.add(
+            MarketOpenInterestHist(
+                exchange='okx',
+                symbol='BTCUSDT',
+                period='5m',
+                event_time=event_time,
+                sum_open_interest=okx_oi,
+                sum_open_interest_value=okx_oi * (100.0 + index),
+                raw_json={},
+            )
+        )
+        db_session.add(
+            MarketTakerBuySellVol(
+                exchange='okx',
+                symbol='BTCUSDT',
+                period='5m',
+                event_time=event_time,
+                buy_sell_ratio=okx_buy / okx_sell,
+                buy_vol=okx_buy,
+                sell_vol=okx_sell,
+                raw_json={},
+            )
+        )
+    db_session.commit()
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    coin = coins[0]
+    assert coin['source_exchanges'] == ['binance', 'okx']
+    assert coin['missing_exchanges'] == []
+    assert coin['current_price'] == 388.0
+    assert coin['current_open_interest'] == 3880.0 + 7760.0
+    assert coin['current_open_interest_value'] == 1505440.0 + 7760.0 * 388.0
+    assert coin['changes']['15m']['open_interest'] == 3850.0 + 7700.0
+    assert coin['net_inflow']['5m'] == (3880.0 - 3104.0) + (1940.0 - 776.0)
+
+
+def test_get_homepage_series_data_estimates_okx_open_interest_from_value(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'ETHUSDT',
+        start_time,
+        20,
+        oi_base=1000.0,
+        oi_step=10.0,
+        price_base=2000.0,
+        price_step=10.0,
+    )
+
+    for index in range(20):
+        event_time = start_time + index * FIVE_MINUTES_MS
+        db_session.add(
+            MarketOpenInterestHist(
+                exchange='okx',
+                symbol='ETHUSDT',
+                period='5m',
+                event_time=event_time,
+                sum_open_interest=None,
+                sum_open_interest_value=1_000_000.0 + index * 1000.0,
+                raw_json={},
+            )
+        )
+    db_session.commit()
+
+    coins = get_homepage_series_data(symbols=['ETHUSDT'], session=db_session)
+
+    coin = coins[0]
+    reference_price = 2190.0
+    binance_oi = 1190.0
+    binance_oi_value = binance_oi * reference_price
+    okx_oi_value = 1_019_000.0
+    assert coin['source_exchanges'] == ['binance', 'okx']
+    assert coin['current_price'] == reference_price
+    assert coin['current_open_interest_value'] == binance_oi_value + okx_oi_value
+    assert round(coin['current_open_interest'], 8) == round(binance_oi + okx_oi_value / reference_price, 8)
+
+
+def test_get_homepage_series_data_uses_available_exchange_when_okx_is_missing(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 20)
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    coin = coins[0]
+    assert coin['source_exchanges'] == ['binance']
+    assert coin['missing_exchanges'] == ['okx']
+    assert coin['current_open_interest'] == 1190.0
+
+
+def test_get_homepage_series_data_can_return_aggregate_metrics_without_reference_price(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['okx'])
+    start_time = 1_700_000_000_000
+    for index in range(20):
+        event_time = start_time + index * FIVE_MINUTES_MS
+        db_session.add(
+            MarketOpenInterestHist(
+                exchange='okx',
+                symbol='BTCUSDT',
+                period='5m',
+                event_time=event_time,
+                sum_open_interest=1000.0 + index,
+                sum_open_interest_value=2000.0 + index,
+                raw_json={},
+            )
+        )
+    db_session.commit()
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    coin = coins[0]
+    assert coin['current_open_interest'] == 1019.0
+    assert coin['current_price'] is None
+    assert coin['current_price_formatted'] == 'N/A'
+    assert coin['changes']['15m']['price_change'] is None
