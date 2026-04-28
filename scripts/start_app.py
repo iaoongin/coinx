@@ -5,9 +5,7 @@ Flask应用启停脚本
 """
 import os
 import sys
-import subprocess
 import time
-import signal
 import psutil
 from pathlib import Path
 from dotenv import load_dotenv
@@ -27,6 +25,39 @@ class FlaskAppManager:
         self.app_path = project_root / "src" / "coinx" / "main.py"  # 改为使用main.py启动应用
         self.pid_file = project_root / "data" / "app.pid"
         self.log_file = project_root / "logs" / "app_service.log"
+        self.error_log_file = project_root / "logs" / "app_service_error.log"
+
+    def _is_python_process(self, proc):
+        try:
+            return any(
+                "python" in cmd.lower()
+                for cmd in [proc.name()] + proc.cmdline()
+            )
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+
+    def _is_app_command(self, cmdline):
+        # 前台模式是 start_app.py run；后台模式是直接运行 main.py。
+        return (
+            "main.py" in cmdline
+            or "web.app" in cmdline
+            or "-m web.app" in cmdline
+            or ("start_app.py" in cmdline and " run" in f" {cmdline} ")
+        )
+
+    def _find_app_processes(self):
+        current_pid = os.getpid()
+        found = []
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                if proc.info["pid"] == current_pid or not proc.info["cmdline"]:
+                    continue
+                cmdline = " ".join(proc.info["cmdline"])
+                if self._is_app_command(cmdline) and "python" in proc.info["name"].lower():
+                    found.append(proc.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
+                pass
+        return found
 
     def is_app_running(self):
         """检查应用是否正在运行"""
@@ -43,18 +74,11 @@ class FlaskAppManager:
                 # 检查进程是否存在
                 process = psutil.Process(pid)
                 # 确认进程是Python并且正在运行相关文件
-                if process.is_running() and any(
-                    "python" in cmd.lower()
-                    for cmd in [process.name()] + process.cmdline()
-                ):
-                    # 检查命令行参数是否包含main.py或web.app
+                if process.is_running() and self._is_python_process(process):
+                    # 检查命令行参数是否匹配应用入口
                     cmdline = " ".join(process.cmdline())
                     logger.info(f"进程命令行: {cmdline}")
-                    if (
-                        "main.py" in cmdline
-                        or "web.app" in cmdline
-                        or "-m web.app" in cmdline
-                    ):
+                    if self._is_app_command(cmdline):
                         logger.info(f"找到匹配的进程，PID: {pid}")
                         return True
                     else:
@@ -72,22 +96,12 @@ class FlaskAppManager:
 
         # 如果PID文件检查失败，尝试通过进程名查找
         logger.info("通过进程名查找应用...")
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            try:
-                if proc.info["cmdline"]:
-                    cmdline = " ".join(proc.info["cmdline"])
-                    if (
-                        "main.py" in cmdline
-                        or "web.app" in cmdline
-                        or "-m web.app" in cmdline
-                    ) and "python" in proc.info["name"].lower():
-                        print(f"通过进程名找到应用，PID: {proc.info['pid']}")
-                        # 保存PID到文件
-                        with open(self.pid_file, "w") as f:
-                            f.write(str(proc.info["pid"]))
-                        return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
-                pass
+        for pid in self._find_app_processes():
+            logger.info(f"通过进程名找到应用，PID: {pid}")
+            # 保存PID到文件
+            with open(self.pid_file, "w") as f:
+                f.write(str(pid))
+            return True
 
         # 删除无效的PID文件
         if self.pid_file.exists():
@@ -120,13 +134,15 @@ class FlaskAppManager:
                 env["PYTHONPATH"] = src_path
             
             if daemon:
-                # 后台模式：使用PIPE捕获输出，不阻塞
-                process = subprocess.Popen(
+                # 后台模式：输出重定向到日志文件，避免未消费 PIPE 导致子进程异常退出。
+                stdout_file = open(self.log_file, "a", encoding="utf-8")
+                stderr_file = open(self.error_log_file, "a", encoding="utf-8")
+                process = psutil.Popen(
                     cmd,
                     cwd=str(project_root),
                     env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
                     text=True,
                 )
                 
@@ -135,11 +151,10 @@ class FlaskAppManager:
 
                 # 检查进程是否仍在运行
                 if process.poll() is not None:
-                    # 进程已经结束，获取错误输出
-                    stdout, stderr = process.communicate()
                     logger.error(f"应用启动失败，退出码: {process.returncode}")
-                    logger.info(f"标准输出: {stdout}")
-                    logger.error(f"错误输出: {stderr}")
+                    logger.error(f"请查看日志: {self.log_file}, {self.error_log_file}")
+                    stdout_file.close()
+                    stderr_file.close()
                     return False
 
                 # 保存PID
@@ -149,31 +164,25 @@ class FlaskAppManager:
 
                 logger.info(f"应用已后台启动，PID: {process.pid}")
                 logger.info(f"访问地址: http://{WEB_HOST}:{WEB_PORT}")
+                stdout_file.close()
+                stderr_file.close()
                 return True
             else:
-                # 前台模式：直接显示输出，阻塞直到退出
-                process = subprocess.Popen(
-                    cmd,
-                    cwd=str(project_root),
-                    env=env,
-                    stdout=None,  # 继承标准输出
-                    stderr=None,  # 继承标准错误
-                )
-                
-                # 保存PID
-                logger.info(f"进程PID: {process.pid}")
+                # 前台模式：直接在当前进程运行主程序，让 Ctrl+C 进入 main.py 的清理逻辑。
+                os.environ.update(env)
+                logger.info(f"进程PID: {os.getpid()}")
                 with open(self.pid_file, "w") as f:
-                    f.write(str(process.pid))
+                    f.write(str(os.getpid()))
                 
                 logger.info(f"应用已前台启动，按 Ctrl+C 停止")
                 logger.info(f"访问地址: http://{WEB_HOST}:{WEB_PORT}")
                 
                 try:
-                    process.wait()
+                    from coinx.main import main as run_main
+
+                    run_main()
                 except KeyboardInterrupt:
-                    logger.info("\n接收到停止信号，正在停止...")
-                    process.terminate()
-                    process.wait()
+                    logger.info("\n收到停止信号，正在停止...")
                 finally:
                     # 清理PID文件
                     if self.pid_file.exists():
@@ -191,44 +200,54 @@ class FlaskAppManager:
                 self.pid_file.unlink()
             return False
 
+    def _collect_process_tree(self, pid):
+        try:
+            root = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            return []
+        return root.children(recursive=True) + [root]
+
+    def _stop_process_tree(self, pid, timeout=10):
+        processes = self._collect_process_tree(pid)
+        if not processes:
+            return False
+
+        for proc in processes:
+            try:
+                logger.info(f"正在停止进程 {proc.pid}: {' '.join(proc.cmdline())}")
+                proc.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        gone, alive = psutil.wait_procs(processes, timeout=timeout)
+        for proc in alive:
+            try:
+                logger.info(f"进程 {proc.pid} 未及时退出，强制结束")
+                proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        if alive:
+            psutil.wait_procs(alive, timeout=5)
+        return True
+
     def stop(self):
         """停止应用"""
         logger.info("开始停止应用...")
-        # 首先尝试通过进程查找停止应用
         stopped = False
-        processes_to_kill = []
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            try:
-                if proc.info["cmdline"]:
-                    cmdline = " ".join(proc.info["cmdline"])
-                    if (
-                        "main.py" in cmdline
-                        or "web.app" in cmdline
-                        or "-m web.app" in cmdline
-                    ) and "python" in proc.info["name"].lower():
-                        logger.info(f"找到运行中的应用进程，PID: {proc.info['pid']}")
-                        processes_to_kill.append(proc.info["pid"])
-            except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
-                pass
 
-        for pid in processes_to_kill:
+        if self.pid_file.exists():
             try:
-                proc = psutil.Process(pid)
-                # 先尝试优雅关闭
-                proc.terminate()
-                try:
-                    proc.wait(timeout=10)
-                    logger.info(f"进程 {pid} 已停止")
+                with open(self.pid_file, "r") as f:
+                    pid = int(f.read().strip())
+                if self._stop_process_tree(pid):
                     stopped = True
-                except psutil.TimeoutExpired:
-                    # 如果优雅关闭超时，则强制杀死进程
-                    proc.kill()
-                    proc.wait()
-                    logger.info(f"进程 {pid} 已被强制停止")
-                    stopped = True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                # 进程可能已经退出
-                logger.info(f"进程 {pid} 可能已经退出")
+            except (ValueError, FileNotFoundError) as e:
+                logger.error(f"读取PID文件失败: {e}")
+
+        # PID 文件不可用时，通过命令行兜底查找应用进程。
+        for pid in self._find_app_processes():
+            logger.info(f"找到运行中的应用进程，PID: {pid}")
+            if self._stop_process_tree(pid):
                 stopped = True
 
         # 删除PID文件
@@ -262,18 +281,11 @@ class FlaskAppManager:
                 # 检查进程是否存在
                 process = psutil.Process(pid)
                 # 确认进程是Python并且正在运行相关文件
-                if process.is_running() and any(
-                    "python" in cmd.lower()
-                    for cmd in [process.name()] + process.cmdline()
-                ):
-                    # 检查命令行参数是否包含main.py或web.app
+                if process.is_running() and self._is_python_process(process):
+                    # 检查命令行参数是否匹配应用入口
                     cmdline = " ".join(process.cmdline())
                     logger.info(f"进程命令行: {cmdline}")
-                    if (
-                        "main.py" in cmdline
-                        or "web.app" in cmdline
-                        or "-m web.app" in cmdline
-                    ):
+                    if self._is_app_command(cmdline):
                         logger.info(f"应用正在运行，PID: {pid}")
                         return
                     else:
@@ -291,23 +303,13 @@ class FlaskAppManager:
 
         # 如果PID文件检查失败，尝试通过进程名查找
         logger.info("通过进程名查找应用...")
-        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-            try:
-                if proc.info["cmdline"]:
-                    cmdline = " ".join(proc.info["cmdline"])
-                    if (
-                        "main.py" in cmdline
-                        or "web.app" in cmdline
-                        or "-m web.app" in cmdline
-                    ) and "python" in proc.info["name"].lower():
-                        logger.info(f"通过进程名找到应用，PID: {proc.info['pid']}")
-                        # 保存PID到文件
-                        with open(self.pid_file, "w") as f:
-                            f.write(str(proc.info["pid"]))
-                        logger.info(f"应用正在运行，PID: {proc.info['pid']}")
-                        return
-            except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
-                pass
+        for pid in self._find_app_processes():
+            logger.info(f"通过进程名找到应用，PID: {pid}")
+            # 保存PID到文件
+            with open(self.pid_file, "w") as f:
+                f.write(str(pid))
+            logger.info(f"应用正在运行，PID: {pid}")
+            return
 
         # 删除无效的PID文件
         if self.pid_file.exists():
