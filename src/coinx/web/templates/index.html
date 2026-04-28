@@ -12,8 +12,8 @@
   <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>
     :root {
-      --page-max-width: 1200px;
-      --page-padding: 20px;
+      --page-max-width: 1680px;
+      --page-padding: clamp(8px, 1.1vw, 16px);
     }
 
     body {
@@ -22,15 +22,19 @@
       padding: var(--page-padding);
     }
 
-    #app { max-width: var(--page-max-width); margin: 20px auto; }
+    #app {
+      width: min(var(--page-max-width), calc(100vw - var(--page-padding) * 2));
+      max-width: none;
+      margin: 12px auto;
+    }
 
     .shell {
       background: var(--bg-card);
       border-radius: var(--card-radius-lg);
       box-shadow: var(--shadow-card);
       border: 1px solid var(--border-default);
-      padding: 20px;
-      margin-bottom: 20px;
+      padding: 14px;
+      margin-bottom: 16px;
       animation: fadeInUp 0.5s ease;
     }
 
@@ -93,27 +97,36 @@
     .negative { color: var(--negative) !important; font-weight: 600; font-family: var(--font-mono); }
 
     .table-wrapper {
-      margin-top: 20px;
-      border-radius: var(--card-radius);
-      overflow-x: auto;
+      margin-top: 14px;
+      border-radius: 8px;
+      overflow-x: hidden;
       background: var(--bg-secondary);
       border: 1px solid var(--border-default);
     }
 
     .mini-chart {
-      width: 80px;
-      height: 30px;
+      width: 46px;
+      height: 24px;
+      margin: 0 auto;
     }
 
     table {
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       background: var(--bg-secondary);
     }
 
+    col.symbol-col { width: 5%; }
+    col.exchange-col { width: 12.5%; }
+    col.type-col { width: 6%; }
+    col.trend-col { width: 4.6%; }
+    col.current-col { width: 6.4%; }
+    col.interval-col { width: 6.55%; }
+
     thead th {
       background: var(--bg-elevated);
-      padding: 14px 12px;
+      padding: 11px 6px;
       text-align: center;
       font-size: 12px;
       font-weight: 600;
@@ -130,7 +143,7 @@
     }
 
     tbody td {
-      padding: 11px 10px;
+      padding: 9px 6px;
       text-align: center;
       font-size: 13px;
       color: var(--text-primary);
@@ -141,14 +154,73 @@
 
     tbody td:first-child {
       text-align: left;
-      padding-left: 16px;
+      padding-left: 8px;
     }
 
     td.symbol-cell {
       font-family: var(--font-mono);
-      font-weight: 500;
+      font-size: 14px;
+      font-weight: 600;
       color: var(--text-primary);
       background: var(--bg-secondary) !important;
+    }
+
+    td.exchange-oi-cell {
+      min-width: 0;
+      max-width: none;
+      text-align: left;
+      background: var(--bg-secondary) !important;
+      border-right: 1px solid var(--border-subtle);
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    .exchange-oi-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .exchange-oi-item {
+      display: grid;
+      grid-template-columns: minmax(52px, 1fr) minmax(0, 1.8fr);
+      align-items: baseline;
+      gap: 4px;
+      min-width: 0;
+      line-height: 1.15;
+    }
+
+    .exchange-oi-name {
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: left;
+    }
+
+    .exchange-oi-main {
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+      text-align: right;
+    }
+
+    .exchange-oi-share {
+      color: var(--gold-primary);
+      margin-left: 2px;
+    }
+
+    .exchange-oi-empty {
+      color: var(--text-muted);
+      font-size: 12px;
     }
 
     td.type-cell {
@@ -161,18 +233,22 @@
 
     td.change-cell {
       font-size: 12px;
+      word-break: break-word;
     }
 
     td.change-cell .ratio {
       font-weight: 600;
       font-family: var(--font-mono);
-      margin-bottom: 2px;
+      margin-bottom: 1px;
+      line-height: 1.15;
     }
 
     td.change-cell .value {
       font-size: 11px;
       color: var(--text-muted);
       font-family: var(--font-mono);
+      line-height: 1.15;
+      overflow-wrap: anywhere;
     }
 
     /* 币种组分隔线 */
@@ -277,6 +353,42 @@
         align-self: flex-end;
       }
     }
+
+    @media (max-width: 1280px) {
+      thead th {
+        padding: 9px 4px;
+        font-size: 10px;
+      }
+
+      tbody td {
+        padding: 8px 4px;
+        font-size: 11px;
+      }
+
+      td.symbol-cell {
+        font-size: 12px;
+      }
+
+      .exchange-oi-name {
+        font-size: 9px;
+      }
+
+      .exchange-oi-main {
+        font-size: 10px;
+      }
+
+      td.type-cell {
+        font-size: 10px;
+      }
+
+      td.change-cell {
+        font-size: 10px;
+      }
+
+      td.change-cell .value {
+        font-size: 9px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -305,9 +417,18 @@
 
       <div class="table-wrapper" v-if="tableData.length > 0">
         <table>
+          <colgroup>
+            <col class="symbol-col">
+            <col class="exchange-col">
+            <col class="type-col">
+            <col class="trend-col">
+            <col class="current-col">
+            <col v-for="interval in intervals" :key="interval" class="interval-col">
+          </colgroup>
           <thead>
             <tr>
               <th style="position: sticky; left: 0; z-index: 20; background: inherit;">币种</th>
+              <th>交易所持仓</th>
               <th>类型</th>
               <th>趋势</th>
               <th>当前</th>
@@ -319,6 +440,18 @@
               <tr class="coin-group">
                 <td :rowspan="4" class="symbol-cell">
                   <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-link">{{ coin.symbol.replace('USDT', '') }}</a>
+                </td>
+                <td :rowspan="4" class="exchange-oi-cell">
+                  <div v-if="coin.exchange_open_interest && coin.exchange_open_interest.length" class="exchange-oi-list">
+                    <div v-for="item in coin.exchange_open_interest" :key="item.exchange" class="exchange-oi-item">
+                      <span class="exchange-oi-name">{{ formatExchangeName(item.exchange) }}</span>
+                      <span class="exchange-oi-main">
+                        {{ item.open_interest_formatted || 'N/A' }}
+                        <span class="exchange-oi-share">({{ formatPercent(item.quantity_share_percent) }})</span>
+                      </span>
+                    </div>
+                  </div>
+                  <span v-else class="exchange-oi-empty">N/A</span>
                 </td>
                 <td class="type-cell">持仓量</td>
                 <td><div :id="'chart-oi-' + index" class="mini-chart"></div></td>
@@ -378,11 +511,11 @@
         const intervals = ref([]);
         const FIVE_MINUTES_MS = 5 * 60 * 1000;
         const REFRESH_TIMEOUT_MS = 15000;
-        const CHART_BATCH_SIZE = 2;
+        const CHART_BATCH_SIZE = 1;
 
         let countdownInterval = null;
         let chartRenderToken = 0;
-        let chartInstances = [];
+        const chartInstances = new Map();
 
         const formatNetInflow = (value) => {
           if (typeof value !== 'number') return 'N/A';
@@ -405,6 +538,16 @@
         const getChangeClass = (value) => {
           if (value === null || value === undefined) return '';
           return value > 0 ? 'positive' : value < 0 ? 'negative' : '';
+        };
+
+        const formatPercent = (value) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          return Number(value).toFixed(2) + '%';
+        };
+
+        const formatExchangeName = (exchange) => {
+          if (!exchange) return '--';
+          return String(exchange).toUpperCase();
         };
 
         const getChangesForType = (coin, type) => {
@@ -477,7 +620,19 @@
               console.warn('销毁图表失败:', error);
             }
           });
-          chartInstances = [];
+          chartInstances.clear();
+        };
+
+        const disposeStaleCharts = (activeDomIds) => {
+          chartInstances.forEach((chart, domId) => {
+            if (activeDomIds.has(domId)) return;
+            try {
+              chart.dispose();
+            } catch (error) {
+              console.warn('销毁过期图表失败:', error);
+            }
+            chartInstances.delete(domId);
+          });
         };
 
         const applyHomepageResult = (result) => {
@@ -497,13 +652,11 @@
           const dom = document.getElementById(domId);
           if (!dom || !data || data.length < 2) return;
 
-          const existingChart = echarts.getInstanceByDom(dom);
-          if (existingChart) {
-            existingChart.dispose();
+          let chart = chartInstances.get(domId) || echarts.getInstanceByDom(dom);
+          if (!chart) {
+            chart = echarts.init(dom, null, { renderer: 'canvas' });
+            chartInstances.set(domId, chart);
           }
-
-          const chart = echarts.init(dom, null, { renderer: 'canvas' });
-          chartInstances.push(chart);
 
           chart.setOption({
             backgroundColor: 'transparent',
@@ -555,7 +708,7 @@
               data: data
             }],
             tooltip: { show: false }
-          });
+          }, true);
         };
 
         const renderChartBatch = (coins, startIndex, token) => {
@@ -591,15 +744,22 @@
         const scheduleChartRender = (coins) => {
           chartRenderToken += 1;
           const token = chartRenderToken;
-          disposeCharts();
+          const activeDomIds = new Set();
+          coins.forEach((_coin, index) => {
+            activeDomIds.add(`chart-oi-${index}`);
+            activeDomIds.add(`chart-value-${index}`);
+            activeDomIds.add(`chart-price-${index}`);
+            activeDomIds.add(`chart-inflow-${index}`);
+          });
+          disposeStaleCharts(activeDomIds);
 
           nextTick(() => {
             if (token !== chartRenderToken) return;
             const scheduleStart = () => renderChartBatch(coins, 0, token);
             if (typeof requestAnimationFrame === 'function') {
-              requestAnimationFrame(scheduleStart);
+              requestAnimationFrame(() => requestAnimationFrame(scheduleStart));
             } else {
-              setTimeout(scheduleStart, 0);
+              setTimeout(scheduleStart, 32);
             }
           });
         };
@@ -666,6 +826,8 @@
           getNetInflowClass,
           formatChange,
           getChangeClass,
+          formatPercent,
+          formatExchangeName,
           getChangesForType,
           loadData
         };

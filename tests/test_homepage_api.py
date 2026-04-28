@@ -34,6 +34,17 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
                     'current_open_interest_formatted': '100.00',
                     'current_open_interest_value': 200.0,
                     'current_open_interest_value_formatted': '200.00',
+                    'exchange_open_interest': [
+                        {
+                            'exchange': 'binance',
+                            'open_interest': 60.0,
+                            'open_interest_formatted': '60.00',
+                            'open_interest_value': 120.0,
+                            'open_interest_value_formatted': '$120.00',
+                            'share_percent': 60.0,
+                            'quantity_share_percent': 60.0,
+                        }
+                    ],
                     'current_price': 2.0,
                     'current_price_formatted': '2.00',
                     'price_change': 1.0,
@@ -70,7 +81,106 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
     assert payload['status'] == 'success'
     assert payload['cache_update_time'] == 1234567890000
     assert payload['data'][0]['symbol'] == 'BTCUSDT'
+    assert payload['data'][0]['exchange_open_interest'][0]['exchange'] == 'binance'
     assert payload['data'][0]['changes'][0]['interval'] == '5m'
+
+
+def test_get_coins_reuses_snapshot_cache_within_same_anchor(monkeypatch):
+    module = __import__('coinx.web.routes.api_data', fromlist=['_clear_homepage_snapshot_cache'])
+    module._clear_homepage_snapshot_cache()
+    calls = {'snapshot': 0}
+
+    def fake_snapshot(symbols):
+        calls['snapshot'] += 1
+        return {
+            'data': [
+                {
+                    'symbol': 'BTCUSDT',
+                    'current_open_interest': 100.0,
+                    'current_open_interest_formatted': '100.00',
+                    'current_open_interest_value': 200.0,
+                    'current_open_interest_value_formatted': '200.00',
+                    'exchange_open_interest': [],
+                    'current_price': 2.0,
+                    'current_price_formatted': '2.00',
+                    'price_change': 1.0,
+                    'price_change_percent': 100.0,
+                    'price_change_formatted': '1.00',
+                    'net_inflow': {'5m': 12.0},
+                    'changes': {
+                        '5m': {
+                            'ratio': 5.0,
+                            'value_ratio': 6.0,
+                            'open_interest': 95.0,
+                            'open_interest_formatted': '95.00',
+                            'open_interest_value': 188.0,
+                            'open_interest_value_formatted': '188.00',
+                            'price_change': 0.1,
+                            'price_change_percent': 5.0,
+                            'price_change_formatted': '0.10',
+                            'current_price': 1.9,
+                            'current_price_formatted': '1.90',
+                        }
+                    },
+                }
+            ],
+            'cache_update_time': 1234567890000,
+        }
+
+    monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data._get_homepage_cache_anchor', lambda: 123)
+    monkeypatch.setattr('coinx.web.routes.api_data.get_homepage_series_snapshot', fake_snapshot)
+    monkeypatch.setattr('coinx.web.routes.api_data._start_homepage_refresh_async', lambda *args, **kwargs: False)
+    client = create_test_client()
+
+    first = client.get('/api/coins?wait=true')
+    second = client.get('/api/coins?wait=true')
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls['snapshot'] == 1
+    module._clear_homepage_snapshot_cache()
+
+
+def test_get_coins_cache_expires_when_anchor_changes(monkeypatch):
+    module = __import__('coinx.web.routes.api_data', fromlist=['_clear_homepage_snapshot_cache'])
+    module._clear_homepage_snapshot_cache()
+    anchors = [123, 456]
+    calls = {'snapshot': 0}
+
+    def fake_snapshot(symbols):
+        calls['snapshot'] += 1
+        return {
+            'data': [
+                {
+                    'symbol': 'BTCUSDT',
+                    'current_open_interest': 100.0,
+                    'current_open_interest_formatted': '100.00',
+                    'current_open_interest_value': 200.0,
+                    'current_open_interest_value_formatted': '200.00',
+                    'exchange_open_interest': [],
+                    'current_price': 2.0,
+                    'current_price_formatted': '2.00',
+                    'price_change': 1.0,
+                    'price_change_percent': 100.0,
+                    'price_change_formatted': '1.00',
+                    'net_inflow': {'5m': 12.0},
+                    'changes': {'5m': {'ratio': 5.0, 'value_ratio': 6.0, 'open_interest': 95.0, 'open_interest_formatted': '95.00', 'open_interest_value': 188.0, 'open_interest_value_formatted': '188.00', 'price_change': 0.1, 'price_change_percent': 5.0, 'price_change_formatted': '0.10', 'current_price': 1.9, 'current_price_formatted': '1.90'}},
+                }
+            ],
+            'cache_update_time': 1234567890000,
+        }
+
+    monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data._get_homepage_cache_anchor', lambda: anchors.pop(0))
+    monkeypatch.setattr('coinx.web.routes.api_data.get_homepage_series_snapshot', fake_snapshot)
+    monkeypatch.setattr('coinx.web.routes.api_data._start_homepage_refresh_async', lambda *args, **kwargs: False)
+    client = create_test_client()
+
+    assert client.get('/api/coins?wait=true').status_code == 200
+    assert client.get('/api/coins?wait=true').status_code == 200
+    assert calls['snapshot'] == 2
+    module._clear_homepage_snapshot_cache()
 
 
 def test_update_data_uses_homepage_series_refresh(monkeypatch):
@@ -290,7 +400,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
             'results': [],
         }
 
-    monkeypatch.setattr('coinx.web.routes.api_data.repair_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.web.routes.api_data.repair_latest_tracked_symbols', fake_repair)
     started = {}
 
     class FakeThread:

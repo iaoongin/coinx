@@ -384,6 +384,12 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['current_price'] == 388.0
     assert coin['current_open_interest'] == 3880.0 + 7760.0
     assert coin['current_open_interest_value'] == 1505440.0 + 7760.0 * 388.0
+    assert coin['exchange_open_interest'][0]['exchange'] == 'okx'
+    assert coin['exchange_open_interest'][0]['open_interest_value'] == 7760.0 * 388.0
+    assert round(coin['exchange_open_interest'][0]['share_percent'], 2) == 66.67
+    assert coin['exchange_open_interest'][1]['exchange'] == 'binance'
+    assert coin['exchange_open_interest'][1]['open_interest_value'] == 1505440.0
+    assert round(coin['exchange_open_interest'][1]['quantity_share_percent'], 2) == 33.33
     assert coin['changes']['15m']['open_interest'] == 3850.0 + 7700.0
     assert coin['net_inflow']['5m'] == (3880.0 - 3104.0) + (1940.0 - 776.0)
 
@@ -428,6 +434,9 @@ def test_get_homepage_series_data_estimates_okx_open_interest_from_value(db_sess
     assert coin['current_price'] == reference_price
     assert coin['current_open_interest_value'] == binance_oi_value + okx_oi_value
     assert round(coin['current_open_interest'], 8) == round(binance_oi + okx_oi_value / reference_price, 8)
+    okx_breakdown = next(item for item in coin['exchange_open_interest'] if item['exchange'] == 'okx')
+    assert okx_breakdown['open_interest_value'] == okx_oi_value
+    assert round(okx_breakdown['open_interest'], 8) == round(okx_oi_value / reference_price, 8)
 
 
 def test_get_homepage_series_data_uses_available_exchange_when_okx_is_missing(db_session, monkeypatch):
@@ -441,6 +450,7 @@ def test_get_homepage_series_data_uses_available_exchange_when_okx_is_missing(db
     assert coin['source_exchanges'] == ['binance']
     assert coin['missing_exchanges'] == ['okx']
     assert coin['current_open_interest'] == 1190.0
+    assert [item['exchange'] for item in coin['exchange_open_interest']] == ['binance']
 
 
 def test_get_homepage_series_data_can_return_aggregate_metrics_without_reference_price(db_session, monkeypatch):

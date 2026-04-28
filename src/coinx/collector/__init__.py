@@ -45,6 +45,7 @@ from coinx.collector.binance.repair import (
     floor_to_completed_5m,
     build_repair_window,
     repair_single_series,
+    repair_latest_tracked_symbols as repair_latest_binance_tracked_symbols,
     repair_tracked_symbols as repair_binance_tracked_symbols,
     run_series_repair_job as run_binance_series_repair_job,
 )
@@ -85,6 +86,44 @@ def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_se
         periods=[HOMEPAGE_SERIES_REPAIR_PERIOD],
         series_types=okx_series_types,
         limit=HOMEPAGE_SERIES_REPAIR_PAGE_LIMIT,
+        http_session=http_session,
+        db_session=db_session,
+    )
+    summary['exchange_summaries'] = {
+        'binance': dict(summary),
+        'okx': okx_summary,
+    }
+    summary['success_count'] = summary.get('success_count', 0) + okx_summary.get('success_count', 0)
+    summary['failure_count'] = summary.get('failure_count', 0) + okx_summary.get('failure_count', 0)
+    return summary
+
+
+def repair_latest_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_session=None, db_session=None):
+    """只修补首页最新点，避免高频任务触发大范围历史回填。"""
+    summary = repair_latest_binance_tracked_symbols(
+        symbols=symbols,
+        series_types=series_types,
+        now_ms=now_ms,
+        http_session=http_session,
+        db_session=db_session,
+    )
+
+    if 'okx' not in [exchange.lower() for exchange in ENABLED_EXCHANGES]:
+        return summary
+
+    from coinx.collector.okx.series import collect_series_batch
+
+    okx_series_types = [
+        series_type
+        for series_type in (series_types or HOMEPAGE_SERIES_TYPES)
+        if series_type in ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
+    ]
+    target_symbols = symbols or summary.get('symbols') or []
+    okx_summary = collect_series_batch(
+        symbols=target_symbols,
+        periods=[HOMEPAGE_SERIES_REPAIR_PERIOD],
+        series_types=okx_series_types,
+        limit=2,
         http_session=http_session,
         db_session=db_session,
     )

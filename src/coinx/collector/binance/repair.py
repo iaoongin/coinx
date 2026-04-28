@@ -341,6 +341,46 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
     }
 
 
+def repair_latest_series_point(symbol, series_type, now_ms=None, http_session=None, db_session=None):
+    """只修补最新一个已收盘 5m 点，供首页高频定时任务使用。"""
+    current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    target_time = latest_closed_5m_open_time(current_time_ms)
+    time_field = _get_time_field(series_type)
+    limit = 2 if series_type == 'taker_buy_sell_vol' else 1
+    payload = fetch_series_payload(
+        series_type=series_type,
+        symbol=symbol,
+        period=BINANCE_SERIES_REPAIR_PERIOD,
+        limit=limit,
+        session=http_session,
+        start_time=target_time,
+        end_time=target_time,
+    )
+    records = parse_series_payload(series_type, payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+    records = trim_unclosed_series_records(
+        series_type=series_type,
+        records=records,
+        now_ms=current_time_ms,
+        period=BINANCE_SERIES_REPAIR_PERIOD,
+    )
+    filtered_records = [record for record in records if record.get(time_field) == target_time]
+    affected = upsert_series_records(series_type, filtered_records, session=db_session) if filtered_records else 0
+    logger.info(
+        f"首页最新点修补完成: 币种={symbol}, 类型={series_type}, "
+        f"目标时间={target_time}, 记录数={len(filtered_records)}, 影响行数={affected}"
+    )
+    return {
+        'symbol': symbol,
+        'series_type': series_type,
+        'period': BINANCE_SERIES_REPAIR_PERIOD,
+        'status': 'success',
+        'target_time': target_time,
+        'affected': affected,
+        'records': len(filtered_records),
+        'pages': 1 if filtered_records else 0,
+    }
+
+
 def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current_time_ms):
     from sqlalchemy import func
     from coinx.models import BinanceTakerBuySellVol
@@ -587,6 +627,58 @@ def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_se
         'success_count': success_count,
         'failure_count': failure_count,
         'skipped_count': skipped_count,
+        'results': results,
+    }
+
+
+def repair_latest_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_session=None, db_session=None):
+    """批量修补首页最新一个已收盘点，不做历史缺口回填。"""
+    tracked_symbols = symbols if symbols else get_active_coins()
+    active_series_types = series_types or DEFAULT_REPAIR_SERIES_TYPES
+    results = []
+    total_tasks = len(tracked_symbols) * len(active_series_types)
+
+    logger.info(
+        f"开始修补首页最新点: 币种数量={len(tracked_symbols)}, "
+        f"序列类型={active_series_types}, 总任务数={total_tasks}, 周期={BINANCE_SERIES_REPAIR_PERIOD}"
+    )
+
+    for symbol in tracked_symbols:
+        for series_type in active_series_types:
+            try:
+                result = repair_latest_series_point(
+                    symbol=symbol,
+                    series_type=series_type,
+                    now_ms=now_ms,
+                    http_session=http_session,
+                    db_session=db_session,
+                )
+                results.append(result)
+            except Exception as exc:
+                logger.error(f'首页最新点修补失败: symbol={symbol}, type={series_type}, error={exc}')
+                results.append(
+                    {
+                        'symbol': symbol,
+                        'series_type': series_type,
+                        'period': BINANCE_SERIES_REPAIR_PERIOD,
+                        'status': 'error',
+                        'error': str(exc),
+                    }
+                )
+
+    success_count = sum(1 for item in results if item.get('status') == 'success')
+    failure_count = sum(1 for item in results if item.get('status') == 'error')
+    logger.info(
+        f"首页最新点修补完成: 总任务数={total_tasks}, 成功={success_count}, 失败={failure_count}"
+    )
+    return {
+        'status': 'success' if failure_count == 0 else 'partial_success',
+        'symbols': tracked_symbols,
+        'series_types': active_series_types,
+        'period': BINANCE_SERIES_REPAIR_PERIOD,
+        'success_count': success_count,
+        'failure_count': failure_count,
+        'skipped_count': 0,
         'results': results,
     }
 

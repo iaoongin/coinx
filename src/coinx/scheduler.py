@@ -1,6 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from .collector import repair_tracked_symbols, run_series_repair_job, get_all_24hr_tickers
+from .collector import repair_latest_tracked_symbols, repair_tracked_symbols, run_series_repair_job, get_all_24hr_tickers
 from .coin_manager import get_active_coins, update_coins_config
 from .config import (
     BINANCE_SERIES_REPAIR_INTERVAL,
@@ -24,20 +24,20 @@ scheduler = BackgroundScheduler()
     coalesce=True
 )
 def scheduled_repair_tracked():
-    """修补跟踪币种历史序列"""
+    """轻量修补跟踪币种最新首页序列"""
     try:
         tracked_coins = get_active_coins()
         if not tracked_coins:
             logger.info('无跟踪币种，跳过修补')
             return
-        logger.info(f'开始修补跟踪币种，共 {len(tracked_coins)} 个')
-        repair_tracked_symbols(
+        logger.info(f'开始修补跟踪币种最新点，共 {len(tracked_coins)} 个')
+        repair_latest_tracked_symbols(
             symbols=tracked_coins,
             series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
         )
-        logger.info('修补跟踪币种完成')
+        logger.info('修补跟踪币种最新点完成')
     except Exception as e:
-        logger.error(f'修补跟踪币种失败: {e}')
+        logger.error(f'修补跟踪币种最新点失败: {e}')
         logger.exception(e)
 
 

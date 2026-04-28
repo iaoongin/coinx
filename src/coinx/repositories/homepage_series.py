@@ -96,6 +96,21 @@ def format_price(num):
     return f"{float(value):.5e}"
 
 
+def format_usd_value(num):
+    if num is None:
+        return 'N/A'
+
+    value = float(num)
+    abs_value = abs(value)
+    if abs_value >= 1_000_000_000:
+        return f"${value / 1_000_000_000:.2f}B"
+    if abs_value >= 1_000_000:
+        return f"${value / 1_000_000:.2f}M"
+    if abs_value >= 1_000:
+        return f"${value / 1_000:.2f}K"
+    return f"${value:.2f}"
+
+
 def _interval_to_ms(interval):
     if interval.endswith('m'):
         return int(interval[:-1]) * 60 * 1000
@@ -130,6 +145,12 @@ def _calc_percent_change(current_value, past_value):
     if current_value is None or past_value in (None, 0):
         return None
     return ((current_value - past_value) / past_value) * 100
+
+
+def _calc_share_percent(value, total):
+    if total in (None, 0):
+        return None
+    return float(value or 0) / float(total) * 100
 
 
 def _get_exact_window(records_by_time, current_time, points, tolerance=10):
@@ -307,6 +328,30 @@ def _merge_taker_points(*points):
         buy_vol=total_buy_vol,
         sell_vol=total_sell_vol,
     )
+
+
+def _build_exchange_open_interest_rows(exchange_points, total_value, total_open_interest):
+    rows = []
+    for exchange, point in exchange_points.items():
+        if point is None:
+            continue
+
+        open_interest = float(point.sum_open_interest or 0)
+        open_interest_value = float(point.sum_open_interest_value or 0)
+        rows.append(
+            {
+                'exchange': exchange,
+                'open_interest': open_interest,
+                'open_interest_formatted': format_number(open_interest),
+                'open_interest_value': open_interest_value,
+                'open_interest_value_formatted': format_usd_value(open_interest_value),
+                'share_percent': _calc_share_percent(open_interest_value, total_value),
+                'quantity_share_percent': _calc_share_percent(open_interest, total_open_interest),
+            }
+        )
+
+    rows.sort(key=lambda item: item['open_interest_value'], reverse=True)
+    return rows
 
 
 def _get_latest_series_time_map(session, model, symbols, time_field_name, upper_bound=None):
@@ -647,7 +692,7 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
     aggregate_oi_map = {symbol: {} for symbol in symbols}
     aggregate_taker_map = {symbol: {} for symbol in symbols}
     coverage_map = {
-        symbol: {'source_exchanges': [], 'missing_exchanges': []}
+        symbol: {'source_exchanges': [], 'missing_exchanges': [], 'open_interest_by_exchange': {}}
         for symbol in symbols
     }
 
@@ -665,14 +710,18 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             taker_times.update(symbol_taker.keys())
 
         for event_time in oi_times:
+            exchange_points = {}
+            for exchange in exchange_maps:
+                point = _with_estimated_open_interest_value(
+                    exchange_maps[exchange][0].get(symbol, {}).get(event_time),
+                    primary_kline_map.get(symbol, {}).get(event_time),
+                )
+                if point is not None:
+                    exchange_points[exchange] = point
+
+            coverage_map[symbol]['open_interest_by_exchange'][event_time] = exchange_points
             aggregate_oi_map[symbol][event_time] = _merge_time_points(
-                *[
-                    _with_estimated_open_interest_value(
-                        exchange_maps[exchange][0].get(symbol, {}).get(event_time),
-                        primary_kline_map.get(symbol, {}).get(event_time),
-                    )
-                    for exchange in exchange_maps
-                ]
+                *exchange_points.values()
             )
 
         for event_time in taker_times:
@@ -708,6 +757,11 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     current_open_interest = float(current_oi.sum_open_interest or 0)
     current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
     current_price = float(current_kline.close_price) if current_kline and current_kline.close_price is not None else None
+    exchange_open_interest = _build_exchange_open_interest_rows(
+        ((coverage or {}).get('open_interest_by_exchange') or {}).get(current_time, {}),
+        current_open_interest_value,
+        current_open_interest,
+    )
 
     changes = {}
     for interval in TIME_INTERVALS:
@@ -743,6 +797,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
         'symbol': symbol,
         'source_exchanges': (coverage or {}).get('source_exchanges', []),
         'missing_exchanges': (coverage or {}).get('missing_exchanges', []),
+        'exchange_open_interest': exchange_open_interest,
         'current_open_interest': current_open_interest,
         'current_open_interest_formatted': format_number(current_open_interest),
         'current_open_interest_value': current_open_interest_value,

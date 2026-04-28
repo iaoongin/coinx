@@ -1,4 +1,5 @@
 import threading
+import time
 
 from flask import Blueprint, jsonify, request
 
@@ -12,6 +13,7 @@ from coinx.collector import (
     get_latest_price,
     get_long_short_ratio,
     get_open_interest,
+    repair_latest_tracked_symbols,
     repair_tracked_symbols,
     update_market_tickers,
 )
@@ -34,6 +36,7 @@ from coinx.repositories.homepage_series import (
     get_homepage_series_data,
     get_homepage_series_snapshot,
     get_homepage_series_update_time,
+    latest_closed_5m_open_time,
     should_refresh_homepage_series,
 )
 from coinx.utils import logger
@@ -41,6 +44,8 @@ from coinx.utils import logger
 
 api_data_bp = Blueprint('api_data', __name__)
 HOME_PAGE_REFRESH_LOCK = threading.Lock()
+HOMEPAGE_SNAPSHOT_CACHE_LOCK = threading.Lock()
+HOMEPAGE_SNAPSHOT_CACHE = {}
 
 SUPPORTED_SERIES_TYPES = {
     'top_long_short_position_ratio',
@@ -51,7 +56,7 @@ SUPPORTED_SERIES_TYPES = {
 }
 
 
-def _run_homepage_refresh(symbols, series_types):
+def _run_homepage_refresh(symbols, series_types, latest_only=False):
     if not HOME_PAGE_REFRESH_LOCK.acquire(blocking=False):
         logger.info('首页历史序列补全正在执行，跳过重复触发')
         return {
@@ -66,10 +71,8 @@ def _run_homepage_refresh(symbols, series_types):
         }
 
     try:
-        return repair_tracked_symbols(
-            symbols=symbols,
-            series_types=series_types,
-        )
+        repair_func = repair_latest_tracked_symbols if latest_only else repair_tracked_symbols
+        return repair_func(symbols=symbols, series_types=series_types)
     finally:
         HOME_PAGE_REFRESH_LOCK.release()
 
@@ -105,7 +108,7 @@ def _is_complete_homepage_payload(coins_data):
     return True
 
 
-def _start_homepage_refresh_async(symbols, series_types=None):
+def _start_homepage_refresh_async(symbols, series_types=None, latest_only=False):
     if not symbols:
         return False
 
@@ -114,11 +117,37 @@ def _start_homepage_refresh_async(symbols, series_types=None):
         kwargs={
             'symbols': symbols,
             'series_types': series_types or list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            'latest_only': latest_only,
         },
     )
     refresh_thread.daemon = True
     refresh_thread.start()
     return True
+
+
+def _get_homepage_cache_anchor():
+    return latest_closed_5m_open_time(int(time.time() * 1000))
+
+
+def _get_homepage_cache_key(symbols, anchor_time):
+    # 测试中会 monkeypatch 仓储函数，把函数 id 放入 key 可避免跨测试串缓存。
+    return (tuple(symbols or []), anchor_time, id(get_homepage_series_snapshot))
+
+
+def _get_cached_homepage_payload(cache_key):
+    with HOMEPAGE_SNAPSHOT_CACHE_LOCK:
+        return HOMEPAGE_SNAPSHOT_CACHE.get(cache_key)
+
+
+def _set_cached_homepage_payload(cache_key, payload):
+    with HOMEPAGE_SNAPSHOT_CACHE_LOCK:
+        HOMEPAGE_SNAPSHOT_CACHE.clear()
+        HOMEPAGE_SNAPSHOT_CACHE[cache_key] = payload
+
+
+def _clear_homepage_snapshot_cache():
+    with HOMEPAGE_SNAPSHOT_CACHE_LOCK:
+        HOMEPAGE_SNAPSHOT_CACHE.clear()
 
 
 def _format_homepage_coins_payload(coins_data):
@@ -128,6 +157,7 @@ def _format_homepage_coins_payload(coins_data):
             'symbol': coin['symbol'],
             'source_exchanges': coin.get('source_exchanges', []),
             'missing_exchanges': coin.get('missing_exchanges', []),
+            'exchange_open_interest': coin.get('exchange_open_interest', []),
             'current_open_interest': coin['current_open_interest'],
             'current_open_interest_formatted': coin['current_open_interest_formatted'],
             'current_open_interest_value': coin['current_open_interest_value'],
@@ -214,29 +244,46 @@ def get_binance_series_config():
 
 @api_data_bp.route('/api/coins')
 def get_coins():
+    request_start = time.perf_counter()
     logger.info('开始从历史序列加载首页数据')
     try:
         active_coins = get_active_coins()
+        cache_anchor = _get_homepage_cache_anchor()
+        cache_key = _get_homepage_cache_key(active_coins, cache_anchor)
+        cached_payload = _get_cached_homepage_payload(cache_key)
+        if cached_payload is not None:
+            elapsed_ms = (time.perf_counter() - request_start) * 1000
+            logger.info(f'首页数据命中缓存: 币种数={len(active_coins)}, 锚点={cache_anchor}, 耗时={elapsed_ms:.2f}ms')
+            return jsonify(cached_payload)
+
+        snapshot_start = time.perf_counter()
         snapshot = get_homepage_series_snapshot(active_coins)
+        snapshot_ms = (time.perf_counter() - snapshot_start) * 1000
 
         if active_coins and not _is_complete_homepage_payload(snapshot.get('data') or []):
-            logger.info('首页历史序列不完整，开始后台补全')
+            logger.info('首页历史序列不完整，开始后台轻量补全最新点')
             _start_homepage_refresh_async(
                 active_coins,
                 series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                latest_only=True,
             )
 
         formatted_data = _format_homepage_coins_payload(snapshot['data'])
+        payload = {
+            'status': 'success',
+            'message': 'homepage data loaded',
+            'data': formatted_data,
+            'cache_update_time': snapshot['cache_update_time'],
+            'homepage_complete': _is_complete_homepage_payload(snapshot.get('data') or []),
+        }
+        _set_cached_homepage_payload(cache_key, payload)
 
-        return jsonify(
-            {
-                'status': 'success',
-                'message': 'homepage data loaded',
-                'data': formatted_data,
-                'cache_update_time': snapshot['cache_update_time'],
-                'homepage_complete': _is_complete_homepage_payload(snapshot.get('data') or []),
-            }
+        elapsed_ms = (time.perf_counter() - request_start) * 1000
+        logger.info(
+            f'首页数据加载完成: 币种数={len(active_coins)}, 数据行={len(formatted_data)}, '
+            f'锚点={cache_anchor}, 聚合耗时={snapshot_ms:.2f}ms, 总耗时={elapsed_ms:.2f}ms'
         )
+        return jsonify(payload)
     except Exception as e:
         logger.error(f'加载首页数据失败: {e}')
         logger.exception(e)
@@ -271,6 +318,7 @@ def update_data():
 
         if wait_for_completion:
             summary = _run_homepage_refresh(**refresh_kwargs)
+            _clear_homepage_snapshot_cache()
             return jsonify(
                 {
                     'status': 'success',
@@ -282,6 +330,7 @@ def update_data():
         update_thread = threading.Thread(target=_run_homepage_refresh, kwargs=refresh_kwargs)
         update_thread.daemon = True
         update_thread.start()
+        _clear_homepage_snapshot_cache()
 
         return jsonify({'status': 'success', 'message': 'homepage series refresh triggered'})
     except Exception as e:

@@ -73,6 +73,11 @@ def assert_complete_interval_contract(coin):
     assert coin['current_open_interest_formatted'] != 'N/A'
     assert coin['current_open_interest_value_formatted'] != 'N/A'
     assert coin['current_price_formatted'] != 'N/A'
+    assert coin['exchange_open_interest']
+    assert coin['exchange_open_interest'][0]['exchange']
+    assert coin['exchange_open_interest'][0]['open_interest_value'] is not None
+    assert coin['exchange_open_interest'][0]['open_interest_value_formatted'] != 'N/A'
+    assert coin['exchange_open_interest'][0]['share_percent'] is not None
 
     changes = normalize_changes(coin['changes'])
 

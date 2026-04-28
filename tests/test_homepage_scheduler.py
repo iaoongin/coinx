@@ -13,7 +13,7 @@ def test_scheduled_repair_tracked_repairs_active_coins(monkeypatch):
         return {'status': 'success', 'results': []}
 
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT'])
-    monkeypatch.setattr('coinx.scheduler.repair_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.scheduler.repair_latest_tracked_symbols', fake_repair)
 
     scheduled_repair_tracked()
 
@@ -28,7 +28,7 @@ def test_scheduled_repair_tracked_skips_when_no_active_coins(monkeypatch):
 
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: [])
     monkeypatch.setattr(
-        'coinx.scheduler.repair_tracked_symbols',
+        'coinx.scheduler.repair_latest_tracked_symbols',
         lambda **kwargs: calls.__setitem__('repair', calls['repair'] + 1),
     )
 

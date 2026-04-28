@@ -4,6 +4,7 @@
 import os
 import signal
 import sys
+import logging
 
 from coinx.config import WEB_DEBUG, WEB_HOST, WEB_PORT
 from coinx.runtime import start_runtime_services
@@ -12,7 +13,7 @@ from coinx.scheduler import scheduler
 from coinx.utils import logger
 
 def signal_handler(sig, frame):
-    """信号处理函数，用于优雅地关闭应用"""
+    """信号处理函数，用于快速关闭应用与后台线程"""
     logger.info("接收到关闭信号，正在停止应用...")
     try:
         # 关闭调度器
@@ -21,9 +22,10 @@ def signal_handler(sig, frame):
             logger.info("调度器已强制关闭")
     except Exception as e:
         logger.error(f"关闭调度器时出错: {e}")
-    
+
     logger.info("应用已停止")
-    sys.exit(0)
+    logging.shutdown()
+    os._exit(0)
 
 def main():
     """主函数"""
