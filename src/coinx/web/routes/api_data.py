@@ -29,6 +29,13 @@ from coinx.config import (
     BINANCE_SERIES_REPAIR_PERIOD,
     BINANCE_SERIES_REPAIR_SLEEP_MS,
     BINANCE_SERIES_TYPES,
+    REPAIR_HISTORY_COVERAGE_HOURS,
+    REPAIR_HISTORY_ENABLED,
+    REPAIR_HISTORY_INTERVAL,
+    REPAIR_HISTORY_MAX_WORKERS,
+    REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
+    REPAIR_ROLLING_MAX_WORKERS,
+    REPAIR_ROLLING_POINTS,
     TIME_INTERVALS,
 )
 from coinx.repositories.homepage_series import (
@@ -236,6 +243,13 @@ def get_binance_series_config():
                     'klines_page_limit': BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
                     'futures_page_limit': BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
                     'sleep_ms': BINANCE_SERIES_REPAIR_SLEEP_MS,
+                    'rolling_points': REPAIR_ROLLING_POINTS,
+                    'rolling_max_workers': REPAIR_ROLLING_MAX_WORKERS,
+                    'history_enabled': REPAIR_HISTORY_ENABLED,
+                    'history_interval': REPAIR_HISTORY_INTERVAL,
+                    'history_max_workers': REPAIR_HISTORY_MAX_WORKERS,
+                    'history_symbol_batch_size': REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
+                    'history_coverage_hours': REPAIR_HISTORY_COVERAGE_HOURS,
                 },
             },
         }
@@ -468,14 +482,39 @@ def batch_collect_binance_series():
 @api_data_bp.route('/api/binance-series/repair-tracked', methods=['POST'])
 def repair_tracked_binance_series():
     payload = request.get_json(silent=True) or {}
+    symbols = payload.get('symbols')
+    exchanges = payload.get('exchanges')
     series_types = payload.get('series_types')
+    mode = payload.get('mode', 'history')
+    full_scan = bool(payload.get('full_scan', False))
+    coverage_hours = payload.get('coverage_hours')
+    max_workers = payload.get('max_workers')
 
     error = _validate_series_types(series_types)
     if error:
         return jsonify({'status': 'error', 'message': error}), 400
+    if symbols is not None and not isinstance(symbols, list):
+        return jsonify({'status': 'error', 'message': 'symbols must be a list'}), 400
+    if exchanges is not None and not isinstance(exchanges, list):
+        return jsonify({'status': 'error', 'message': 'exchanges must be a list'}), 400
+    if mode not in ('history', 'legacy'):
+        return jsonify({'status': 'error', 'message': 'mode must be history or legacy'}), 400
 
     try:
-        result = repair_tracked_symbols(series_types=series_types)
+        if symbols is None and coverage_hours is None and max_workers is None and not full_scan:
+            repair_kwargs = {'series_types': series_types}
+            if exchanges is not None:
+                repair_kwargs['exchanges'] = exchanges
+            result = repair_tracked_symbols(**repair_kwargs)
+        else:
+            result = repair_tracked_symbols(
+                symbols=symbols,
+                series_types=series_types,
+                exchanges=exchanges,
+                coverage_hours=int(coverage_hours) if coverage_hours is not None else None,
+                max_workers=int(max_workers) if max_workers is not None else 1,
+                symbol_batch_size=None if full_scan else REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
+            )
         return jsonify({'status': 'success', 'message': 'tracked series repaired', 'data': result})
     except Exception as e:
         logger.error(f'修补已跟踪币种历史序列失败: {e}')

@@ -1,12 +1,21 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from .collector import repair_latest_tracked_symbols, repair_tracked_symbols, run_series_repair_job, get_all_24hr_tickers
+from .collector import (
+    get_all_24hr_tickers,
+    repair_rolling_tracked_symbols,
+    run_history_repair_job,
+    run_series_repair_job,
+)
 from .coin_manager import get_active_coins, update_coins_config
 from .config import (
     BINANCE_SERIES_REPAIR_INTERVAL,
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
     FETCH_COINS_TOP_VOLUME_COUNT,
+    REPAIR_HISTORY_ENABLED,
+    REPAIR_HISTORY_INTERVAL,
+    REPAIR_ROLLING_MAX_WORKERS,
+    REPAIR_ROLLING_POINTS,
     REPAIR_TRACKED_INTERVAL,
 )
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
@@ -31,9 +40,11 @@ def scheduled_repair_tracked():
             logger.info('无跟踪币种，跳过修补')
             return
         logger.info(f'开始修补跟踪币种最新点，共 {len(tracked_coins)} 个')
-        repair_latest_tracked_symbols(
+        repair_rolling_tracked_symbols(
             symbols=tracked_coins,
             series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            points=REPAIR_ROLLING_POINTS,
+            max_workers=REPAIR_ROLLING_MAX_WORKERS,
         )
         logger.info('修补跟踪币种最新点完成')
     except Exception as e:
@@ -64,13 +75,55 @@ if FETCH_COINS_ENABLED:
                 )[:FETCH_COINS_TOP_VOLUME_COUNT]
             ]
             logger.info(f'开始修补成交额前{FETCH_COINS_TOP_VOLUME_COUNT}，共 {len(top_volume_symbols)} 个')
-            repair_tracked_symbols(
+            repair_rolling_tracked_symbols(
                 symbols=top_volume_symbols,
                 series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                points=REPAIR_ROLLING_POINTS,
+                max_workers=REPAIR_ROLLING_MAX_WORKERS,
             )
             logger.info('修补成交额前N完成')
         except Exception as e:
             logger.error(f'修补成交额前N失败: {e}')
+            logger.exception(e)
+
+
+if REPAIR_HISTORY_ENABLED:
+    @scheduler.scheduled_job(
+        'interval',
+        seconds=REPAIR_HISTORY_INTERVAL,
+        id='repair_history_job',
+        max_instances=1,
+        coalesce=True
+    )
+    def scheduled_repair_history():
+        """Low-frequency historical gap repair."""
+        try:
+            logger.info('开始执行低频历史补齐任务')
+            symbols = get_active_coins()
+            if FETCH_COINS_ENABLED:
+                all_tickers = get_all_24hr_tickers()
+                if all_tickers:
+                    top_volume_symbols = [
+                        t['symbol'] for t in sorted(
+                            all_tickers,
+                            key=lambda x: x.get('quoteVolume', 0),
+                            reverse=True
+                        )[:FETCH_COINS_TOP_VOLUME_COUNT]
+                    ]
+                    symbols = list(dict.fromkeys([*symbols, *top_volume_symbols]))
+                else:
+                    logger.warning('低频历史补齐获取成交额排行失败，仅修补跟踪币种')
+            summary = run_history_repair_job(
+                symbols=symbols,
+                series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            )
+            logger.info(
+                f"低频历史补齐任务完成: 状态={summary.get('status')}, "
+                f"成功={summary.get('success_count', 0)}, 失败={summary.get('failure_count', 0)}, "
+                f"跳过={summary.get('skipped_count', 0)}"
+            )
+        except Exception as e:
+            logger.error(f'低频历史补齐任务失败: {e}')
             logger.exception(e)
 
 

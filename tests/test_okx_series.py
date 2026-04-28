@@ -1,4 +1,7 @@
 from coinx.collector.okx.series import (
+    clear_supported_symbols_cache,
+    get_supported_symbols,
+    is_symbol_supported,
     parse_klines,
     parse_open_interest_hist,
     parse_taker_buy_sell_vol,
@@ -71,3 +74,31 @@ def test_parse_okx_taker_buy_sell_vol_calculates_ratio():
     assert records[0]['buy_vol'] == 100.0
     assert records[0]['sell_vol'] == 150.0
     assert round(records[0]['buy_sell_ratio'], 4) == round(100.0 / 150.0, 4)
+
+
+def test_okx_supported_symbols_maps_live_usdt_swaps(monkeypatch):
+    clear_supported_symbols_cache()
+
+    monkeypatch.setattr(
+        'coinx.collector.okx.series._request_okx',
+        lambda path, params, session=None: [
+            {'instId': 'BTC-USDT-SWAP', 'state': 'live'},
+            {'instId': 'ETH-USDT-SWAP', 'state': 'live'},
+            {'instId': 'BTC-USD-SWAP', 'state': 'live'},
+            {'instId': 'OLD-USDT-SWAP', 'state': 'suspend'},
+        ],
+    )
+
+    assert get_supported_symbols(ttl_seconds=0) == {'BTCUSDT', 'ETHUSDT'}
+
+
+def test_okx_is_symbol_supported_false_for_missing_swap(monkeypatch):
+    clear_supported_symbols_cache()
+
+    monkeypatch.setattr(
+        'coinx.collector.okx.series._request_okx',
+        lambda path, params, session=None: [{'instId': 'BTC-USDT-SWAP', 'state': 'live'}],
+    )
+
+    assert is_symbol_supported('BTCUSDT') is True
+    assert is_symbol_supported('PROMUSDT') is False

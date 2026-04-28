@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -20,310 +20,279 @@ SQLITE_BIGINT_PK = BigInteger().with_variant(Integer, 'sqlite')
 
 
 class Coin(Base):
-    """币种配置模型"""
 
     __tablename__ = 'coins'
 
-    symbol = Column(String(50), primary_key=True, comment='交易对符号')
-    is_tracking = Column(Boolean, default=True, comment='是否启用跟踪')
+    symbol = Column(String(50), primary_key=True)
+    is_tracking = Column(Boolean, default=True)
 
-    base_asset = Column(String(100), comment='基础资产')
-    quote_asset = Column(String(100), comment='计价资产')
-    margin_asset = Column(String(100), comment='保证金资产')
+    base_asset = Column(String(100))
+    quote_asset = Column(String(100))
+    margin_asset = Column(String(100))
 
-    price_precision = Column(Integer, comment='价格精度')
-    quantity_precision = Column(Integer, comment='数量精度')
-    base_asset_precision = Column(Integer, comment='基础资产精度')
-    quote_precision = Column(Integer, comment='报价精度')
+    price_precision = Column(Integer)
+    quantity_precision = Column(Integer)
+    base_asset_precision = Column(Integer)
+    quote_precision = Column(Integer)
 
-    status = Column(String(50), comment='交易状态')
-    onboard_date = Column(BigInteger, comment='上线时间')
-    delivery_date = Column(BigInteger, comment='交割时间')
+    status = Column(String(50))
+    onboard_date = Column(BigInteger)
+    delivery_date = Column(BigInteger)
 
-    contract_type = Column(String(50), comment='合约类型')
-    underlying_type = Column(String(50), comment='标的类型')
+    contract_type = Column(String(50))
+    underlying_type = Column(String(50))
 
-    liquidation_fee = Column(DECIMAL(10, 6), comment='强平费率')
-    maint_margin_percent = Column(DECIMAL(10, 4), comment='维持保证金率')
-    required_margin_percent = Column(DECIMAL(10, 4), comment='所需保证金率')
+    liquidation_fee = Column(DECIMAL(10, 6))
+    maint_margin_percent = Column(DECIMAL(10, 4))
+    required_margin_percent = Column(DECIMAL(10, 4))
 
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
         return f"<Coin(symbol='{self.symbol}', is_tracking={self.is_tracking})>"
 
 
 class MarketSnapshot(Base):
-    """市场数据快照模型"""
 
     __tablename__ = 'market_snapshots'
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='自增ID')
-    batch_id = Column(String(50), nullable=False, index=True, comment='批次ID')
-    symbol = Column(String(20), nullable=False, index=True, comment='交易对符号')
-    price = Column(DECIMAL(24, 8), comment='当前价格')
-    open_interest = Column(DECIMAL(24, 8), comment='持仓量')
-    open_interest_value = Column(DECIMAL(24, 8), comment='持仓价值')
-    data_json = Column(JSON, comment='完整数据JSON')
-    snapshot_time = Column(BigInteger, nullable=False, index=True, comment='快照时间戳，毫秒')
-    created_at = Column(DateTime, default=datetime.now, comment='记录创建时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    batch_id = Column(String(50), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    price = Column(DECIMAL(24, 8))
+    open_interest = Column(DECIMAL(24, 8))
+    open_interest_value = Column(DECIMAL(24, 8))
+    data_json = Column(JSON)
+    snapshot_time = Column(BigInteger, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now)
 
     def __repr__(self):
         return f"<MarketSnapshot(symbol='{self.symbol}', time={self.snapshot_time})>"
 
 
 class BinanceTopLongShortPositionRatio(Base):
-    """Binance 大户持仓量多空比历史表"""
 
     __tablename__ = 'binance_top_long_short_position_ratio'
     __table_args__ = (
         UniqueConstraint('symbol', 'period', 'event_time', name='uk_btlspr_symbol_period_time'),
         Index('idx_btlspr_symbol_period_time', 'symbol', 'period', 'event_time'),
-        {'comment': 'Binance 大户持仓量多空比历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    long_short_ratio = Column(DECIMAL(20, 8), comment='大户持仓量多空比')
-    long_account = Column(DECIMAL(20, 8), comment='大户多头持仓占比')
-    short_account = Column(DECIMAL(20, 8), comment='大户空头持仓占比')
-    raw_json = Column(JSON, comment='接口原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    long_short_ratio = Column(DECIMAL(20, 8))
+    long_account = Column(DECIMAL(20, 8))
+    short_account = Column(DECIMAL(20, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class BinanceTopLongShortAccountRatio(Base):
-    """Binance 大户账户数多空比历史表"""
 
     __tablename__ = 'binance_top_long_short_account_ratio'
     __table_args__ = (
         UniqueConstraint('symbol', 'period', 'event_time', name='uk_btlsar_symbol_period_time'),
         Index('idx_btlsar_symbol_period_time', 'symbol', 'period', 'event_time'),
-        {'comment': 'Binance 大户账户数多空比历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    long_short_ratio = Column(DECIMAL(20, 8), comment='大户账户数多空比')
-    long_account = Column(DECIMAL(20, 8), comment='大户多头账户占比')
-    short_account = Column(DECIMAL(20, 8), comment='大户空头账户占比')
-    raw_json = Column(JSON, comment='接口原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    long_short_ratio = Column(DECIMAL(20, 8))
+    long_account = Column(DECIMAL(20, 8))
+    short_account = Column(DECIMAL(20, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class BinanceOpenInterestHist(Base):
-    """Binance 合约持仓量历史表"""
 
     __tablename__ = 'binance_open_interest_hist'
     __table_args__ = (
         UniqueConstraint('symbol', 'period', 'event_time', name='uk_boih_symbol_period_time'),
         Index('idx_boih_symbol_period_time', 'symbol', 'period', 'event_time'),
-        {'comment': 'Binance 合约持仓量历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    sum_open_interest = Column(DECIMAL(30, 8), comment='总持仓量')
-    sum_open_interest_value = Column(DECIMAL(30, 8), comment='总持仓价值')
-    cmc_circulating_supply = Column(DECIMAL(30, 8), comment='CMC 流通供应量')
-    raw_json = Column(JSON, comment='接口原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    sum_open_interest = Column(DECIMAL(30, 8))
+    sum_open_interest_value = Column(DECIMAL(30, 8))
+    cmc_circulating_supply = Column(DECIMAL(30, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class BinanceKline(Base):
-    """Binance K线历史表"""
 
     __tablename__ = 'binance_klines'
     __table_args__ = (
         UniqueConstraint('symbol', 'period', 'open_time', name='uk_bk_symbol_period_open_time'),
         Index('idx_bk_symbol_period_open_time', 'symbol', 'period', 'open_time'),
-        {'comment': 'Binance K线历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='K线周期，例如 5m、15m、1h')
-    open_time = Column(BigInteger, nullable=False, comment='开盘时间，毫秒')
-    close_time = Column(BigInteger, nullable=False, comment='收盘时间，毫秒')
-    open_price = Column(DECIMAL(30, 8), nullable=False, comment='开盘价')
-    high_price = Column(DECIMAL(30, 8), nullable=False, comment='最高价')
-    low_price = Column(DECIMAL(30, 8), nullable=False, comment='最低价')
-    close_price = Column(DECIMAL(30, 8), nullable=False, comment='收盘价')
-    volume = Column(DECIMAL(30, 8), comment='成交量')
-    quote_volume = Column(DECIMAL(30, 8), comment='成交额')
-    trade_count = Column(BigInteger, comment='成交笔数')
-    taker_buy_base_volume = Column(DECIMAL(30, 8), comment='主动买入成交量')
-    taker_buy_quote_volume = Column(DECIMAL(30, 8), comment='主动买入成交额')
-    raw_json = Column(JSON, comment='接口原始K线数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    open_time = Column(BigInteger, nullable=False)
+    close_time = Column(BigInteger, nullable=False)
+    open_price = Column(DECIMAL(30, 8), nullable=False)
+    high_price = Column(DECIMAL(30, 8), nullable=False)
+    low_price = Column(DECIMAL(30, 8), nullable=False)
+    close_price = Column(DECIMAL(30, 8), nullable=False)
+    volume = Column(DECIMAL(30, 8))
+    quote_volume = Column(DECIMAL(30, 8))
+    trade_count = Column(BigInteger)
+    taker_buy_base_volume = Column(DECIMAL(30, 8))
+    taker_buy_quote_volume = Column(DECIMAL(30, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class MarketTickers(Base):
-    """行情快照原始数据表"""
 
     __tablename__ = 'market_tickers'
     __table_args__ = (
         Index('idx_mt_symbol', 'symbol'),
         Index('idx_mt_close_time', 'close_time'),
-        {'comment': '行情快照原始数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对')
-    price_change = Column(DECIMAL(24, 8), comment='价格变动')
-    price_change_percent = Column(DECIMAL(20, 8), comment='涨跌幅')
-    weighted_avg_price = Column(DECIMAL(24, 8), comment='加权平均价')
-    last_price = Column(DECIMAL(24, 8), comment='最新价')
-    last_qty = Column(DECIMAL(24, 8), comment='最新成交量')
-    open_price = Column(DECIMAL(24, 8), comment='开盘价')
-    high_price = Column(DECIMAL(24, 8), comment='最高价')
-    low_price = Column(DECIMAL(24, 8), comment='最低价')
-    volume = Column(DECIMAL(30, 8), comment='成交量')
-    quote_volume = Column(DECIMAL(30, 8), comment='成交额')
-    open_time = Column(BigInteger, comment='24h窗口开始时间')
-    close_time = Column(BigInteger, comment='24h窗口结束时间')
-    first_id = Column(BigInteger, comment='首笔交易ID')
-    last_id = Column(BigInteger, comment='末笔交易ID')
-    count = Column(BigInteger, comment='交易笔数')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    price_change = Column(DECIMAL(24, 8))
+    price_change_percent = Column(DECIMAL(20, 8))
+    weighted_avg_price = Column(DECIMAL(24, 8))
+    last_price = Column(DECIMAL(24, 8))
+    last_qty = Column(DECIMAL(24, 8))
+    open_price = Column(DECIMAL(24, 8))
+    high_price = Column(DECIMAL(24, 8))
+    low_price = Column(DECIMAL(24, 8))
+    volume = Column(DECIMAL(30, 8))
+    quote_volume = Column(DECIMAL(30, 8))
+    open_time = Column(BigInteger)
+    close_time = Column(BigInteger)
+    first_id = Column(BigInteger)
+    last_id = Column(BigInteger)
+    count = Column(BigInteger)
+    created_at = Column(DateTime, default=datetime.now)
 
     def __repr__(self):
         return f"<MarketTickers(symbol='{self.symbol}', close_time={self.close_time})>"
 
 
 class BinanceTakerBuySellVol(Base):
-    """Binance 主动买入卖出量历史表"""
 
     __tablename__ = 'binance_taker_buy_sell_vol'
     __table_args__ = (
         UniqueConstraint('symbol', 'period', 'event_time', name='uk_btbsv_symbol_period_time'),
         Index('idx_btbsv_symbol_period_time', 'symbol', 'period', 'event_time'),
-        {'comment': 'Binance 主动买入卖出量历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    buy_sell_ratio = Column(DECIMAL(20, 8), comment='主动买入卖出比')
-    buy_vol = Column(DECIMAL(30, 8), comment='主动买入成交额')
-    sell_vol = Column(DECIMAL(30, 8), comment='主动卖出成交额')
-    raw_json = Column(JSON, comment='接口原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    buy_sell_ratio = Column(DECIMAL(20, 8))
+    buy_vol = Column(DECIMAL(30, 8))
+    sell_vol = Column(DECIMAL(30, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
         return f"<BinanceTakerBuySellVol(symbol='{self.symbol}', period='{self.period}')>"
 
 
 class BinanceGlobalLongShortAccountRatio(Base):
-    """Binance 全市场多空账户数比历史表"""
 
     __tablename__ = 'binance_global_long_short_account_ratio'
     __table_args__ = (
         UniqueConstraint('symbol', 'period', 'event_time', name='uk_bglsar_symbol_period_time'),
         Index('idx_bglsar_symbol_period_time', 'symbol', 'period', 'event_time'),
-        {'comment': 'Binance 全市场多空账户数比历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    symbol = Column(String(20), nullable=False, comment='交易对，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    long_short_ratio = Column(DECIMAL(20, 8), comment='全市场多空账户数比')
-    long_account = Column(DECIMAL(20, 8), comment='全市场多头账户占比')
-    short_account = Column(DECIMAL(20, 8), comment='全市场空头账户占比')
-    raw_json = Column(JSON, comment='接口原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    long_short_ratio = Column(DECIMAL(20, 8))
+    long_account = Column(DECIMAL(20, 8))
+    short_account = Column(DECIMAL(20, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
         return f"<BinanceGlobalLongShortAccountRatio(symbol='{self.symbol}', period='{self.period}')>"
 
 
 class MarketOpenInterestHist(Base):
-    """多交易所持仓量历史表，用于首页累计展示。"""
 
     __tablename__ = 'market_open_interest_hist'
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_moih_exchange_symbol_period_time'),
         Index('idx_moih_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
-        {'comment': '多交易所持仓量历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    exchange = Column(String(20), nullable=False, comment='交易所标识，例如 binance、okx')
-    symbol = Column(String(20), nullable=False, comment='内部交易对符号，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    sum_open_interest = Column(DECIMAL(30, 8), comment='持仓量')
-    sum_open_interest_value = Column(DECIMAL(30, 8), comment='持仓价值')
-    raw_json = Column(JSON, comment='交易所原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    exchange = Column(String(20), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    sum_open_interest = Column(DECIMAL(30, 8))
+    sum_open_interest_value = Column(DECIMAL(30, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class MarketKline(Base):
-    """多交易所K线历史表，用于首页参考价格与累计展示。"""
 
     __tablename__ = 'market_klines'
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'open_time', name='uk_mk_exchange_symbol_period_open_time'),
         Index('idx_mk_exchange_symbol_period_open_time', 'exchange', 'symbol', 'period', 'open_time'),
-        {'comment': '多交易所K线历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    exchange = Column(String(20), nullable=False, comment='交易所标识，例如 binance、okx')
-    symbol = Column(String(20), nullable=False, comment='内部交易对符号，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='K线周期，例如 5m、15m、1h')
-    open_time = Column(BigInteger, nullable=False, comment='开盘时间戳，毫秒')
-    close_time = Column(BigInteger, nullable=False, comment='收盘时间戳，毫秒')
-    open_price = Column(DECIMAL(30, 8), nullable=False, comment='开盘价')
-    high_price = Column(DECIMAL(30, 8), nullable=False, comment='最高价')
-    low_price = Column(DECIMAL(30, 8), nullable=False, comment='最低价')
-    close_price = Column(DECIMAL(30, 8), nullable=False, comment='收盘价')
-    volume = Column(DECIMAL(30, 8), comment='成交量')
-    quote_volume = Column(DECIMAL(30, 8), comment='成交额')
-    trade_count = Column(BigInteger, comment='成交笔数')
-    taker_buy_base_volume = Column(DECIMAL(30, 8), comment='主动买入基础资产成交量')
-    taker_buy_quote_volume = Column(DECIMAL(30, 8), comment='主动买入计价资产成交额')
-    raw_json = Column(JSON, comment='交易所原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    exchange = Column(String(20), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    open_time = Column(BigInteger, nullable=False)
+    close_time = Column(BigInteger, nullable=False)
+    open_price = Column(DECIMAL(30, 8), nullable=False)
+    high_price = Column(DECIMAL(30, 8), nullable=False)
+    low_price = Column(DECIMAL(30, 8), nullable=False)
+    close_price = Column(DECIMAL(30, 8), nullable=False)
+    volume = Column(DECIMAL(30, 8))
+    quote_volume = Column(DECIMAL(30, 8))
+    trade_count = Column(BigInteger)
+    taker_buy_base_volume = Column(DECIMAL(30, 8))
+    taker_buy_quote_volume = Column(DECIMAL(30, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class MarketTakerBuySellVol(Base):
-    """多交易所主动买入卖出量历史表，用于首页净流入累计展示。"""
 
     __tablename__ = 'market_taker_buy_sell_vol'
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_mtbsv_exchange_symbol_period_time'),
         Index('idx_mtbsv_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
-        {'comment': '多交易所主动买入卖出量历史数据表'},
     )
 
-    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True, comment='主键ID')
-    exchange = Column(String(20), nullable=False, comment='交易所标识，例如 binance、okx')
-    symbol = Column(String(20), nullable=False, comment='内部交易对符号，例如 BTCUSDT')
-    period = Column(String(10), nullable=False, comment='时间周期，例如 5m、15m、1h')
-    event_time = Column(BigInteger, nullable=False, comment='数据时间戳，毫秒')
-    buy_sell_ratio = Column(DECIMAL(20, 8), comment='主动买入卖出比')
-    buy_vol = Column(DECIMAL(30, 8), comment='主动买入成交量或成交额')
-    sell_vol = Column(DECIMAL(30, 8), comment='主动卖出成交量或成交额')
-    raw_json = Column(JSON, comment='交易所原始返回数据')
-    created_at = Column(DateTime, default=datetime.now, comment='创建时间')
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    exchange = Column(String(20), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    period = Column(String(10), nullable=False)
+    event_time = Column(BigInteger, nullable=False)
+    buy_sell_ratio = Column(DECIMAL(20, 8))
+    buy_vol = Column(DECIMAL(30, 8))
+    sell_vol = Column(DECIMAL(30, 8))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
         return f"<MarketTakerBuySellVol(exchange='{self.exchange}', symbol='{self.symbol}', period='{self.period}')>"

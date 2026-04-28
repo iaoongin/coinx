@@ -13,7 +13,6 @@ def test_upsert_series_records_inserts_and_updates_ratio_rows(db_session):
                 "long_short_ratio": 1.5,
                 "long_account": 0.6,
                 "short_account": 0.4,
-                "raw_json": {"v": 1},
             }
         ],
         session=db_session,
@@ -29,7 +28,6 @@ def test_upsert_series_records_inserts_and_updates_ratio_rows(db_session):
                 "long_short_ratio": 1.8,
                 "long_account": 0.64,
                 "short_account": 0.36,
-                "raw_json": {"v": 2},
             }
         ],
         session=db_session,
@@ -41,7 +39,6 @@ def test_upsert_series_records_inserts_and_updates_ratio_rows(db_session):
     assert updated == 1
     assert len(rows) == 1
     assert float(rows[0].long_short_ratio) == 1.8
-    assert rows[0].raw_json == {"v": 2}
 
 
 def test_upsert_series_records_uses_kline_unique_key(db_session):
@@ -62,7 +59,6 @@ def test_upsert_series_records_uses_kline_unique_key(db_session):
                 "trade_count": 9876,
                 "taker_buy_base_volume": 60.7,
                 "taker_buy_quote_volume": 4123456.78,
-                "raw_json": [1],
             },
             {
                 "symbol": "BTCUSDT",
@@ -78,7 +74,6 @@ def test_upsert_series_records_uses_kline_unique_key(db_session):
                 "trade_count": 9000,
                 "taker_buy_base_volume": 50.7,
                 "taker_buy_quote_volume": 3000000.0,
-                "raw_json": [2],
             },
         ],
         session=db_session,

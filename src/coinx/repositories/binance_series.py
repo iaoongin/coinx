@@ -1,4 +1,5 @@
-from sqlalchemy import func
+from sqlalchemy import func, tuple_
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from coinx.database import get_session
 from coinx.models import (
@@ -50,10 +51,32 @@ def upsert_series_records(series_type, records, session=None):
     db = session or get_session()
 
     try:
+        if db.bind and db.bind.dialect.name == 'mysql':
+            statement = mysql_insert(model).values(records)
+            update_columns = {
+                column.name: statement.inserted[column.name]
+                for column in model.__table__.columns
+                if column.name not in ('id', 'created_at')
+            }
+            db.execute(statement.on_duplicate_key_update(**update_columns))
+            db.commit()
+            return len(records)
+
+        key_values = [tuple(record[field] for field in key_fields) for record in records]
+        key_columns = [getattr(model, field) for field in key_fields]
+        existing_rows = (
+            db.query(model)
+            .filter(tuple_(*key_columns).in_(key_values))
+            .all()
+        )
+        existing_by_key = {
+            tuple(getattr(row, field) for field in key_fields): row
+            for row in existing_rows
+        }
         affected = 0
         for record in records:
-            unique_filter = {field: record[field] for field in key_fields}
-            instance = db.query(model).filter_by(**unique_filter).one_or_none()
+            unique_key = tuple(record[field] for field in key_fields)
+            instance = existing_by_key.get(unique_key)
 
             if instance is None:
                 db.add(model(**record))
@@ -88,6 +111,38 @@ def get_latest_series_timestamp(series_type, symbol, period='5m', session=None):
             .filter(model.symbol == symbol, model.period == period)
             .scalar()
         )
+    finally:
+        if own_session:
+            db.close()
+
+
+def get_existing_series_timestamps(series_type, symbols, timestamps, period='5m', session=None):
+    """Return existing timestamps by symbol for a series and timestamp set."""
+    if not symbols or not timestamps:
+        return {symbol: set() for symbol in symbols or []}
+
+    model = get_series_model(series_type)
+    timestamp_field = 'open_time' if series_type == 'klines' else 'event_time'
+    time_column = getattr(model, timestamp_field)
+
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        rows = (
+            db.query(model.symbol, time_column)
+            .filter(
+                model.symbol.in_(symbols),
+                model.period == period,
+                time_column.in_(timestamps),
+            )
+            .all()
+        )
+        existing = {symbol: set() for symbol in symbols}
+        for symbol, timestamp in rows:
+            if timestamp is not None:
+                existing.setdefault(symbol, set()).add(int(timestamp))
+        return existing
     finally:
         if own_session:
             db.close()

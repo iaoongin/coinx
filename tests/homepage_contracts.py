@@ -24,7 +24,6 @@ def seed_complete_homepage_series(session, symbol='BTCUSDT', start_time_ms=START
                 sum_open_interest=open_interest,
                 sum_open_interest_value=open_interest_value,
                 cmc_circulating_supply=None,
-                raw_json={},
             )
         )
         session.add(
@@ -42,7 +41,6 @@ def seed_complete_homepage_series(session, symbol='BTCUSDT', start_time_ms=START
                 trade_count=10 + index,
                 taker_buy_base_volume=50 + index,
                 taker_buy_quote_volume=600.0 + index,
-                raw_json=[],
             )
         )
         session.add(
@@ -53,7 +51,6 @@ def seed_complete_homepage_series(session, symbol='BTCUSDT', start_time_ms=START
                 buy_sell_ratio=1.2 + index * 0.001,
                 buy_vol=taker_base,
                 sell_vol=taker_base * 0.8,
-                raw_json={},
             )
         )
 

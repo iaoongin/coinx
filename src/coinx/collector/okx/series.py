@@ -1,4 +1,4 @@
-import time
+﻿import time
 
 from coinx.config import OKX_BASE_URL
 from coinx.collector.binance.client import get_session, request_with_retry
@@ -8,6 +8,12 @@ from coinx.utils import logger
 
 OKX_EXCHANGE_ID = 'okx'
 SUPPORTED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
+_SUPPORTED_SYMBOLS_TTL_SECONDS = 60 * 60
+_supported_symbols_cache = {
+    'loaded_at': 0,
+    'failed_at': 0,
+    'symbols': None,
+}
 
 
 def _to_float(value):
@@ -37,6 +43,56 @@ def to_internal_symbol(inst_id):
     return inst_id.replace('-', '')
 
 
+def _is_live_usdt_swap(instrument):
+    inst_id = instrument.get('instId') if isinstance(instrument, dict) else None
+    if not inst_id or not inst_id.endswith('-USDT-SWAP'):
+        return False
+    state = instrument.get('state')
+    return state in (None, '', 'live')
+
+
+def clear_supported_symbols_cache():
+    _supported_symbols_cache['loaded_at'] = 0
+    _supported_symbols_cache['failed_at'] = 0
+    _supported_symbols_cache['symbols'] = None
+
+
+def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):
+    now = time.time()
+    cached_symbols = _supported_symbols_cache.get('symbols')
+    loaded_at = _supported_symbols_cache.get('loaded_at') or 0
+    if cached_symbols is not None and now - loaded_at < ttl_seconds:
+        return cached_symbols
+
+    instruments = _request_okx(
+        '/api/v5/public/instruments',
+        {'instType': 'SWAP'},
+        session=session,
+    )
+    symbols = {
+        to_internal_symbol(instrument['instId'])
+        for instrument in instruments
+        if _is_live_usdt_swap(instrument)
+    }
+    _supported_symbols_cache['symbols'] = symbols
+    _supported_symbols_cache['loaded_at'] = now
+    return symbols
+
+
+def is_symbol_supported(symbol, series_type=None, session=None):
+    if series_type not in (None, *SUPPORTED_SERIES_TYPES):
+        return False
+    failed_at = _supported_symbols_cache.get('failed_at') or 0
+    if _supported_symbols_cache.get('symbols') is None and time.time() - failed_at < 60:
+        return True
+    try:
+        return symbol in get_supported_symbols(session=session)
+    except Exception as exc:
+        _supported_symbols_cache['failed_at'] = time.time()
+        logger.warning(f"OKX supported symbol cache unavailable, fallback to request path: {exc}")
+        return True
+
+
 def _request_okx(path, params, session=None, timeout=10):
     http_session = session or get_session()
     url = f"{OKX_BASE_URL}{path}"
@@ -44,7 +100,7 @@ def _request_okx(path, params, session=None, timeout=10):
     response.raise_for_status()
     payload = response.json()
     if isinstance(payload, dict) and payload.get('code') not in (None, '0', 0):
-        raise ValueError(f"OKX 接口返回错误 {payload.get('code')}: {payload.get('msg')}")
+        raise ValueError(f"OKX 鎺ュ彛杩斿洖閿欒 {payload.get('code')}: {payload.get('msg')}")
     return payload.get('data', payload)
 
 
@@ -91,7 +147,7 @@ def fetch_taker_buy_sell_vol(symbol, period, limit, session=None, start_time=Non
 def parse_klines(payload, symbol, period):
     parsed = []
     for item in payload:
-        # OKX K线数组: [时间戳, 开盘价, 最高价, 最低价, 收盘价, 成交量, 币种成交量, 计价成交额, 是否确认]
+        # OKX K绾挎暟缁? [鏃堕棿鎴? 寮€鐩樹环, 鏈€楂樹环, 鏈€浣庝环, 鏀剁洏浠? 鎴愪氦閲? 甯佺鎴愪氦閲? 璁′环鎴愪氦棰? 鏄惁纭]
         open_time = int(item[0])
         parsed.append(
             {
@@ -108,7 +164,6 @@ def parse_klines(payload, symbol, period):
                 'trade_count': None,
                 'taker_buy_base_volume': None,
                 'taker_buy_quote_volume': None,
-                'raw_json': item,
             }
         )
     return parsed
@@ -132,7 +187,6 @@ def parse_open_interest_hist(payload, symbol, period):
                 or item.get('sumOpenInterestValue')
             )
         else:
-            # OKX 统计序列通常是时间戳在第一位的数组。
             event_time = int(item[0])
             open_interest = None
             open_interest_value = _to_float(item[1]) if len(item) > 1 else None
@@ -144,7 +198,6 @@ def parse_open_interest_hist(payload, symbol, period):
                 'event_time': event_time,
                 'sum_open_interest': open_interest,
                 'sum_open_interest_value': open_interest_value,
-                'raw_json': item,
             }
         )
     return parsed
@@ -158,7 +211,6 @@ def parse_taker_buy_sell_vol(payload, symbol, period):
             buy_vol = _to_float(item.get('buyVol') or item.get('buyVolume') or item.get('buy'))
             sell_vol = _to_float(item.get('sellVol') or item.get('sellVolume') or item.get('sell'))
         else:
-            # OKX 主动买卖量序列通常是时间戳在第一位的数组。
             event_time = int(item[0])
             sell_vol = _to_float(item[1]) if len(item) > 1 else None
             buy_vol = _to_float(item[2]) if len(item) > 2 else None
@@ -174,7 +226,6 @@ def parse_taker_buy_sell_vol(payload, symbol, period):
                 'buy_sell_ratio': ratio,
                 'buy_vol': buy_vol,
                 'sell_vol': sell_vol,
-                'raw_json': item,
             }
         )
     return parsed
@@ -189,7 +240,7 @@ def fetch_series_payload(series_type, symbol, period, limit, session=None, start
     try:
         fetcher = fetchers[series_type]
     except KeyError as exc:
-        raise ValueError(f"不支持的 OKX 序列类型: {series_type}") from exc
+        raise ValueError(f"涓嶆敮鎸佺殑 OKX 搴忓垪绫诲瀷: {series_type}") from exc
     return fetcher(symbol, period, limit, session=session, start_time=start_time, end_time=end_time)
 
 
@@ -202,16 +253,16 @@ def parse_series_payload(series_type, payload, symbol, period):
     try:
         parser = parsers[series_type]
     except KeyError as exc:
-        raise ValueError(f"不支持的 OKX 序列类型: {series_type}") from exc
+        raise ValueError(f"涓嶆敮鎸佺殑 OKX 搴忓垪绫诲瀷: {series_type}") from exc
     return parser(payload, symbol, period)
 
 
 def collect_and_store_series(series_type, symbol, period, limit, http_session=None, db_session=None):
-    logger.info(f"开始采集 OKX 序列数据: 类型={series_type}, 币种={symbol}, 周期={period}, 条数={limit}")
+    logger.info(f"寮€濮嬮噰闆?OKX 搴忓垪鏁版嵁: 绫诲瀷={series_type}, 甯佺={symbol}, 鍛ㄦ湡={period}, 鏉℃暟={limit}")
     payload = fetch_series_payload(series_type, symbol, period, limit, session=http_session)
     records = parse_series_payload(series_type, payload, symbol, period)
     affected = upsert_series_records(OKX_EXCHANGE_ID, series_type, records, session=db_session)
-    logger.info(f"OKX 序列数据采集完成: 类型={series_type}, 币种={symbol}, 影响行数={affected}")
+    logger.info(f"OKX 搴忓垪鏁版嵁閲囬泦瀹屾垚: 绫诲瀷={series_type}, 甯佺={symbol}, 褰卞搷琛屾暟={affected}")
     return {
         'exchange': OKX_EXCHANGE_ID,
         'series_type': series_type,
@@ -272,4 +323,4 @@ def _period_to_ms(period):
         return int(period[:-1]) * 60 * 60 * 1000
     if period.endswith('d'):
         return int(period[:-1]) * 24 * 60 * 60 * 1000
-    raise ValueError(f'不支持的周期: {period}')
+    raise ValueError(f'涓嶆敮鎸佺殑鍛ㄦ湡: {period}')

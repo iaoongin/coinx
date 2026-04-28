@@ -1,4 +1,4 @@
-import time
+﻿import time
 
 from coinx.config import BINANCE_BASE_URL
 from coinx.utils import logger
@@ -119,7 +119,6 @@ def parse_top_long_short_position_ratio(payload, symbol, period):
             'long_short_ratio': _to_float(item.get('longShortRatio')),
             'long_account': _to_float(item.get('longAccount')),
             'short_account': _to_float(item.get('shortAccount')),
-            'raw_json': item,
         }
         for item in payload
     ]
@@ -134,7 +133,6 @@ def parse_top_long_short_account_ratio(payload, symbol, period):
             'long_short_ratio': _to_float(item.get('longShortRatio')),
             'long_account': _to_float(item.get('longAccount')),
             'short_account': _to_float(item.get('shortAccount')),
-            'raw_json': item,
         }
         for item in payload
     ]
@@ -149,7 +147,6 @@ def parse_open_interest_hist(payload, symbol, period):
             'sum_open_interest': _to_float(item.get('sumOpenInterest')),
             'sum_open_interest_value': _to_float(item.get('sumOpenInterestValue')),
             'cmc_circulating_supply': _to_float(item.get('CMCCirculatingSupply')),
-            'raw_json': item,
         }
         for item in payload
     ]
@@ -173,7 +170,6 @@ def parse_klines(payload, symbol, period):
                 'trade_count': int(item[8]),
                 'taker_buy_base_volume': _to_float(item[9]),
                 'taker_buy_quote_volume': _to_float(item[10]),
-                'raw_json': item,
             }
         )
     return parsed
@@ -188,7 +184,6 @@ def parse_global_long_short_account_ratio(payload, symbol, period):
             'long_short_ratio': _to_float(item.get('longShortRatio')),
             'long_account': _to_float(item.get('longAccount')),
             'short_account': _to_float(item.get('shortAccount')),
-            'raw_json': item,
         }
         for item in payload
     ]
@@ -203,7 +198,6 @@ def parse_taker_buy_sell_vol(payload, symbol, period):
             'buy_sell_ratio': _to_float(item.get('buySellRatio')),
             'buy_vol': _to_float(item.get('buyVol')),
             'sell_vol': _to_float(item.get('sellVol')),
-            'raw_json': item,
         }
         for item in payload
     ]
@@ -222,7 +216,7 @@ def fetch_series_payload(series_type, symbol, period, limit, session=None, start
     try:
         fetcher = fetchers[series_type]
     except KeyError as exc:
-        raise ValueError(f"不支持的序列类型: {series_type}") from exc
+        raise ValueError(f"涓嶆敮鎸佺殑搴忓垪绫诲瀷: {series_type}") from exc
 
     return fetcher(
         symbol,
@@ -247,14 +241,13 @@ def parse_series_payload(series_type, payload, symbol, period):
     try:
         parser = parsers[series_type]
     except KeyError as exc:
-        raise ValueError(f"不支持的序列类型: {series_type}") from exc
+        raise ValueError(f"涓嶆敮鎸佺殑搴忓垪绫诲瀷: {series_type}") from exc
 
     return parser(payload, symbol, period)
 
 
 def collect_and_store_series(series_type, symbol, period, limit, http_session=None, db_session=None, now_ms=None):
-    """抓取、解析并写入指定序列数据。"""
-    logger.info(f"开始采集序列数据: type={series_type}, symbol={symbol}, period={period}, limit={limit}")
+    logger.info(f"寮€濮嬮噰闆嗗簭鍒楁暟鎹? type={series_type}, symbol={symbol}, period={period}, limit={limit}")
     payload = fetch_series_payload(series_type, symbol, period, limit, session=http_session)
     records = parse_series_payload(series_type, payload, symbol, period)
     if now_ms is None:
@@ -269,7 +262,7 @@ def collect_and_store_series(series_type, symbol, period, limit, http_session=No
         period=period,
     )
     affected = upsert_series_records(series_type, records, session=db_session)
-    logger.info(f"序列数据采集完成: type={series_type}, symbol={symbol}, affected={affected}")
+    logger.info(f"搴忓垪鏁版嵁閲囬泦瀹屾垚: type={series_type}, symbol={symbol}, affected={affected}")
     return {
         'series_type': series_type,
         'symbol': symbol,
@@ -281,7 +274,6 @@ def collect_and_store_series(series_type, symbol, period, limit, http_session=No
 
 
 def collect_series_batch(symbols, periods, series_types=None, limit=30, http_session=None, db_session=None):
-    """按符号、周期和序列类型批量采集并写入数据库。"""
     active_series_types = series_types or DEFAULT_SERIES_TYPES
     results = []
 
@@ -301,7 +293,7 @@ def collect_series_batch(symbols, periods, series_types=None, limit=30, http_ses
                     results.append(result)
                 except Exception as exc:
                     logger.error(
-                        f"批量采集失败: type={series_type}, symbol={symbol}, period={period}, error={exc}"
+                        f"鎵归噺閲囬泦澶辫触: type={series_type}, symbol={symbol}, period={period}, error={exc}"
                     )
                     results.append(
                         {

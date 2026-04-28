@@ -28,7 +28,6 @@ def test_parse_top_long_short_position_ratio_maps_fields():
             "long_short_ratio": 1.96,
             "long_account": 0.6622,
             "short_account": 0.3378,
-            "raw_json": payload[0],
         }
     ]
 

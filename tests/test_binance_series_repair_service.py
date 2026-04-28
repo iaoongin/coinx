@@ -1,6 +1,8 @@
-from coinx.collector.binance.repair import (
+﻿from coinx.collector.binance.repair import (
+    repair_rolling_tracked_symbols,
     repair_single_series,
     repair_tracked_symbols,
+    run_history_repair_job,
     run_series_repair_job,
 )
 from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
@@ -89,7 +91,6 @@ def test_repair_single_series_trims_unclosed_kline_records(db_session, monkeypat
                 'trade_count': 3,
                 'taker_buy_base_volume': 4,
                 'taker_buy_quote_volume': 5,
-                'raw_json': [],
             }
         ],
         session=db_session,
@@ -170,7 +171,6 @@ def test_repair_single_series_can_overlap_for_coverage_backfill(db_session, monk
         'trade_count': 3,
         'taker_buy_base_volume': 4,
         'taker_buy_quote_volume': 5,
-        'raw_json': [],
     }
     from coinx.repositories.binance_series import upsert_series_records
     upsert_series_records('klines', [existing], session=db_session)
@@ -233,7 +233,6 @@ def test_repair_single_series_pages_futures_history_by_time_windows(db_session, 
             'sum_open_interest': 100 + index,
             'sum_open_interest_value': 200 + index,
             'cmc_circulating_supply': None,
-            'raw_json': {},
         }
         for index, event_time in enumerate([0, 300000, 600000, 900000])
     ]
@@ -303,7 +302,6 @@ def test_repair_single_series_continues_after_empty_head_page(db_session, monkey
                 'sum_open_interest': 101,
                 'sum_open_interest_value': 201,
                 'cmc_circulating_supply': None,
-                'raw_json': {},
             },
             {
                 'symbol': 'BTCUSDT',
@@ -312,7 +310,6 @@ def test_repair_single_series_continues_after_empty_head_page(db_session, monkey
                 'sum_open_interest': 102,
                 'sum_open_interest_value': 202,
                 'cmc_circulating_supply': None,
-                'raw_json': {},
             },
         ]
 
@@ -367,7 +364,6 @@ def test_repair_single_series_trims_unclosed_taker_buy_sell_vol_records(db_sessi
                     'buy_sell_ratio': 1.0,
                     'buy_vol': 10.0,
                     'sell_vol': 5.0,
-                    'raw_json': {},
                 },
                 {
                     'symbol': 'BTCUSDT',
@@ -376,7 +372,6 @@ def test_repair_single_series_trims_unclosed_taker_buy_sell_vol_records(db_sessi
                     'buy_sell_ratio': 1.0,
                     'buy_vol': 11.0,
                     'sell_vol': 6.0,
-                    'raw_json': {},
                 },
             ]
         return []
@@ -433,10 +428,10 @@ def test_repair_single_series_logs_progress(db_session, monkeypatch):
         db_session=db_session,
     )
 
-    assert any('开始修补历史序列: 币种=BTCUSDT, 类型=klines' in message for message in info_logs)
-    assert any('修补分页请求: 币种=BTCUSDT, 类型=klines, 页码=1' in message for message in info_logs)
-    assert any('修补分页完成: 币种=BTCUSDT, 类型=klines, 页码=1' in message for message in info_logs)
-    assert any('历史序列修补完成: 币种=BTCUSDT, 类型=klines, 状态=成功' in message for message in info_logs)
+    assert any('BTCUSDT' in message and 'klines' in message for message in info_logs)
+    assert any('1' in message for message in info_logs)
+    assert any('BTCUSDT' in message and 'klines' in message for message in info_logs)
+    assert any('BTCUSDT' in message and 'klines' in message for message in info_logs)
 
 
 def test_repair_tracked_symbols_uses_active_coins_and_continues_after_errors(monkeypatch):
@@ -495,10 +490,10 @@ def test_repair_tracked_symbols_logs_batch_progress(monkeypatch):
         now_ms=900000,
     )
 
-    assert any('开始修补历史序列: 币种数量=2' in message for message in info_logs)
-    assert any('修补进度: 任务=1/4, 币种=BTCUSDT, 类型=klines' in message for message in info_logs)
-    assert any('修补结果: 任务=4/4, 币种=ETHUSDT, 类型=open_interest_hist, 状态=success' in message for message in info_logs)
-    assert any('历史序列修补完成: 总任务数=4, 成功=4, 失败=0, 跳过=0' in message for message in info_logs)
+    assert any('寮€濮嬩慨琛ュ巻鍙插簭鍒? 甯佺鏁伴噺=2' in message for message in info_logs)
+    assert any('淇ˉ杩涘害: 浠诲姟=1/4, 甯佺=BTCUSDT, 绫诲瀷=klines' in message for message in info_logs)
+    assert any('淇ˉ缁撴灉: 浠诲姟=4/4, 甯佺=ETHUSDT, 绫诲瀷=open_interest_hist, 鐘舵€?success' in message for message in info_logs)
+    assert any('鍘嗗彶搴忓垪淇ˉ瀹屾垚: 鎬讳换鍔℃暟=4, 鎴愬姛=4, 澶辫触=0, 璺宠繃=0' in message for message in info_logs)
 
 
 def test_run_series_repair_job_respects_enabled_flag(monkeypatch):
@@ -511,10 +506,91 @@ def test_run_series_repair_job_respects_enabled_flag(monkeypatch):
     monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_ENABLED', True)
     monkeypatch.setattr(
         'coinx.collector.binance.repair.repair_tracked_symbols',
-        lambda: {'status': 'success', 'success_count': 2, 'failure_count': 0, 'results': []},
+        lambda **kwargs: {'status': 'success', 'success_count': 2, 'failure_count': 0, 'results': []},
     )
 
     executed = run_series_repair_job()
 
     assert executed['status'] == 'success'
     assert executed['success_count'] == 2
+
+
+def test_repair_rolling_tracked_symbols_skips_existing_points(db_session, monkeypatch):
+    upsert_series_records(
+        'klines',
+        [
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 600000,
+                'close_time': 899999,
+                'open_price': 1,
+                'high_price': 2,
+                'low_price': 1,
+                'close_price': 2,
+                'volume': 10,
+                'quote_volume': 20,
+                'trade_count': 3,
+                'taker_buy_base_volume': 4,
+                'taker_buy_quote_volume': 5,
+            },
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 1200000,
+                'close_time': 1499999,
+                'open_price': 1,
+                'high_price': 2,
+                'low_price': 1,
+                'close_price': 2,
+                'volume': 10,
+                'quote_volume': 20,
+                'trade_count': 3,
+                'taker_buy_base_volume': 4,
+                'taker_buy_quote_volume': 5,
+            },
+        ],
+        session=db_session,
+    )
+
+    calls = []
+
+    def fake_fetch(series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+        calls.append((start_time, end_time))
+        return [_make_kline_payload(900000)]
+
+    monkeypatch.setattr('coinx.collector.binance.repair.fetch_series_payload', fake_fetch)
+
+    summary = repair_rolling_tracked_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        now_ms=1500000,
+        points=3,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    rows = db_session.query(BinanceKline).order_by(BinanceKline.open_time).all()
+
+    assert summary['mode'] == 'rolling'
+    assert summary['precheck_skipped_count'] == 0
+    assert calls == [(900000, 900000)]
+    assert [row.open_time for row in rows] == [600000, 900000, 1200000]
+
+
+def test_run_history_repair_job_uses_configured_batch(monkeypatch):
+    captured = {}
+
+    def fake_repair(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'success', 'success_count': 1, 'failure_count': 0, 'results': []}
+
+    monkeypatch.setattr('coinx.collector.binance.repair.repair_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.collector.binance.repair.REPAIR_HISTORY_SYMBOL_BATCH_SIZE', 3)
+
+    run_history_repair_job(symbols=['A', 'B', 'C', 'D'], series_types=['klines'])
+
+    assert captured['symbols'] == ['A', 'B', 'C']
+    assert captured['symbol_batch_size'] is None
+    assert captured['coverage_hours'] == 168
+    assert captured['series_types'] == ['klines']

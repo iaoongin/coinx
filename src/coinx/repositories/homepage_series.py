@@ -553,9 +553,70 @@ def _get_recent_lower_bound(session, model, symbols, time_field_name, upper_boun
     return max(0, int(latest_time) - _MAX_INTERVAL_MS)
 
 
+def _build_change_target_times(current_times):
+    target_times = set()
+    for current_time in current_times:
+        if current_time is None:
+            continue
+        current_time = int(current_time)
+        target_times.add(current_time)
+        for interval in TIME_INTERVALS:
+            target_times.add(current_time - _interval_to_ms(interval))
+    return {timestamp for timestamp in target_times if timestamp >= 0}
+
+
+def _get_recent_time_candidates(session, model, symbol, time_field_name, upper_bound=None, exchange=None, limit=12):
+    time_field = getattr(model, time_field_name)
+    query = session.query(time_field).filter(
+        model.symbol == symbol,
+        model.period == '5m',
+    )
+    if hasattr(model, 'exchange') and exchange is not None:
+        query = query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        query = query.filter(time_field <= upper_bound)
+    return [int(row[0]) for row in query.order_by(time_field.desc()).limit(limit).all() if row[0] is not None]
+
+
 def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exchange=None):
     if not symbols:
         return {}
+
+    if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
+        records_by_symbol = {symbol: {} for symbol in symbols}
+        for symbol in symbols:
+            target_times = _build_change_target_times(
+                _get_recent_time_candidates(
+                    session,
+                    model,
+                    symbol,
+                    'event_time',
+                    upper_bound=upper_bound,
+                    exchange=exchange,
+                )
+            )
+            if not target_times:
+                continue
+            query = session.query(
+                model.symbol,
+                model.event_time,
+                model.sum_open_interest,
+                model.sum_open_interest_value,
+            ).filter(
+                model.symbol == symbol,
+                model.period == '5m',
+            )
+            if hasattr(model, 'exchange') and exchange is not None:
+                query = query.filter(model.exchange == exchange)
+            if upper_bound is not None:
+                query = query.filter(model.event_time <= upper_bound)
+            query = query.filter(model.event_time.in_(target_times))
+
+            rows = query.all()
+            for row in rows:
+                point = _build_open_interest_point(row)
+                records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+        return records_by_symbol
 
     lower_bound = _get_recent_lower_bound(
         session=session,
@@ -565,7 +626,12 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         upper_bound=upper_bound,
         exchange=exchange,
     )
-    query = session.query(model).filter(model.symbol.in_(symbols), model.period == '5m')
+    query = session.query(
+        model.symbol,
+        model.event_time,
+        model.sum_open_interest,
+        model.sum_open_interest_value,
+    ).filter(model.symbol.in_(symbols), model.period == '5m')
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
     if upper_bound is not None:
@@ -584,6 +650,43 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
     if not symbols:
         return {}
 
+    if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
+        records_by_symbol = {symbol: {} for symbol in symbols}
+        for symbol in symbols:
+            target_times = _build_change_target_times(
+                _get_recent_time_candidates(
+                    session,
+                    model,
+                    symbol,
+                    'open_time',
+                    upper_bound=upper_bound,
+                    exchange=exchange,
+                )
+            )
+            if not target_times:
+                continue
+            query = session.query(
+                model.symbol,
+                model.open_time,
+                model.close_price,
+                model.quote_volume,
+                model.taker_buy_quote_volume,
+            ).filter(
+                model.symbol == symbol,
+                model.period == '5m',
+            )
+            if hasattr(model, 'exchange') and exchange is not None:
+                query = query.filter(model.exchange == exchange)
+            if upper_bound is not None:
+                query = query.filter(model.open_time <= upper_bound)
+            query = query.filter(model.open_time.in_(target_times))
+
+            rows = query.all()
+            for row in rows:
+                point = _build_kline_point(row)
+                records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
+        return records_by_symbol
+
     lower_bound = _get_recent_lower_bound(
         session=session,
         model=model,
@@ -592,7 +695,13 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
         upper_bound=upper_bound,
         exchange=exchange,
     )
-    query = session.query(model).filter(model.symbol.in_(symbols), model.period == '5m')
+    query = session.query(
+        model.symbol,
+        model.open_time,
+        model.close_price,
+        model.quote_volume,
+        model.taker_buy_quote_volume,
+    ).filter(model.symbol.in_(symbols), model.period == '5m')
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
     if upper_bound is not None:
@@ -611,6 +720,30 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
     if not symbols:
         return {}
 
+    if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
+        records_by_symbol = {symbol: {} for symbol in symbols}
+        for symbol in symbols:
+            query = session.query(
+                model.symbol,
+                model.event_time,
+                model.buy_sell_ratio,
+                model.buy_vol,
+                model.sell_vol,
+            ).filter(
+                model.symbol == symbol,
+                model.period == '5m',
+            )
+            if hasattr(model, 'exchange') and exchange is not None:
+                query = query.filter(model.exchange == exchange)
+            if upper_bound is not None:
+                query = query.filter(model.event_time <= upper_bound)
+
+            rows = query.order_by(model.event_time.desc()).limit(_REQUIRED_POINTS).all()
+            for row in rows:
+                point = _build_taker_buy_sell_vol_point(row)
+                records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+        return records_by_symbol
+
     lower_bound = _get_recent_lower_bound(
         session=session,
         model=model,
@@ -619,7 +752,13 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         upper_bound=upper_bound,
         exchange=exchange,
     )
-    query = session.query(model).filter(model.symbol.in_(symbols), model.period == '5m')
+    query = session.query(
+        model.symbol,
+        model.event_time,
+        model.buy_sell_ratio,
+        model.buy_vol,
+        model.sell_vol,
+    ).filter(model.symbol.in_(symbols), model.period == '5m')
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
     if upper_bound is not None:
@@ -659,15 +798,38 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     )
 
     if exchange == 'binance':
-        legacy_oi_map = _load_open_interest_model_map(session, BinanceOpenInterestHist, symbols, upper_bound=upper_bound)
-        legacy_kline_map = _load_kline_model_map(session, BinanceKline, symbols, upper_bound=upper_bound)
-        legacy_taker_map = _load_taker_vol_model_map(session, BinanceTakerBuySellVol, symbols, upper_bound=upper_bound)
-        for symbol in symbols:
-            if not oi_map.get(symbol):
+        missing_oi_symbols = [symbol for symbol in symbols if not oi_map.get(symbol)]
+        missing_kline_symbols = [symbol for symbol in symbols if not kline_map.get(symbol)]
+        missing_taker_symbols = [symbol for symbol in symbols if not taker_map.get(symbol)]
+
+        if missing_oi_symbols:
+            legacy_oi_map = _load_open_interest_model_map(
+                session,
+                BinanceOpenInterestHist,
+                missing_oi_symbols,
+                upper_bound=upper_bound,
+            )
+            for symbol in missing_oi_symbols:
                 oi_map[symbol] = legacy_oi_map.get(symbol, {})
-            if not kline_map.get(symbol):
+
+        if missing_kline_symbols:
+            legacy_kline_map = _load_kline_model_map(
+                session,
+                BinanceKline,
+                missing_kline_symbols,
+                upper_bound=upper_bound,
+            )
+            for symbol in missing_kline_symbols:
                 kline_map[symbol] = legacy_kline_map.get(symbol, {})
-            if not taker_map.get(symbol):
+
+        if missing_taker_symbols:
+            legacy_taker_map = _load_taker_vol_model_map(
+                session,
+                BinanceTakerBuySellVol,
+                missing_taker_symbols,
+                upper_bound=upper_bound,
+            )
+            for symbol in missing_taker_symbols:
                 taker_map[symbol] = legacy_taker_map.get(symbol, {})
 
     return oi_map, kline_map, taker_map

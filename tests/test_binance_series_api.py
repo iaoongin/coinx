@@ -146,3 +146,35 @@ def test_repair_tracked_binance_series_api_returns_summary(monkeypatch):
     payload = response.get_json()
     assert payload['status'] == 'success'
     assert payload['data']['success_count'] == 2
+
+
+def test_repair_tracked_binance_series_api_accepts_exchanges(monkeypatch):
+    captured = {}
+
+    def fake_repair(**kwargs):
+        captured.update(kwargs)
+        return {
+            'status': 'success',
+            'symbols': kwargs.get('symbols'),
+            'exchanges': kwargs.get('exchanges'),
+            'success_count': 1,
+            'failure_count': 0,
+            'results': [],
+        }
+
+    monkeypatch.setattr('coinx.web.routes.api_data.repair_tracked_symbols', fake_repair)
+    client = create_test_client()
+
+    response = client.post(
+        '/api/binance-series/repair-tracked',
+        json={
+            'symbols': ['BTCUSDT'],
+            'exchanges': ['binance', 'okx'],
+            'series_types': ['klines'],
+            'full_scan': True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured['symbols'] == ['BTCUSDT']
+    assert captured['exchanges'] == ['binance', 'okx']

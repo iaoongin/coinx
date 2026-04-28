@@ -42,7 +42,6 @@ def seed_series(
                 sum_open_interest=oi_base + index * oi_step,
                 sum_open_interest_value=(oi_base + index * oi_step) * close_price,
                 cmc_circulating_supply=None,
-                raw_json={},
             )
         )
         session.add(
@@ -60,7 +59,6 @@ def seed_series(
                 trade_count=10 + index,
                 taker_buy_base_volume=50 + index,
                 taker_buy_quote_volume=taker_buy_quote_base + index,
-                raw_json=[],
             )
         )
         if include_taker_vol:
@@ -72,7 +70,6 @@ def seed_series(
                     buy_sell_ratio=1.2 + index * 0.001,
                     buy_vol=taker_vol_base + index * taker_vol_step,
                     sell_vol=(taker_vol_base + index * taker_vol_step) * 0.8,
-                    raw_json={},
                 )
             )
     session.commit()
@@ -359,7 +356,6 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
                 event_time=event_time,
                 sum_open_interest=okx_oi,
                 sum_open_interest_value=okx_oi * (100.0 + index),
-                raw_json={},
             )
         )
         db_session.add(
@@ -371,7 +367,6 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
                 buy_sell_ratio=okx_buy / okx_sell,
                 buy_vol=okx_buy,
                 sell_vol=okx_sell,
-                raw_json={},
             )
         )
     db_session.commit()
@@ -418,7 +413,6 @@ def test_get_homepage_series_data_estimates_okx_open_interest_from_value(db_sess
                 event_time=event_time,
                 sum_open_interest=None,
                 sum_open_interest_value=1_000_000.0 + index * 1000.0,
-                raw_json={},
             )
         )
     db_session.commit()
@@ -466,7 +460,6 @@ def test_get_homepage_series_data_can_return_aggregate_metrics_without_reference
                 event_time=event_time,
                 sum_open_interest=1000.0 + index,
                 sum_open_interest_value=2000.0 + index,
-                raw_json={},
             )
         )
     db_session.commit()
