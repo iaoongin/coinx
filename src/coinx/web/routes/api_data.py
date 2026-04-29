@@ -13,9 +13,9 @@ from coinx.collector import (
     get_latest_price,
     get_long_short_ratio,
     get_open_interest,
+    refresh_market_tickers,
     repair_latest_tracked_symbols,
     repair_tracked_symbols,
-    update_market_tickers,
 )
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
 from coinx.config import (
@@ -407,6 +407,41 @@ def get_market_rank():
         logger.error(f'加载行情榜数据失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load market rank data: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/market-rank/refresh', methods=['POST'])
+def refresh_market_rank():
+    """手动触发行情榜快照刷新"""
+    logger.info('开始触发行情榜快照刷新')
+    try:
+        summary = refresh_market_tickers()
+        if summary.get('status') != 'success':
+            status = 409 if summary.get('status') == 'skipped' else 500
+            message = summary.get('message', 'market rank refresh failed')
+            if summary.get('status') == 'error':
+                message = f'failed to refresh market rank: {message}'
+            return (
+                jsonify(
+                    {
+                        'status': summary.get('status', 'error'),
+                        'message': message,
+                        'data': summary,
+                    }
+                ),
+                status,
+            )
+
+        return jsonify(
+            {
+                'status': 'success',
+                'message': 'market rank snapshot refreshed',
+                'data': summary,
+            }
+        )
+    except Exception as e:
+        logger.error(f'触发行情榜快照刷新失败: {e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to refresh market rank: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/binance-series/collect', methods=['POST'])

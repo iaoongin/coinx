@@ -20,6 +20,15 @@ test.describe('行情榜测试', () => {
     await expect(page.locator('body')).toContainText('-3.40%');
   });
 
+  test('行情榜刷新按钮会先刷新快照再重新加载数据', async ({ page }) => {
+    await visit(page, '/market-rank');
+    await expect(page.locator('body')).toContainText('-3.40%');
+
+    await button(page, '↻ 刷新').click();
+
+    await expect(page.locator('body')).toContainText('+3.40%');
+  });
+
   test('行情榜标题与状态操作在同一标题行，且无内嵌币种配置', async ({ page }) => {
     await visit(page, '/market-rank');
 

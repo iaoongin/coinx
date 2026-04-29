@@ -129,6 +129,25 @@ const mockMarketRankBase = [
   },
 ];
 
+const mockMarketRankRefreshed = [
+  {
+    symbol: 'BTCUSDT',
+    rank_index: 1,
+    price: 69888.88,
+    price_change_percent: 3.4,
+    volume: 223456.78,
+    quote_volume: 95432123.45,
+  },
+  {
+    symbol: 'ETHUSDT',
+    rank_index: 2,
+    price: 3621.45,
+    price_change_percent: 1.2,
+    volume: 198765.43,
+    quote_volume: 53000000.12,
+  },
+];
+
 const mockBinanceSeriesConfig = {
   collect: {
     limit: 30,
@@ -184,6 +203,8 @@ const test = base.extend({
       ETHUSDT: true,
       SOLUSDT: false,
     };
+    let marketRankSnapshot = mockMarketRankBase;
+    let marketRankSnapshotTime = '2026-04-07T01:00:00';
 
     await context.route('**/api/**', async (route) => {
       const request = route.request();
@@ -211,14 +232,32 @@ const test = base.extend({
         const direction = searchParams.get('direction');
         const data =
           direction === 'up'
-            ? mockMarketRankBase.map((item) => ({ ...item, price_change_percent: Math.abs(item.price_change_percent) }))
-            : mockMarketRankBase;
+            ? marketRankSnapshot.map((item) => ({ ...item, price_change_percent: Math.abs(item.price_change_percent) }))
+            : marketRankSnapshot;
         await route.fulfill(
           jsonResponse({
             status: 'success',
             message: 'market rank loaded',
             data,
-            snapshot_time: '2026-04-07T01:00:00',
+            snapshot_time: marketRankSnapshotTime,
+          })
+        );
+        return;
+      }
+
+      if (pathname === '/api/market-rank/refresh' && request.method() === 'POST') {
+        marketRankSnapshot = mockMarketRankRefreshed;
+        marketRankSnapshotTime = '2026-04-07T01:05:00';
+        await route.fulfill(
+          jsonResponse({
+            status: 'success',
+            message: 'market rank snapshot refreshed',
+            data: {
+              status: 'success',
+              message: 'market rank snapshot refreshed',
+              saved_count: marketRankSnapshot.length,
+              snapshot_time: marketRankSnapshotTime,
+            },
           })
         );
         return;

@@ -18,6 +18,7 @@ from coinx.collector.binance.service import (
     get_all_coins_list,
     update_all_data,
     update_market_tickers,
+    refresh_market_tickers,
     update_single_coin_data,
 )
 from coinx.collector.binance.cache import get_cache_update_time, should_update_cache

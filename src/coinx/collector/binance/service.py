@@ -1,6 +1,8 @@
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from coinx.config import TIME_INTERVALS
+from coinx.repositories.market_tickers import get_latest_close_time
 from coinx.utils import save_all_coins_data, logger
 from coinx.coin_manager import get_active_coins
 from .market import (
@@ -257,3 +259,48 @@ def update_market_tickers(force_update=False):
         logger.error(f"采集行情快照数据失败: {e}")
         logger.exception(e)
         return []
+
+
+MARKET_TICKERS_REFRESH_LOCK = threading.Lock()
+
+
+def refresh_market_tickers(force_update=False):
+    """Refresh market ticker snapshots and return a status payload."""
+    if not MARKET_TICKERS_REFRESH_LOCK.acquire(blocking=False):
+        logger.info("行情榜快照刷新正在执行，跳过重复触发")
+        return {
+            'status': 'skipped',
+            'message': 'market rank refresh already running',
+            'saved_count': 0,
+            'snapshot_time': get_latest_close_time(),
+        }
+
+    try:
+        records = update_market_tickers(force_update=force_update)
+        snapshot_time = get_latest_close_time()
+        if not records:
+            logger.warning("行情榜快照刷新未获取到有效数据")
+            return {
+                'status': 'error',
+                'message': 'market rank refresh returned no data',
+                'saved_count': 0,
+                'snapshot_time': snapshot_time,
+            }
+
+        return {
+            'status': 'success',
+            'message': 'market rank snapshot refreshed',
+            'saved_count': len(records),
+            'snapshot_time': snapshot_time,
+        }
+    except Exception as e:
+        logger.error(f"刷新行情榜快照失败: {e}")
+        logger.exception(e)
+        return {
+            'status': 'error',
+            'message': f'market rank refresh failed: {str(e)}',
+            'saved_count': 0,
+            'snapshot_time': get_latest_close_time(),
+        }
+    finally:
+        MARKET_TICKERS_REFRESH_LOCK.release()

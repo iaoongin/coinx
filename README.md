@@ -5,15 +5,17 @@ CoinX 是一个面向 Binance U 本位合约的币种监控项目，提供定时
 当前仓库已经可以跑通一套基础闭环：
 
 - 定时抓取合约市场数据
-- 展示首页监控面板、币种详情和跌幅榜
+- 展示首页监控面板、行情榜、币种详情和跌幅榜
 - 管理哪些交易对需要跟踪
 - 将市场快照写入数据库并保留最近批次
 
 ## Features
 
 - 默认每 5 分钟刷新一次市场数据
+- 行情榜会按定时任务自动刷新数据库快照，页面支持手动强制刷新一次
 - 每天 0 点同步一次 Binance 最新交易对列表
 - 支持持仓量、持仓价值、24h 涨跌、分周期持仓变化、主力净流入等指标
+- 提供行情榜页面
 - 提供跌幅榜页面
 - 提供币种配置页面，可切换交易对跟踪状态
 - 提供 Flask 页面和 JSON API
@@ -76,7 +78,7 @@ mysql -u root -p coinx < sql/schema.sql
 | --- | --- | --- |
 | `COINX_ENV` | 选择环境配置文件，例如 `dev` 会加载 `application-dev.yml` | `application.yml` 中的 `profiles.active`，默认是 `dev` |
 | `BINANCE_BASE_URL` | Binance API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/fapi.binance.com` |
-| `UPDATE_INTERVAL` | 定时刷新市场数据的间隔，单位为秒 | `300` |
+| `UPDATE_INTERVAL` | 定时刷新间隔，单位为秒，当前会同时用于市场数据与行情榜快照刷新 | `300` |
 | `TIME_INTERVALS` | 需要计算的时间周期列表，当前更建议放在 YAML 中配置，不建议直接用环境变量字符串覆盖 | `5m,15m,30m,1h,4h,12h,24h,48h,72h,168h` |
 | `USE_PROXY` | 是否启用 HTTP/HTTPS 代理，支持 `true/false/1/0/yes/no` | `false` |
 | `PROXY_HOST` | 代理主机地址 | `127.0.0.1` |
@@ -145,6 +147,8 @@ http://127.0.0.1:5000
 
 - `/`
   - 首页监控面板
+- `/market-rank`
+  - 行情榜，支持自动刷新和手动刷新快照
 - `/coins-config`
   - 币种配置管理
 - `/coin-detail`
@@ -156,6 +160,10 @@ http://127.0.0.1:5000
   - 获取已跟踪币种的展示数据
 - `GET /api/update`
   - 手动触发一次刷新
+- `GET /api/market-rank`
+  - 获取行情榜排行数据，按最新数据库快照排序返回
+- `POST /api/market-rank/refresh`
+  - 手动触发行情榜快照刷新，再供 `/api/market-rank` 读取最新结果
 - `GET /api/coin-detail/<symbol>`
   - 获取单币详情
 - `GET /api/coins-config`

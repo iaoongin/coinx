@@ -2,6 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from .collector import (
     get_all_24hr_tickers,
+    refresh_market_tickers,
     repair_rolling_tracked_symbols,
     run_history_repair_job,
     run_series_repair_job,
@@ -12,6 +13,7 @@ from .config import (
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
     FETCH_COINS_TOP_VOLUME_COUNT,
+    UPDATE_INTERVAL,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
     REPAIR_ROLLING_MAX_WORKERS,
@@ -23,6 +25,32 @@ from .utils import logger
 
 
 scheduler = BackgroundScheduler()
+
+
+@scheduler.scheduled_job(
+    'interval',
+    seconds=UPDATE_INTERVAL,
+    id='market_rank_refresh_job',
+    max_instances=1,
+    coalesce=True
+)
+def scheduled_market_rank_refresh():
+    """定时刷新行情榜快照数据"""
+    try:
+        summary = refresh_market_tickers()
+        if summary.get('status') == 'success':
+            logger.info(
+                f"行情榜快照定时刷新完成: 状态={summary.get('status')}, "
+                f"保存={summary.get('saved_count', 0)}, 快照时间={summary.get('snapshot_time')}"
+            )
+        else:
+            logger.warning(
+                f"行情榜快照定时刷新未成功: 状态={summary.get('status')}, "
+                f"消息={summary.get('message')}"
+            )
+    except Exception as e:
+        logger.error(f'行情榜快照定时刷新任务失败: {e}')
+        logger.exception(e)
 
 
 @scheduler.scheduled_job(

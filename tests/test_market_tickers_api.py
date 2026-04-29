@@ -93,3 +93,44 @@ def test_get_market_rank_api_error(monkeypatch):
     assert response.status_code == 500
     data = response.get_json()
     assert data['status'] == 'error'
+
+
+def test_refresh_market_rank_api_success(monkeypatch):
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.refresh_market_tickers',
+        lambda: {
+            'status': 'success',
+            'message': 'market rank snapshot refreshed',
+            'saved_count': 2,
+            'snapshot_time': 1700100000000,
+        },
+    )
+
+    client = create_test_client()
+    response = client.post('/api/market-rank/refresh')
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'success'
+    assert data['data']['saved_count'] == 2
+    assert data['data']['snapshot_time'] == 1700100000000
+
+
+def test_refresh_market_rank_api_error(monkeypatch):
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.refresh_market_tickers',
+        lambda: {
+            'status': 'error',
+            'message': 'market rank refresh failed',
+            'saved_count': 0,
+            'snapshot_time': None,
+        },
+    )
+
+    client = create_test_client()
+    response = client.post('/api/market-rank/refresh')
+
+    assert response.status_code == 500
+    data = response.get_json()
+    assert data['status'] == 'error'
+    assert 'failed to refresh market rank' in data['message']

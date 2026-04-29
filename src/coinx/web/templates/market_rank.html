@@ -326,9 +326,27 @@
         const currentDirection = ref('down');
 
         let countdownInterval = null;
+        let dataRefreshInterval = null;
+        const DATA_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
         const getApiUrl = () => {
           return `/api/market-rank?type=${currentRankType.value}&direction=${currentDirection.value}&limit=100`;
+        };
+
+        const refreshMarketRankSnapshot = async () => {
+          const response = await fetch('/api/market-rank/refresh', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          const result = await response.json();
+
+          if (result.status !== 'success') {
+            throw new Error(result.message || '行情榜刷新失败');
+          }
+
+          return result;
         };
 
         const formatPrice = (price) => {
@@ -360,11 +378,6 @@
           }
 
           const timeDiff = nextRefreshTime - now;
-          if (timeDiff <= 0) {
-            loadData();
-            return;
-          }
-
           const seconds = Math.floor(timeDiff / 1000);
           const minutes = Math.floor(seconds / 60);
           const secs = seconds % 60;
@@ -378,8 +391,16 @@
         };
 
         const loadData = async (force = false) => {
+          if (loading.value) {
+            return;
+          }
+
           loading.value = true;
           try {
+            if (force) {
+              await refreshMarketRankSnapshot();
+            }
+
             const response = await fetch(getApiUrl());
             const result = await response.json();
 
@@ -405,10 +426,12 @@
 
         onMounted(() => {
           loadData();
+          dataRefreshInterval = setInterval(() => loadData(false), DATA_REFRESH_INTERVAL_MS);
         });
 
         onUnmounted(() => {
           if (countdownInterval) clearInterval(countdownInterval);
+          if (dataRefreshInterval) clearInterval(dataRefreshInterval);
         });
 
         return {
