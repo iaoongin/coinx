@@ -93,6 +93,8 @@ BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://api.binance.com')
 ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx', list)
 PRIMARY_PRICE_EXCHANGE = get_env('PRIMARY_PRICE_EXCHANGE', 'binance')
 OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://www.okx.com')
+BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://api.bybit.com')
+BYBIT_CATEGORY = get_env('BYBIT_CATEGORY', 'linear')
 
 # 币种拉取任务配置
 FETCH_COINS_ENABLED = get_env('FETCH_COINS_ENABLED', True, bool)

@@ -389,6 +389,39 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['net_inflow']['5m'] == (3880.0 - 3104.0) + (1940.0 - 776.0)
 
 
+def test_get_homepage_series_data_uses_okx_hourly_taker_for_long_intervals(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    start_time = 1_700_000_000_000
+    full_history_points = 2017
+    seed_series(db_session, 'BTCUSDT', start_time, full_history_points, include_taker_vol=True)
+
+    current_time = start_time + (full_history_points - 1) * FIVE_MINUTES_MS
+    for offset in range(168):
+        event_time = current_time - offset * 60 * 60 * 1000
+        db_session.add(
+            MarketTakerBuySellVol(
+                exchange='okx',
+                symbol='BTCUSDT',
+                period='1H',
+                event_time=event_time,
+                buy_sell_ratio=2.5,
+                buy_vol=100.0,
+                sell_vol=40.0,
+            )
+        )
+    db_session.commit()
+
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
+    binance_only = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)[0]
+
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    with_okx = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)[0]
+
+    assert with_okx['net_inflow']['168h'] - binance_only['net_inflow']['168h'] == 168 * (100.0 - 40.0)
+    assert '48h' in with_okx['net_inflow']
+    assert '72h' in with_okx['net_inflow']
+
+
 def test_get_homepage_series_data_estimates_okx_open_interest_from_value(db_session, monkeypatch):
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
     start_time = 1_700_000_000_000

@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy import and_, func, or_
 
 from coinx.coin_manager import get_active_coins
+from coinx.collector.exchange_adapters import get_exchange_adapter
 from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS
 from coinx.database import get_session
 from coinx.models import (
@@ -167,6 +168,20 @@ def _get_exact_window(records_by_time, current_time, points, tolerance=10):
     return window
 
 
+def _get_exact_window_by_step(records_by_time, current_time, points, step_ms, tolerance=10):
+    window = []
+    missing = 0
+    for offset in range(points):
+        record = records_by_time.get(current_time - offset * step_ms)
+        if record is None:
+            missing += 1
+            if missing > tolerance:
+                return None
+        else:
+            window.append(record)
+    return window
+
+
 def _calc_net_inflow_from_taker_vol(window, price=None):
     if not window:
         return 0
@@ -185,6 +200,41 @@ def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time):
 
         inflow[interval] = _calc_net_inflow_from_taker_vol(window)
     return inflow
+
+
+def _period_to_ms(period):
+    if period.endswith('m'):
+        return int(period[:-1]) * 60 * 1000
+    if period.endswith('h') or period.endswith('H'):
+        return int(period[:-1]) * 60 * 60 * 1000
+    if period.endswith('d') or period.endswith('D'):
+        return int(period[:-1]) * 24 * 60 * 60 * 1000
+    raise ValueError(f'unsupported homepage period: {period}')
+
+
+def _calc_net_inflow_for_period(taker_vol_by_time, current_time, interval, period):
+    if not taker_vol_by_time:
+        return None
+
+    period_ms = _period_to_ms(period)
+    interval_ms = _interval_to_ms(interval)
+    points = interval_ms // period_ms
+    if points <= 0:
+        return None
+
+    if period == '5m':
+        period_current_time = current_time
+        if points == 1 and period_current_time not in taker_vol_by_time:
+            return None
+    else:
+        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
+        if not available_times:
+            return None
+        period_current_time = max(available_times)
+    window = _get_exact_window_by_step(taker_vol_by_time, period_current_time, points, period_ms)
+    if not window:
+        return None
+    return _calc_net_inflow_from_taker_vol(window)
 
 
 def _has_required_change_coverage(oi_by_time, kline_by_time, current_time):
@@ -536,11 +586,11 @@ def _load_recent_taker_buy_sell_vol(session, symbol, upper_bound=None):
     return {int(row.event_time): _build_taker_buy_sell_vol_point(row) for row in rows}
 
 
-def _get_recent_lower_bound(session, model, symbols, time_field_name, upper_bound=None, exchange=None):
+def _get_recent_lower_bound(session, model, symbols, time_field_name, upper_bound=None, exchange=None, period='5m'):
     time_field = getattr(model, time_field_name)
     query = session.query(func.max(time_field)).filter(
         model.symbol.in_(symbols),
-        model.period == '5m',
+        model.period == period,
     )
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
@@ -716,7 +766,7 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
     return records_by_symbol
 
 
-def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchange=None):
+def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchange=None, period='5m'):
     if not symbols:
         return {}
 
@@ -731,7 +781,7 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
                 model.sell_vol,
             ).filter(
                 model.symbol == symbol,
-                model.period == '5m',
+                model.period == period,
             )
             if hasattr(model, 'exchange') and exchange is not None:
                 query = query.filter(model.exchange == exchange)
@@ -751,6 +801,7 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         time_field_name='event_time',
         upper_bound=upper_bound,
         exchange=exchange,
+        period=period,
     )
     query = session.query(
         model.symbol,
@@ -758,7 +809,7 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         model.buy_sell_ratio,
         model.buy_vol,
         model.sell_vol,
-    ).filter(model.symbol.in_(symbols), model.period == '5m')
+    ).filter(model.symbol.in_(symbols), model.period == period)
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
     if upper_bound is not None:
@@ -775,6 +826,19 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
 
 def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     exchange = exchange.lower()
+    try:
+        adapter = get_exchange_adapter(exchange)
+        taker_periods = sorted(
+            {
+                adapter.taker_period_for_interval(interval)
+                for interval in TIME_INTERVALS
+                if adapter.taker_period_for_interval(interval)
+            }
+        )
+    except Exception:
+        adapter = None
+        taker_periods = ['5m']
+
     oi_map = _load_open_interest_model_map(
         session,
         MarketOpenInterestHist,
@@ -789,18 +853,26 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         upper_bound=upper_bound,
         exchange=exchange,
     )
-    taker_map = _load_taker_vol_model_map(
-        session,
-        MarketTakerBuySellVol,
-        symbols,
-        upper_bound=upper_bound,
-        exchange=exchange,
-    )
+    taker_maps_by_period = {
+        period: _load_taker_vol_model_map(
+            session,
+            MarketTakerBuySellVol,
+            symbols,
+            upper_bound=upper_bound,
+            exchange=exchange,
+            period=period,
+        )
+        for period in taker_periods
+    }
 
     if exchange == 'binance':
         missing_oi_symbols = [symbol for symbol in symbols if not oi_map.get(symbol)]
         missing_kline_symbols = [symbol for symbol in symbols if not kline_map.get(symbol)]
-        missing_taker_symbols = [symbol for symbol in symbols if not taker_map.get(symbol)]
+        missing_taker_symbols = [
+            symbol
+            for symbol in symbols
+            if not (taker_maps_by_period.get('5m') or {}).get(symbol)
+        ]
 
         if missing_oi_symbols:
             legacy_oi_map = _load_open_interest_model_map(
@@ -828,11 +900,13 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
                 BinanceTakerBuySellVol,
                 missing_taker_symbols,
                 upper_bound=upper_bound,
+                period='5m',
             )
+            taker_maps_by_period.setdefault('5m', {})
             for symbol in missing_taker_symbols:
-                taker_map[symbol] = legacy_taker_map.get(symbol, {})
+                taker_maps_by_period['5m'][symbol] = legacy_taker_map.get(symbol, {})
 
-    return oi_map, kline_map, taker_map
+    return oi_map, kline_map, taker_maps_by_period
 
 
 def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
@@ -852,24 +926,24 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
     primary_kline_map = exchange_maps[primary_exchange][1]
 
     aggregate_oi_map = {symbol: {} for symbol in symbols}
-    aggregate_taker_map = {symbol: {} for symbol in symbols}
     coverage_map = {
-        symbol: {'source_exchanges': [], 'missing_exchanges': [], 'open_interest_by_exchange': {}}
+        symbol: {'source_exchanges': [], 'missing_exchanges': [], 'open_interest_by_exchange': {}, 'net_inflow': {}}
         for symbol in symbols
     }
 
     for symbol in symbols:
         oi_times = set()
-        taker_times = set()
-        for exchange, (oi_map, _kline_map, taker_map) in exchange_maps.items():
+        for exchange, (oi_map, _kline_map, taker_maps_by_period) in exchange_maps.items():
             symbol_oi = oi_map.get(symbol, {})
-            symbol_taker = taker_map.get(symbol, {})
+            symbol_taker = any(
+                period_map.get(symbol)
+                for period_map in (taker_maps_by_period or {}).values()
+            )
             if symbol_oi or symbol_taker:
                 coverage_map[symbol]['source_exchanges'].append(exchange)
             else:
                 coverage_map[symbol]['missing_exchanges'].append(exchange)
             oi_times.update(symbol_oi.keys())
-            taker_times.update(symbol_taker.keys())
 
         for event_time in oi_times:
             exchange_points = {}
@@ -886,15 +960,37 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 *exchange_points.values()
             )
 
-        for event_time in taker_times:
-            aggregate_taker_map[symbol][event_time] = _merge_taker_points(
-                *[
-                    exchange_maps[exchange][2].get(symbol, {}).get(event_time)
-                    for exchange in exchange_maps
-                ]
-            )
+        common_times = sorted(set(aggregate_oi_map[symbol]).intersection(primary_kline_map.get(symbol, {})))
+        current_time = common_times[-1] if common_times else (max(aggregate_oi_map[symbol]) if aggregate_oi_map[symbol] else None)
+        exchange_taker_inflow = {}
+        if current_time is not None:
+            for exchange, (_oi_map, _kline_map, taker_maps_by_period) in exchange_maps.items():
+                try:
+                    adapter = get_exchange_adapter(exchange)
+                except Exception:
+                    adapter = None
+                if adapter is None:
+                    continue
+                exchange_taker_inflow[exchange] = {}
+                for interval in TIME_INTERVALS:
+                    period = adapter.taker_period_for_interval(interval)
+                    if not period:
+                        continue
+                    taker_by_time = (taker_maps_by_period or {}).get(period, {}).get(symbol, {})
+                    inflow = _calc_net_inflow_for_period(taker_by_time, current_time, interval, period)
+                    if inflow is not None:
+                        exchange_taker_inflow[exchange][interval] = inflow
 
-    return aggregate_oi_map, primary_kline_map, aggregate_taker_map, coverage_map
+        for interval in TIME_INTERVALS:
+            interval_values = [
+                inflow_by_interval[interval]
+                for inflow_by_interval in exchange_taker_inflow.values()
+                if interval in inflow_by_interval
+            ]
+            if interval_values:
+                coverage_map[symbol]['net_inflow'][interval] = sum(interval_values)
+
+    return aggregate_oi_map, primary_kline_map, {}, coverage_map
 
 
 def _load_homepage_series_maps(session, symbols, upper_bound=None):
@@ -908,9 +1004,9 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
         return None
 
     current_time = common_times[-1] if common_times else oi_times[-1]
-    net_inflow = {}
+    net_inflow = dict((coverage or {}).get('net_inflow') or {})
 
-    if taker_vol_by_time and any(taker_vol_by_time.values()):
+    if not net_inflow and taker_vol_by_time and any(taker_vol_by_time.values()):
         net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
 
     current_oi = oi_by_time[current_time]

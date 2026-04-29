@@ -22,27 +22,48 @@ FIVE_MINUTES_MS = 5 * 60 * 1000
 _history_symbol_cursor = 0
 
 
+def _period_to_ms(period):
+    if period.endswith('m'):
+        return int(period[:-1]) * 60 * 1000
+    if period.endswith('h'):
+        return int(period[:-1]) * 60 * 60 * 1000
+    if period.endswith('H'):
+        return int(period[:-1]) * 60 * 60 * 1000
+    if period.endswith('d'):
+        return int(period[:-1]) * 24 * 60 * 60 * 1000
+    if period.endswith('D'):
+        return int(period[:-1]) * 24 * 60 * 60 * 1000
+    raise ValueError(f'unsupported repair period: {period}')
+
+
+def latest_closed_period_open_time(now_ms, period):
+    period_ms = _period_to_ms(period)
+    return max(0, now_ms - (now_ms % period_ms) - period_ms)
+
+
 def latest_closed_5m_open_time(now_ms):
-    return max(0, now_ms - (now_ms % FIVE_MINUTES_MS) - FIVE_MINUTES_MS)
+    return latest_closed_period_open_time(now_ms, '5m')
 
 
 def _get_time_field(series_type):
     return 'open_time' if series_type == 'klines' else 'event_time'
 
 
-def _build_rolling_target_times(now_ms, points):
-    latest_time = latest_closed_5m_open_time(now_ms)
+def _build_rolling_target_times(now_ms, points, period='5m'):
+    period_ms = _period_to_ms(period)
+    latest_time = latest_closed_period_open_time(now_ms, period)
     return [
-        latest_time - offset * FIVE_MINUTES_MS
+        latest_time - offset * period_ms
         for offset in range(max(1, int(points or 1)))
-        if latest_time - offset * FIVE_MINUTES_MS >= 0
+        if latest_time - offset * period_ms >= 0
     ]
 
 
-def _group_contiguous_times(times):
+def _group_contiguous_times(times, period='5m'):
+    period_ms = _period_to_ms(period)
     groups = []
     for timestamp in sorted(set(times)):
-        if not groups or timestamp != groups[-1][-1] + FIVE_MINUTES_MS:
+        if not groups or timestamp != groups[-1][-1] + period_ms:
             groups.append([timestamp])
         else:
             groups[-1].append(timestamp)
@@ -50,21 +71,25 @@ def _group_contiguous_times(times):
 
 
 def _trim_unclosed_records(series_type, records, now_ms, period=HOMEPAGE_SERIES_REPAIR_PERIOD):
-    if not records or period != '5m':
+    if not records:
         return records
     if series_type == 'klines':
         return [record for record in records if record.get('close_time') is not None and record.get('close_time') <= now_ms]
-    cutoff_time = latest_closed_5m_open_time(now_ms)
+    cutoff_time = latest_closed_period_open_time(now_ms, period)
     time_field = _get_time_field(series_type)
     return [record for record in records if record.get(time_field) is not None and record.get(time_field) <= cutoff_time]
 
 
-def _page_limit(series_type):
+def _page_limit(series_type, adapter=None):
+    if adapter is not None and hasattr(adapter, 'page_limit'):
+        adapter_limit = adapter.page_limit(series_type)
+        if adapter_limit:
+            return adapter_limit
     return 1000 if series_type == 'klines' else 500
 
 
-def _page_end_time(start_time, end_time, page_limit):
-    return min(end_time, start_time + max(page_limit - 1, 0) * FIVE_MINUTES_MS)
+def _page_end_time(start_time, end_time, page_limit, period='5m'):
+    return min(end_time, start_time + max(page_limit - 1, 0) * _period_to_ms(period))
 
 
 def _active_series_types(adapter, series_types):
@@ -138,14 +163,14 @@ def _run_tasks(tasks, worker_func, max_workers, db_session=None):
     return results
 
 
-def _repair_rolling_series(adapter, symbol, series_type, target_times, now_ms, http_session=None, db_session=None):
+def _repair_rolling_series(adapter, symbol, series_type, period, target_times, now_ms, http_session=None, db_session=None):
     time_field = _get_time_field(series_type)
     affected = 0
     repaired_records = 0
     pages = 0
     window_precise = adapter.supports_time_window(series_type)
 
-    groups = _group_contiguous_times(target_times) if window_precise else [sorted(set(target_times))]
+    groups = _group_contiguous_times(target_times, period=period) if window_precise else [sorted(set(target_times))]
     for group in groups:
         start_time = group[0] if window_precise else None
         end_time = group[-1] if window_precise else None
@@ -153,14 +178,14 @@ def _repair_rolling_series(adapter, symbol, series_type, target_times, now_ms, h
         payload = adapter.fetch_series_payload(
             series_type=series_type,
             symbol=symbol,
-            period=HOMEPAGE_SERIES_REPAIR_PERIOD,
+            period=period,
             limit=limit,
             session=http_session,
             start_time=start_time,
             end_time=end_time,
         )
-        records = adapter.parse_series_payload(series_type, payload, symbol, HOMEPAGE_SERIES_REPAIR_PERIOD)
-        records = _trim_unclosed_records(series_type, records, now_ms)
+        records = adapter.parse_series_payload(series_type, payload, symbol, period)
+        records = _trim_unclosed_records(series_type, records, now_ms, period=period)
         expected_times = set(group)
         filtered_records = [record for record in records if record.get(time_field) in expected_times]
         if not filtered_records:
@@ -174,7 +199,7 @@ def _repair_rolling_series(adapter, symbol, series_type, target_times, now_ms, h
         'exchange': adapter.exchange_id,
         'symbol': symbol,
         'series_type': series_type,
-        'period': HOMEPAGE_SERIES_REPAIR_PERIOD,
+        'period': period,
         'status': 'success',
         'mode': 'rolling',
         'window_precise': window_precise,
@@ -199,15 +224,16 @@ def repair_rolling_symbols(
     target_exchanges = exchanges or ENABLED_EXCHANGES
     adapters = get_exchange_adapters(target_exchanges)
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    target_times = _build_rolling_target_times(current_time_ms, points or REPAIR_ROLLING_POINTS)
     worker_count = max_workers if max_workers is not None else REPAIR_ROLLING_MAX_WORKERS
     started_at = time.perf_counter()
     results = []
     tasks = []
     precheck_skipped_count = 0
+    all_target_times = set()
 
     for adapter in adapters:
         for series_type in _active_series_types(adapter, series_types):
+            periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             supported_symbols = []
             for symbol in target_symbols:
                 if adapter.supports_symbol(symbol, series_type=series_type, session=http_session):
@@ -220,53 +246,57 @@ def repair_rolling_symbols(
                             series_type,
                             mode='rolling',
                             window_precise=adapter.supports_time_window(series_type),
-                            extra={'target_times': sorted(target_times)},
+                            extra={'target_times': []},
                         )
                     )
             if not supported_symbols:
                 continue
-            existing_by_symbol = get_existing_series_timestamps(
-                exchange=adapter.exchange_id,
-                series_type=series_type,
-                symbols=supported_symbols,
-                timestamps=target_times,
-                period=HOMEPAGE_SERIES_REPAIR_PERIOD,
-                session=db_session,
-            )
-            for symbol in supported_symbols:
-                missing_times = [
-                    timestamp
-                    for timestamp in target_times
-                    if timestamp not in existing_by_symbol.get(symbol, set())
-                ]
-                if not missing_times:
-                    precheck_skipped_count += 1
-                    results.append(
-                        {
-                            'exchange': adapter.exchange_id,
-                            'symbol': symbol,
-                            'series_type': series_type,
-                            'period': HOMEPAGE_SERIES_REPAIR_PERIOD,
-                            'status': 'skipped',
-                            'mode': 'rolling',
-                            'reason': 'rolling window already complete',
-                            'window_precise': adapter.supports_time_window(series_type),
-                            'affected': 0,
-                            'records': 0,
-                            'pages': 0,
-                            'target_times': sorted(target_times),
-                        }
-                    )
-                else:
-                    tasks.append(
-                        {
-                            'adapter': adapter,
-                            'exchange': adapter.exchange_id,
-                            'symbol': symbol,
-                            'series_type': series_type,
-                            'target_times': missing_times,
-                        }
-                    )
+            for period in periods:
+                target_times = _build_rolling_target_times(current_time_ms, points or REPAIR_ROLLING_POINTS, period=period)
+                all_target_times.update(target_times)
+                existing_by_symbol = get_existing_series_timestamps(
+                    exchange=adapter.exchange_id,
+                    series_type=series_type,
+                    symbols=supported_symbols,
+                    timestamps=target_times,
+                    period=period,
+                    session=db_session,
+                )
+                for symbol in supported_symbols:
+                    missing_times = [
+                        timestamp
+                        for timestamp in target_times
+                        if timestamp not in existing_by_symbol.get(symbol, set())
+                    ]
+                    if not missing_times:
+                        precheck_skipped_count += 1
+                        results.append(
+                            {
+                                'exchange': adapter.exchange_id,
+                                'symbol': symbol,
+                                'series_type': series_type,
+                                'period': period,
+                                'status': 'skipped',
+                                'mode': 'rolling',
+                                'reason': 'rolling window already complete',
+                                'window_precise': adapter.supports_time_window(series_type),
+                                'affected': 0,
+                                'records': 0,
+                                'pages': 0,
+                                'target_times': sorted(target_times),
+                            }
+                        )
+                    else:
+                        tasks.append(
+                            {
+                                'adapter': adapter,
+                                'exchange': adapter.exchange_id,
+                                'symbol': symbol,
+                                'series_type': series_type,
+                                'period': period,
+                                'target_times': missing_times,
+                            }
+                        )
 
     def worker(task, db_session=None):
         own_session = db_session is None
@@ -276,6 +306,7 @@ def repair_rolling_symbols(
                 adapter=task['adapter'],
                 symbol=task['symbol'],
                 series_type=task['series_type'],
+                period=task['period'],
                 target_times=task['target_times'],
                 now_ms=current_time_ms,
                 http_session=http_session if db_session is not None else None,
@@ -290,7 +321,7 @@ def repair_rolling_symbols(
                 'exchange': task['exchange'],
                 'symbol': task['symbol'],
                 'series_type': task['series_type'],
-                'period': HOMEPAGE_SERIES_REPAIR_PERIOD,
+                'period': task['period'],
                 'status': 'error',
                 'mode': 'rolling',
                 'error': str(exc),
@@ -308,7 +339,7 @@ def repair_rolling_symbols(
         results=results,
         started_at=started_at,
         extra={
-            'target_times': sorted(target_times),
+            'target_times': sorted(all_target_times),
             'precheck_skipped_count': precheck_skipped_count,
         },
     )
@@ -350,39 +381,47 @@ def repair_history_symbols(
     adapters = get_exchange_adapters(target_exchanges)
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     effective_coverage_hours = coverage_hours or REPAIR_HISTORY_COVERAGE_HOURS
-    target_end_time = latest_closed_5m_open_time(current_time_ms)
-    target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
     worker_count = max_workers if max_workers is not None else REPAIR_HISTORY_MAX_WORKERS
     started_at = time.perf_counter()
     tasks = []
     skipped_results = []
+    summary_end_time = latest_closed_5m_open_time(current_time_ms)
+    summary_start_time = max(0, summary_end_time - effective_coverage_hours * 60 * 60 * 1000)
 
     for adapter in adapters:
         for series_type in _active_series_types(adapter, series_types):
-            for symbol in target_symbols:
-                if not adapter.supports_symbol(symbol, series_type=series_type, session=http_session):
-                    skipped_results.append(
-                        _unsupported_symbol_result(
-                            adapter,
-                            symbol,
-                            series_type,
-                            mode='history',
-                            window_precise=adapter.supports_time_window(series_type),
-                            extra={
-                                'start_time': target_start_time,
-                                'end_time': target_end_time,
-                            },
+            periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
+            for period in periods:
+                target_end_time = latest_closed_period_open_time(current_time_ms, period)
+                target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
+                for symbol in target_symbols:
+                    if not adapter.supports_symbol(symbol, series_type=series_type, session=http_session):
+                        skipped_results.append(
+                            _unsupported_symbol_result(
+                                adapter,
+                                symbol,
+                                series_type,
+                                mode='history',
+                                window_precise=adapter.supports_time_window(series_type),
+                                extra={
+                                    'period': period,
+                                    'start_time': target_start_time,
+                                    'end_time': target_end_time,
+                                },
+                            )
                         )
+                        continue
+                    tasks.append(
+                        {
+                            'adapter': adapter,
+                            'exchange': adapter.exchange_id,
+                            'symbol': symbol,
+                            'series_type': series_type,
+                            'period': period,
+                            'start_time': target_start_time,
+                            'end_time': target_end_time,
+                        }
                     )
-                    continue
-                tasks.append(
-                    {
-                    'adapter': adapter,
-                    'exchange': adapter.exchange_id,
-                    'symbol': symbol,
-                    'series_type': series_type,
-                    }
-                )
 
     def worker(task, db_session=None):
         own_session = db_session is None
@@ -390,18 +429,21 @@ def repair_history_symbols(
         window_precise = task['adapter'].supports_time_window(task['series_type'])
         try:
             time_field = _get_time_field(task['series_type'])
-            limit = _page_limit(task['series_type'])
+            limit = _page_limit(task['series_type'], adapter=task['adapter'])
+            period = task['period']
+            target_start_time = task['start_time']
+            target_end_time = task['end_time']
             cursor_time = target_start_time
             affected = 0
             record_count = 0
             pages = 0
 
             while cursor_time <= target_end_time:
-                page_end_time = _page_end_time(cursor_time, target_end_time, limit) if window_precise else None
+                page_end_time = _page_end_time(cursor_time, target_end_time, limit, period=period) if window_precise else None
                 payload = task['adapter'].fetch_series_payload(
                     series_type=task['series_type'],
                     symbol=task['symbol'],
-                    period=HOMEPAGE_SERIES_REPAIR_PERIOD,
+                    period=period,
                     limit=limit,
                     session=http_session if db_session is not None else None,
                     start_time=cursor_time if window_precise else None,
@@ -411,9 +453,9 @@ def repair_history_symbols(
                     task['series_type'],
                     payload,
                     task['symbol'],
-                    HOMEPAGE_SERIES_REPAIR_PERIOD,
+                    period,
                 )
-                records = _trim_unclosed_records(task['series_type'], records, current_time_ms)
+                records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
                 current_end_time = page_end_time if window_precise else target_end_time
                 filtered_records = [
                     record
@@ -432,13 +474,13 @@ def repair_history_symbols(
 
                 if not window_precise:
                     break
-                cursor_time = page_end_time + FIVE_MINUTES_MS
+                cursor_time = page_end_time + _period_to_ms(period)
 
             return {
                 'exchange': task['exchange'],
                 'symbol': task['symbol'],
                 'series_type': task['series_type'],
-                'period': HOMEPAGE_SERIES_REPAIR_PERIOD,
+                'period': period,
                 'status': 'success',
                 'mode': 'history',
                 'window_precise': window_precise,
@@ -457,7 +499,7 @@ def repair_history_symbols(
                 'exchange': task['exchange'],
                 'symbol': task['symbol'],
                 'series_type': task['series_type'],
-                'period': HOMEPAGE_SERIES_REPAIR_PERIOD,
+                'period': task['period'],
                 'status': 'error',
                 'mode': 'history',
                 'window_precise': window_precise,
@@ -477,8 +519,8 @@ def repair_history_symbols(
         started_at=started_at,
         extra={
             'coverage_hours': effective_coverage_hours,
-            'start_time': target_start_time,
-            'end_time': target_end_time,
+            'start_time': summary_start_time,
+            'end_time': summary_end_time,
             'full_scan': full_scan,
         },
     )
