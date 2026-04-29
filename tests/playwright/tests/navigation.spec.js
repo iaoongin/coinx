@@ -20,8 +20,8 @@ test.describe('导航栏契约', () => {
   test('点击导航可以跳转到对应页面', async ({ page }) => {
     await visit(page, '/');
 
-    for (const item of NAV_ITEMS) {
-      await page.getByRole('link', { name: item.name }).click();
+    for (const item of navLinks(page)) {
+      await item.locator.click();
       await expect(page).toHaveURL(new RegExp(`${item.href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\?)`));
     }
   });
@@ -30,8 +30,8 @@ test.describe('导航栏契约', () => {
     for (const path of pages) {
       await visit(page, path);
 
-      for (const item of NAV_ITEMS) {
-        await expect(page.getByRole('link', { name: item.name })).toBeVisible();
+      for (const item of navLinks(page)) {
+        await expect(item.locator).toBeVisible();
       }
     }
   });

@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, redirect, render_template, url_for
 
 from coinx.utils import logger
 
@@ -8,14 +8,20 @@ pages_bp = Blueprint('pages', __name__)
 
 @pages_bp.route('/')
 def index():
-    logger.info("访问首页")
+    logger.info("访问多周期矩阵页面")
     return render_template('index.html')
 
 
 @pages_bp.route('/new-home')
 def new_home():
-    logger.info("visit new home")
-    return render_template('new_home.html')
+    logger.info("访问多周期矩阵兼容入口，重定向到默认首页")
+    return redirect(url_for('pages.index'))
+
+
+@pages_bp.route('/legacy-home')
+def legacy_home():
+    logger.info("访问旧首页")
+    return render_template('legacy_home.html')
 
 
 @pages_bp.route('/coins-config')

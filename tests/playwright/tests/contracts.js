@@ -21,11 +21,14 @@ function heading(page, name, level) {
 }
 
 function button(page, name) {
-  return page.getByRole('button', { name: new RegExp(escapeRegExp(name)) });
+  return page.getByRole('button', { name: new RegExp(`^${escapeRegExp(name)}$`) });
 }
 
 function link(page, name) {
-  return page.getByRole('link', { name: new RegExp(escapeRegExp(name)) });
+  if (name === '首页') {
+    return page.locator('a[href="/"]');
+  }
+  return page.getByRole('link', { name: new RegExp(`^${escapeRegExp(name)}$`) });
 }
 
 function testId(page, id) {
@@ -35,7 +38,7 @@ function testId(page, id) {
 function navLinks(page) {
   return NAV_ITEMS.map((item) => ({
     ...item,
-    locator: link(page, item.name),
+    locator: page.locator(`a[href="${item.href}"]`),
   }));
 }
 

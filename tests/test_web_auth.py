@@ -52,7 +52,7 @@ def test_login_allows_access_to_protected_page():
     assert page_response.status_code == 200
 
 
-def test_login_allows_access_to_new_home_page():
+def test_new_home_redirects_to_default_home():
     client = create_test_client()
     auth_context = auth_module.get_auth_context()
 
@@ -65,9 +65,9 @@ def test_login_allows_access_to_new_home_page():
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/new-home')
 
-    page_response = client.get('/new-home')
-    assert page_response.status_code == 200
-    assert '新首页'.encode('utf-8') in page_response.data
+    page_response = client.get('/new-home', follow_redirects=False)
+    assert page_response.status_code == 302
+    assert page_response.headers['Location'].endswith('/')
 
 
 def test_login_rejects_wrong_username():

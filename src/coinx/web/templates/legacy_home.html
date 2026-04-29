@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>旧首页 - CoinX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --page-max-width: 1680px;
+      --page-padding: clamp(8px, 1.1vw, 16px);
+    }
+
+    body {
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+      margin: 0;
+      padding: var(--page-padding);
+    }
+
+    #app {
+      width: min(var(--page-max-width), calc(100vw - var(--page-padding) * 2));
+      max-width: none;
+      margin: 12px auto;
+    }
+
+    .shell {
+      background: var(--bg-card);
+      border-radius: var(--card-radius-lg);
+      box-shadow: var(--shadow-card);
+      border: 1px solid var(--border-default);
+      padding: 14px;
+      margin-bottom: 16px;
+      animation: fadeInUp 0.5s ease;
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .header-left {
+      flex: 1;
+    }
+
+    .header-row h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+
+    .header-row h1 span {
+      color: var(--gold-primary);
+    }
+
+    .header-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .right-header-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .time-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      text-align: right;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .time-info .label {
+      opacity: 0.7;
+    }
+
+    .time-info .value {
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    .positive { color: var(--positive) !important; font-weight: 600; font-family: var(--font-mono); }
+    .negative { color: var(--negative) !important; font-weight: 600; font-family: var(--font-mono); }
+
+    .table-wrapper {
+      margin-top: 14px;
+      border-radius: 8px;
+      overflow-x: hidden;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+    }
+
+    .mini-chart {
+      width: 46px;
+      height: 24px;
+      margin: 0 auto;
+    }
+
+    table {
+      width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+      background: var(--bg-secondary);
+    }
+
+    col.symbol-col { width: 5%; }
+    col.exchange-col { width: 12.5%; }
+    col.type-col { width: 6%; }
+    col.trend-col { width: 4.6%; }
+    col.current-col { width: 6.4%; }
+    col.interval-col { width: 6.55%; }
+
+    thead th {
+      background: var(--bg-elevated);
+      padding: 11px 6px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-primary);
+      border: none;
+      white-space: nowrap;
+    }
+
+    thead th:first-child {
+      text-align: left;
+      padding-left: 16px;
+    }
+
+    tbody td {
+      padding: 9px 6px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: middle;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    tbody td:first-child {
+      text-align: left;
+      padding-left: 8px;
+    }
+
+    td.symbol-cell {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      background: var(--bg-secondary) !important;
+    }
+
+    td.exchange-oi-cell {
+      min-width: 0;
+      max-width: none;
+      text-align: left;
+      background: var(--bg-secondary) !important;
+      border-right: 1px solid var(--border-subtle);
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    .exchange-oi-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .exchange-oi-item {
+      display: grid;
+      grid-template-columns: minmax(52px, 1fr) minmax(0, 1.8fr);
+      align-items: baseline;
+      gap: 4px;
+      min-width: 0;
+      line-height: 1.15;
+    }
+
+    .exchange-oi-name {
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: left;
+    }
+
+    .exchange-oi-main {
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+      text-align: right;
+    }
+
+    .exchange-oi-share {
+      color: var(--gold-primary);
+      margin-left: 2px;
+    }
+
+    .exchange-oi-empty {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    td.type-cell {
+      color: var(--text-primary);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      text-align: center !important;
+    }
+
+    td.change-cell {
+      font-size: 12px;
+      word-break: break-word;
+    }
+
+    td.change-cell .ratio {
+      font-weight: 600;
+      font-family: var(--font-mono);
+      margin-bottom: 1px;
+      line-height: 1.15;
+    }
+
+    td.change-cell .value {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      line-height: 1.15;
+      overflow-wrap: anywhere;
+    }
+
+    /* 币种组分隔线 */
+    .coin-group-end td {
+      border-bottom: 2px solid var(--border-default);
+    }
+
+/* 币种组分隔线 */
+    .coin-group-end td {
+      border-bottom: 1px solid var(--border-default);
+    }
+
+    /* 表格统一背景 */
+    tbody td {
+      background: var(--bg-secondary);
+    }
+
+    .coin-group-alt td.symbol-cell {
+      background: var(--bg-card) !important;
+    }
+
+    /* 所有单元格默认背景 */
+    
+
+    .coin-link {
+      color: var(--gold-primary);
+      text-decoration: none;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      transition: all var(--transition-fast);
+    }
+
+    .coin-link:hover {
+      color: var(--gold-bright);
+      text-decoration: underline;
+    }
+
+    .countdown {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--gold-primary);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-fast);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      color: #080808;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.4);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .no-data, .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .loading::after {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      margin-left: 8px;
+      border: 2px solid var(--border-default);
+      border-top-color: var(--gold-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 768px) {
+      .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .right-header-section {
+        align-self: flex-end;
+      }
+    }
+
+    @media (max-width: 1280px) {
+      thead th {
+        padding: 9px 4px;
+        font-size: 10px;
+      }
+
+      tbody td {
+        padding: 8px 4px;
+        font-size: 11px;
+      }
+
+      td.symbol-cell {
+        font-size: 12px;
+      }
+
+      .exchange-oi-name {
+        font-size: 9px;
+      }
+
+      .exchange-oi-main {
+        font-size: 10px;
+      }
+
+      td.type-cell {
+        font-size: 10px;
+      }
+
+      td.change-cell {
+        font-size: 10px;
+      }
+
+      td.change-cell .value {
+        font-size: 9px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    {% include 'components/nav.html' %}
+
+    <div class="shell">
+{% raw %}
+      <div class="header-row">
+        <div class="header-left">
+          <h1><span>◈</span> 旧首页</h1>
+          <div class="header-subtitle">USDT 本位合约 · 持仓量与主力净流入</div>
+        </div>
+        <div class="right-header-section">
+          <div class="time-info">
+            <div><span class="label">最后更新</span></div>
+            <div class="value">{{ lastUpdateTime || '--' }}</div>
+            <div style="margin-top: 4px;"><span class="label">刷新倒计时</span></div>
+            <div class="value countdown">{{ countdown }}</div>
+          </div>
+          <button class="btn btn-primary" @click="loadData(true)">
+            ↻ 刷新
+          </button>
+        </div>
+      </div>
+
+      <div class="table-wrapper" v-if="tableData.length > 0">
+        <table>
+          <colgroup>
+            <col class="symbol-col">
+            <col class="exchange-col">
+            <col class="type-col">
+            <col class="trend-col">
+            <col class="current-col">
+            <col v-for="interval in intervals" :key="interval" class="interval-col">
+          </colgroup>
+          <thead>
+            <tr>
+              <th style="position: sticky; left: 0; z-index: 20; background: inherit;">币种</th>
+              <th>交易所持仓</th>
+              <th>类型</th>
+              <th>趋势</th>
+              <th>当前</th>
+              <th v-for="interval in intervals" :key="interval">{{ interval }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="(coin, index) in tableData" :key="coin.symbol">
+              <tr class="coin-group">
+                <td :rowspan="4" class="symbol-cell">
+                  <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-link">{{ coin.symbol.replace('USDT', '') }}</a>
+                </td>
+                <td :rowspan="4" class="exchange-oi-cell">
+                  <div v-if="coin.exchange_open_interest && coin.exchange_open_interest.length" class="exchange-oi-list">
+                    <div v-for="item in coin.exchange_open_interest" :key="item.exchange" class="exchange-oi-item">
+                      <span class="exchange-oi-name">{{ formatExchangeName(item.exchange) }}</span>
+                      <span class="exchange-oi-main">
+                        {{ item.open_interest_formatted || 'N/A' }}
+                        <span class="exchange-oi-share">({{ formatPercent(item.quantity_share_percent) }})</span>
+                      </span>
+                    </div>
+                  </div>
+                  <span v-else class="exchange-oi-empty">N/A</span>
+                </td>
+                <td class="type-cell">持仓量</td>
+                <td><div :id="'chart-oi-' + index" class="mini-chart"></div></td>
+                <td>{{ coin.current_open_interest_formatted || 'N/A' }}</td>
+                <td v-for="change in getChangesForType(coin, 'ratio')" :key="change.interval" class="change-cell">
+                  <div class="ratio" :class="getChangeClass(change.ratio)">{{ formatChange(change.ratio) }}</div>
+                  <div class="value">{{ change.open_interest_formatted || 'N/A' }}</div>
+                </td>
+              </tr>
+              <tr class="coin-group">
+                <td class="type-cell">持仓价值</td>
+                <td><div :id="'chart-value-' + index" class="mini-chart"></div></td>
+                <td>{{ coin.current_open_interest_value_formatted || 'N/A' }}</td>
+                <td v-for="change in getChangesForType(coin, 'value_ratio')" :key="change.interval" class="change-cell">
+                  <div class="ratio" :class="getChangeClass(change.value_ratio)">{{ formatChange(change.value_ratio) }}</div>
+                  <div class="value">{{ change.open_interest_value_formatted || 'N/A' }}</div>
+                </td>
+              </tr>
+              <tr class="coin-group">
+                <td class="type-cell">价格</td>
+                <td><div :id="'chart-price-' + index" class="mini-chart"></div></td>
+                <td>{{ coin.current_price_formatted || 'N/A' }}</td>
+                <td v-for="change in getChangesForType(coin, 'price_change')" :key="change.interval" class="change-cell">
+                  <div class="ratio" :class="getChangeClass(change.price_change_percent)">{{ formatChange(change.price_change_percent) }}</div>
+                  <div class="value">{{ change.current_price_formatted || 'N/A' }}</div>
+                </td>
+              </tr>
+              <tr class="coin-group coin-group-end">
+                <td class="type-cell">主力净流入</td>
+                <td><div :id="'chart-inflow-' + index" class="mini-chart"></div></td>
+                <td :class="getNetInflowClass(coin.net_inflow?.['5m'])">{{ formatNetInflow(coin.net_inflow?.['5m']) }}</td>
+                <td v-for="interval in intervals" :key="interval" :class="getNetInflowClass(coin.net_inflow?.[interval])">
+                  {{ formatNetInflow(coin.net_inflow?.[interval]) }}
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-else-if="!loading" class="no-data">暂无数据</div>
+      <div v-else class="loading">加载中</div>
+{% endraw %}
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, onMounted, onUnmounted, nextTick } = Vue;
+
+    const App = {
+      setup() {
+        const REQUIRED_INTERVALS = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h'];
+        const tableData = ref([]);
+        const loading = ref(false);
+        const lastUpdateTime = ref('');
+        const countdown = ref('--');
+        const intervals = ref([]);
+        const FIVE_MINUTES_MS = 5 * 60 * 1000;
+        const REFRESH_TIMEOUT_MS = 15000;
+        const CHART_BATCH_SIZE = 1;
+
+        let countdownInterval = null;
+        let chartRenderToken = 0;
+        const chartInstances = new Map();
+
+        const formatNetInflow = (value) => {
+          if (typeof value !== 'number') return 'N/A';
+          const abs = Math.abs(value);
+          if (abs >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+          if (abs >= 1e3) return (value / 1e3).toFixed(2) + 'K';
+          return value.toFixed(0);
+        };
+
+        const getNetInflowClass = (value) => {
+          if (typeof value !== 'number') return '';
+          return value > 0 ? 'positive' : value < 0 ? 'negative' : '';
+        };
+
+        const formatChange = (value) => {
+          if (value === null || value === undefined) return 'N/A';
+          return (value > 0 ? '+' : '') + value.toFixed(2) + '%';
+        };
+
+        const getChangeClass = (value) => {
+          if (value === null || value === undefined) return '';
+          return value > 0 ? 'positive' : value < 0 ? 'negative' : '';
+        };
+
+        const formatPercent = (value) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          return Number(value).toFixed(2) + '%';
+        };
+
+        const formatExchangeName = (exchange) => {
+          if (!exchange) return '--';
+          return String(exchange).toUpperCase();
+        };
+
+        const getChangesForType = (coin, type) => {
+          if (!coin.changes || !Array.isArray(coin.changes)) return [];
+          return coin.changes.map(c => ({ ...c, type }));
+        };
+
+        const normalizeChanges = (changes) => {
+          if (!Array.isArray(changes)) {
+            return changes || {};
+          }
+
+          return changes.reduce((acc, change) => {
+            acc[change.interval] = change;
+            return acc;
+          }, {});
+        };
+
+        const isCompleteHomepagePayload = (coins) => {
+          if (!Array.isArray(coins) || coins.length === 0) {
+            return false;
+          }
+
+          const coin = coins[0];
+          const changes = normalizeChanges(coin.changes);
+          if (!coin.current_open_interest_formatted || coin.current_open_interest_formatted === 'N/A') return false;
+          if (!coin.current_open_interest_value_formatted || coin.current_open_interest_value_formatted === 'N/A') return false;
+          if (!coin.current_price_formatted || coin.current_price_formatted === 'N/A') return false;
+
+          return REQUIRED_INTERVALS.every((interval) => {
+            const change = changes[interval];
+            return (
+              change &&
+              change.current_price_formatted !== 'N/A' &&
+              change.open_interest_formatted !== 'N/A' &&
+              change.open_interest_value_formatted !== 'N/A' &&
+              typeof coin.net_inflow?.[interval] === 'number'
+            );
+          });
+        };
+
+        const refreshHomepageSeries = async () => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
+
+          try {
+            const response = await fetch('/api/update?force=true&wait=true', { signal: controller.signal });
+            const updateResult = await response.json();
+
+            if (updateResult.status !== 'success') {
+              throw new Error(updateResult.message || '首页序列刷新失败');
+            }
+
+            return updateResult;
+          } finally {
+            clearTimeout(timer);
+          }
+        };
+
+        const fetchHomepageCoins = async () => {
+          const dataResponse = await fetch('/api/coins');
+          return dataResponse.json();
+        };
+
+        const disposeCharts = () => {
+          chartInstances.forEach((chart) => {
+            try {
+              chart.dispose();
+            } catch (error) {
+              console.warn('销毁图表失败:', error);
+            }
+          });
+          chartInstances.clear();
+        };
+
+        const disposeStaleCharts = (activeDomIds) => {
+          chartInstances.forEach((chart, domId) => {
+            if (activeDomIds.has(domId)) return;
+            try {
+              chart.dispose();
+            } catch (error) {
+              console.warn('销毁过期图表失败:', error);
+            }
+            chartInstances.delete(domId);
+          });
+        };
+
+        const applyHomepageResult = (result) => {
+          const refreshedCoins = result.data || [];
+          tableData.value = refreshedCoins;
+          if (refreshedCoins.length > 0 && refreshedCoins[0].changes) {
+            intervals.value = refreshedCoins[0].changes.map(c => c.interval);
+          }
+          if (result.cache_update_time) {
+            lastUpdateTime.value = new Date(result.cache_update_time).toLocaleString('zh-CN');
+            startCountdown();
+          }
+          scheduleChartRender(refreshedCoins);
+        };
+
+        const createChart = (domId, data) => {
+          const dom = document.getElementById(domId);
+          if (!dom || !data || data.length < 2) return;
+
+          let chart = chartInstances.get(domId) || echarts.getInstanceByDom(dom);
+          if (!chart) {
+            chart = echarts.init(dom, null, { renderer: 'canvas' });
+            chartInstances.set(domId, chart);
+          }
+
+          chart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 0, right: 0, top: 0, bottom: 0 },
+            xAxis: { show: false, type: 'value', min: 0, max: data.length - 1 },
+            yAxis: { show: false, type: 'value' },
+            series: [{
+              type: 'custom',
+              renderItem: (params, api) => {
+                const lines = [];
+                const zeroY = api.coord([0, 0])[1];
+
+                for (let i = 0; i < data.length - 1; i++) {
+                  const val1 = data[i];
+                  const val2 = data[i + 1];
+                  if (val1 === null || val2 === null) continue;
+
+                  const startPoint = api.coord([i, val1]);
+                  const endPoint = api.coord([i + 1, val2]);
+
+                  if ((val1 >= 0 && val2 >= 0) || (val1 <= 0 && val2 <= 0)) {
+                    const lineColor = val1 >= 0 ? '#22c55e' : '#ef4444';
+                    lines.push({
+                      type: 'line',
+                      shape: { x1: startPoint[0], y1: startPoint[1], x2: endPoint[0], y2: endPoint[1] },
+                      style: { stroke: lineColor, lineWidth: 1.5 }
+                    });
+                  } else {
+                    const t = Math.abs(val1) / (Math.abs(val1) + Math.abs(val2));
+                    const crossX = startPoint[0] + t * (endPoint[0] - startPoint[0]);
+
+                    const firstColor = val1 >= 0 ? '#22c55e' : '#ef4444';
+                    lines.push({
+                      type: 'line',
+                      shape: { x1: startPoint[0], y1: startPoint[1], x2: crossX, y2: zeroY },
+                      style: { stroke: firstColor, lineWidth: 1.5 }
+                    });
+                    const secondColor = val2 >= 0 ? '#22c55e' : '#ef4444';
+                    lines.push({
+                      type: 'line',
+                      shape: { x1: crossX, y1: zeroY, x2: endPoint[0], y2: endPoint[1] },
+                      style: { stroke: secondColor, lineWidth: 1.5 }
+                    });
+                  }
+                }
+
+                return { type: 'group', children: lines };
+              },
+              data: data
+            }],
+            tooltip: { show: false }
+          }, true);
+        };
+
+        const renderChartBatch = (coins, startIndex, token) => {
+          if (token !== chartRenderToken) return;
+
+          const endIndex = Math.min(startIndex + CHART_BATCH_SIZE, coins.length);
+          for (let index = startIndex; index < endIndex; index += 1) {
+            const coin = coins[index];
+            if (!coin.changes || !coin.changes.length) continue;
+
+            const oiData = coin.changes.map(c => c.ratio ?? 0);
+            const valueData = coin.changes.map(c => c.value_ratio ?? 0);
+            const priceData = coin.changes.map(c => c.price_change_percent ?? 0);
+            const intervalsList = coin.changes.map(c => c.interval);
+            const inflowData = intervalsList.map(intv => coin.net_inflow?.[intv] ?? 0);
+
+            createChart(`chart-oi-${index}`, oiData);
+            createChart(`chart-value-${index}`, valueData);
+            createChart(`chart-price-${index}`, priceData);
+            createChart(`chart-inflow-${index}`, inflowData);
+          }
+
+          if (endIndex < coins.length) {
+            const scheduleNext = () => renderChartBatch(coins, endIndex, token);
+            if (typeof requestAnimationFrame === 'function') {
+              requestAnimationFrame(scheduleNext);
+            } else {
+              setTimeout(scheduleNext, 16);
+            }
+          }
+        };
+
+        const scheduleChartRender = (coins) => {
+          chartRenderToken += 1;
+          const token = chartRenderToken;
+          const activeDomIds = new Set();
+          coins.forEach((_coin, index) => {
+            activeDomIds.add(`chart-oi-${index}`);
+            activeDomIds.add(`chart-value-${index}`);
+            activeDomIds.add(`chart-price-${index}`);
+            activeDomIds.add(`chart-inflow-${index}`);
+          });
+          disposeStaleCharts(activeDomIds);
+
+          nextTick(() => {
+            if (token !== chartRenderToken) return;
+            const scheduleStart = () => renderChartBatch(coins, 0, token);
+            if (typeof requestAnimationFrame === 'function') {
+              requestAnimationFrame(() => requestAnimationFrame(scheduleStart));
+            } else {
+              setTimeout(scheduleStart, 32);
+            }
+          });
+        };
+
+        const updateCountdown = () => {
+          const now = Date.now();
+          const nextCloseTime = now - (now % FIVE_MINUTES_MS) + FIVE_MINUTES_MS;
+          const timeDiff = nextCloseTime - now;
+
+          if (timeDiff <= 1000) {
+            loadData(false);
+          }
+
+          const seconds = Math.max(0, Math.floor(timeDiff / 1000));
+          countdown.value = `${seconds}秒`;
+        };
+
+        const startCountdown = () => {
+          if (countdownInterval) clearInterval(countdownInterval);
+          updateCountdown();
+          countdownInterval = setInterval(updateCountdown, 1000);
+        };
+
+        const loadData = async (force = false) => {
+          loading.value = true;
+          try {
+            if (force) {
+              try {
+                await refreshHomepageSeries();
+              } catch (error) {
+                console.warn('强制刷新首页序列超时或失败:', error);
+              }
+            }
+
+            const result = await fetchHomepageCoins();
+
+            if (result.status === 'success') {
+              applyHomepageResult(result);
+            }
+          } catch (error) {
+            console.error('加载数据失败:', error);
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        onMounted(() => {
+          loadData();
+        });
+
+        onUnmounted(() => {
+          if (countdownInterval) clearInterval(countdownInterval);
+          chartRenderToken += 1;
+          disposeCharts();
+        });
+
+        return {
+          tableData,
+          loading,
+          lastUpdateTime,
+          countdown,
+          intervals,
+          formatNetInflow,
+          getNetInflowClass,
+          formatChange,
+          getChangeClass,
+          formatPercent,
+          formatExchangeName,
+          getChangesForType,
+          loadData
+        };
+      }
+    };
+
+    const app = createApp(App);
+    app.mount('#app');
+  </script>
+</body>
+</html>

@@ -19,7 +19,7 @@ test.describe('Vue 加载测试', () => {
 
   test('首页契约渲染', async ({ page }) => {
     await visit(page, '/');
-    await expect(heading(page, '币种数据监控', 1)).toBeVisible();
+    await expect(heading(page, '多周期矩阵', 1)).toBeVisible();
     await expect(link(page, '首页')).toBeVisible();
   });
 

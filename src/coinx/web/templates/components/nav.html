@@ -3,8 +3,8 @@
     <a class="nav-item{% if request.path == '/' %} active{% endif %}" href="/"{% if request.path == '/' %} aria-current="page"{% endif %}>
       <span class="nav-icon">◈</span> 首页
     </a>
-    <a class="nav-item{% if request.path.startswith('/new-home') %} active{% endif %}" href="/new-home"{% if request.path.startswith('/new-home') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">+</span> 新首页
+    <a class="nav-item{% if request.path.startswith('/legacy-home') %} active{% endif %}" href="/legacy-home"{% if request.path.startswith('/legacy-home') %} aria-current="page"{% endif %}>
+      <span class="nav-icon">+</span> 旧首页
     </a>
     <a class="nav-item{% if request.path.startswith('/market-rank') %} active{% endif %}" href="/market-rank"{% if request.path.startswith('/market-rank') %} aria-current="page"{% endif %}>
       <span class="nav-icon">◉</span> 行情榜

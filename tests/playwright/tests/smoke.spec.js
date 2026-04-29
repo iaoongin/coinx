@@ -2,10 +2,10 @@ const { test, expect } = require('./fixtures');
 const { button, heading, testId, visit } = require('./contracts');
 
 test.describe('契约 Smoke', () => {
-  test('首页关键元素可见', async ({ page }) => {
+  test('多周期矩阵关键元素可见', async ({ page }) => {
     await visit(page, '/');
-    await expect(heading(page, '币种数据监控', 1)).toBeVisible();
-    await expect(button(page, '↻ 刷新')).toBeVisible();
+    await expect(heading(page, '多周期矩阵', 1)).toBeVisible();
+    await expect(button(page, '刷新')).toBeVisible();
   });
 
   test('行情榜关键元素可见', async ({ page }) => {
