@@ -12,6 +12,12 @@ def index():
     return render_template('index.html')
 
 
+@pages_bp.route('/new-home')
+def new_home():
+    logger.info("visit new home")
+    return render_template('new_home.html')
+
+
 @pages_bp.route('/coins-config')
 def coins_config():
     """币种配置页面"""
