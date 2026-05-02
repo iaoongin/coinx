@@ -1,22 +1,36 @@
 <div class="nav-container">
+  <a class="brand-lockup" href="/" aria-label="CoinX 首页">
+    <img
+      class="brand-mark"
+      src="{{ url_for('static', filename='brand/coinx-mark.svg') }}"
+      alt="CoinX logo"
+      width="36"
+      height="36"
+    >
+    <span class="brand-copy">
+      <strong>CoinX</strong>
+      <small>Crypto Signal Desk</small>
+    </span>
+  </a>
+
   <div class="nav">
     <a class="nav-item{% if request.path == '/' %} active{% endif %}" href="/"{% if request.path == '/' %} aria-current="page"{% endif %}>
-      <span class="nav-icon">◈</span> 首页
+      首页
     </a>
     <a class="nav-item{% if request.path.startswith('/legacy-home') %} active{% endif %}" href="/legacy-home"{% if request.path.startswith('/legacy-home') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">+</span> 旧首页
+      旧首页
     </a>
     <a class="nav-item{% if request.path.startswith('/market-rank') %} active{% endif %}" href="/market-rank"{% if request.path.startswith('/market-rank') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">◉</span> 行情榜
+      行情榜
     </a>
     <a class="nav-item{% if request.path.startswith('/binance-series') %} active{% endif %}" href="/binance-series"{% if request.path.startswith('/binance-series') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">◇</span> 历史序列
+      历史序列
     </a>
     <a class="nav-item{% if request.path.startswith('/hedge-calculator') %} active{% endif %}" href="/hedge-calculator"{% if request.path.startswith('/hedge-calculator') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">△</span> 对冲计算器
+      对冲计算器
     </a>
     <a class="nav-item{% if request.path.startswith('/coins-config') %} active{% endif %}" href="/coins-config"{% if request.path.startswith('/coins-config') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">□</span> 币种配置
+      币种配置
     </a>
   </div>
 </div>
