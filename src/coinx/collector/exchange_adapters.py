@@ -30,6 +30,7 @@ class ExchangeSeriesAdapter:
     parse_series_payload: object
     precise_window_series_types: tuple = ()
     is_symbol_supported: object = None
+    supported_symbols_fetcher: object = None
     page_limits: dict = None
     series_periods: dict = None
     taker_period_by_interval: dict = None
@@ -41,6 +42,32 @@ class ExchangeSeriesAdapter:
         if self.is_symbol_supported is None:
             return True
         return self.is_symbol_supported(symbol, series_type=series_type, session=session)
+
+    def symbol_support_state(self, symbol, series_type=None, session=None):
+        if self.supported_symbols_fetcher is None:
+            return {
+                'state': 'supported',
+                'supported': True,
+                'known': True,
+            }
+
+        try:
+            supported_symbols = self.supported_symbols_fetcher(session=session)
+        except Exception as exc:
+            return {
+                'state': 'unknown',
+                'supported': None,
+                'known': False,
+                'reason': 'supported_symbol_lookup_failed',
+                'details': {'error': str(exc)},
+            }
+
+        is_supported = symbol in supported_symbols
+        return {
+            'state': 'supported' if is_supported else 'unsupported',
+            'supported': is_supported,
+            'known': True,
+        }
 
     def page_limit(self, series_type):
         if not self.page_limits:
@@ -81,6 +108,7 @@ def _build_okx_adapter():
         parse_series_payload=okx_series.parse_series_payload,
         precise_window_series_types=tuple(okx_series.SUPPORTED_SERIES_TYPES),
         is_symbol_supported=okx_series.is_symbol_supported,
+        supported_symbols_fetcher=okx_series.get_supported_symbols,
         series_periods={
             'taker_buy_sell_vol': ('5m', '1H'),
         },
@@ -98,6 +126,7 @@ def _build_bybit_adapter():
         parse_series_payload=bybit_series.parse_series_payload,
         precise_window_series_types=tuple(bybit_series.SUPPORTED_SERIES_TYPES),
         is_symbol_supported=bybit_series.is_symbol_supported,
+        supported_symbols_fetcher=bybit_series.get_supported_symbols,
         page_limits={
             'klines': 1000,
             'open_interest_hist': 200,
@@ -124,3 +153,7 @@ def get_exchange_adapters(exchange_ids):
         if exchange_id and exchange_id.strip():
             adapters.append(get_exchange_adapter(exchange_id))
     return adapters
+
+
+def get_supported_exchange_ids():
+    return list({'binance': None, 'okx': None, 'bybit': None}.keys())

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -5,9 +6,10 @@ from typing import Optional
 from sqlalchemy import and_, func, or_
 
 from coinx.coin_manager import get_active_coins
-from coinx.collector.exchange_adapters import get_exchange_adapter
+from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
 from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS
 from coinx.database import get_session
+from coinx.utils import logger
 from coinx.models import (
     BinanceKline,
     BinanceOpenInterestHist,
@@ -202,6 +204,99 @@ def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time):
     return inflow
 
 
+def _format_homepage_log_details(details):
+    return json.dumps(details, ensure_ascii=False, sort_keys=True)
+
+
+def _log_homepage_exchange_rejection(symbol, exchange, anchor_time, stage, reasons):
+    if not reasons:
+        return
+
+    summary_reason = reasons[0].get('reason', 'homepage_exchange_rejected')
+    logger.warning(
+        '首页交易所门禁否决: '
+        f'symbol={symbol} exchange={exchange} stage={stage} anchor_time={anchor_time} '
+        f'reason={summary_reason} details={_format_homepage_log_details(reasons)}'
+    )
+
+
+def _log_homepage_symbol_summary(symbol, included_exchanges, missing_exchanges, status, current_time):
+    available = bool(included_exchanges)
+    message = (
+        '首页交易所聚合完成'
+        if available
+        else '首页交易所聚合为空态'
+    )
+    log_line = (
+        f'{message}: symbol={symbol} current_time={current_time} status={status} '
+        f'included_exchanges={_format_homepage_log_details(included_exchanges)} '
+        f'missing_exchanges={_format_homepage_log_details(missing_exchanges)} '
+        f'available={str(available).lower()}'
+    )
+    if available:
+        logger.info(log_line)
+    else:
+        logger.warning(log_line)
+
+
+def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_time, taker_maps_by_period, anchor_time):
+    reasons = []
+
+    if not oi_by_time:
+        reasons.append(
+            {
+                'reason': 'missing_open_interest_history',
+                'details': {'missing': 'open_interest_hist'},
+            }
+        )
+
+    if not kline_by_time:
+        reasons.append(
+            {
+                'reason': 'missing_kline_history',
+                'details': {'missing': 'kline'},
+            }
+        )
+
+    if anchor_time is None:
+        if not reasons:
+            reasons.append(
+                {
+                    'reason': 'missing_exchange_anchor',
+                    'details': {'missing': 'common_time_anchor'},
+                }
+            )
+        return reasons
+
+    for interval in TIME_INTERVALS:
+        target_time = anchor_time - _interval_to_ms(interval)
+        if target_time not in oi_by_time:
+            reasons.append(
+                {
+                    'reason': 'missing_open_interest_target',
+                    'details': {
+                        'interval': interval,
+                        'target_time': target_time,
+                    },
+                }
+            )
+            continue
+
+        if target_time not in kline_by_time:
+            reasons.append(
+                {
+                    'reason': 'missing_kline_target',
+                    'details': {
+                        'interval': interval,
+                        'target_time': target_time,
+                    },
+                }
+            )
+            continue
+
+    return reasons
+
+
 def _period_to_ms(period):
     if period.endswith('m'):
         return int(period[:-1]) * 60 * 1000
@@ -311,7 +406,7 @@ def _build_taker_buy_sell_vol_point(row):
 
 
 def _get_enabled_exchanges():
-    return [exchange.strip().lower() for exchange in ENABLED_EXCHANGES if exchange and exchange.strip()]
+    return _normalize_exchange_list(ENABLED_EXCHANGES)
 
 
 def _merge_time_points(*points):
@@ -402,6 +497,155 @@ def _build_exchange_open_interest_rows(exchange_points, total_value, total_open_
 
     rows.sort(key=lambda item: item['open_interest_value'], reverse=True)
     return rows
+
+
+def _build_exchange_status_rows(
+    exchanges,
+    supported_exchanges,
+    symbol_exchange_snapshots,
+    exchange_rejection_info,
+    included_open_interest_map,
+):
+    rows = []
+    for exchange in exchanges:
+        snapshot = symbol_exchange_snapshots.get(exchange) or {}
+        support_state = snapshot.get('support_state') or {'state': 'supported'}
+        if exchange not in supported_exchanges:
+            rows.append(
+                {
+                    'exchange': exchange,
+                    'status': 'unsupported',
+                    'open_interest': None,
+                    'open_interest_formatted': 'N/A',
+                    'open_interest_value': None,
+                    'open_interest_value_formatted': 'N/A',
+                    'share_percent': None,
+                    'quantity_share_percent': None,
+                }
+            )
+            continue
+
+        if support_state.get('state') == 'unsupported':
+            rows.append(
+                {
+                    'exchange': exchange,
+                    'status': 'unsupported',
+                    'open_interest': None,
+                    'open_interest_formatted': 'N/A',
+                    'open_interest_value': None,
+                    'open_interest_value_formatted': 'N/A',
+                    'share_percent': None,
+                    'quantity_share_percent': None,
+                }
+            )
+            continue
+
+        included_row = included_open_interest_map.get(exchange)
+        if included_row is not None:
+            row = dict(included_row)
+            row['exchange'] = exchange
+            row['status'] = 'included'
+            rows.append(row)
+            continue
+
+        current_time = snapshot.get('current_time')
+        current_point = None
+        if current_time is not None:
+            current_point = _with_estimated_open_interest_value(
+                snapshot.get('oi_by_time', {}).get(current_time),
+                snapshot.get('kline_by_time', {}).get(current_time),
+            )
+
+        open_interest = float(current_point.sum_open_interest or 0) if current_point is not None else None
+        open_interest_value = float(current_point.sum_open_interest_value or 0) if current_point is not None else None
+        row_status = 'excluded'
+        if support_state.get('state') == 'unknown':
+            row_status = 'unknown'
+        row = {
+            'exchange': exchange,
+            'status': row_status,
+            'open_interest': open_interest,
+            'open_interest_formatted': format_number(open_interest) if open_interest is not None else 'N/A',
+            'open_interest_value': open_interest_value,
+            'open_interest_value_formatted': format_usd_value(open_interest_value),
+            'share_percent': None,
+            'quantity_share_percent': None,
+        }
+        rejection = exchange_rejection_info.get(exchange)
+        if rejection:
+            row['reason'] = rejection.get('reasons') or []
+            row['stage'] = rejection.get('stage')
+        if support_state.get('state') == 'unknown':
+            row['support_state'] = 'unknown'
+        rows.append(row)
+
+    rows.sort(
+        key=lambda item: (
+            {'included': 0, 'excluded': 1, 'unknown': 2, 'unsupported': 3}.get(item.get('status'), 4),
+            -(item.get('open_interest_value') or 0),
+            item.get('exchange') or '',
+        )
+    )
+    return rows
+
+
+def _normalize_exchange_list(exchanges):
+    normalized = []
+    seen = set()
+    for exchange in exchanges or []:
+        key = (exchange or '').strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+    return normalized
+
+
+def _get_exchange_common_time(oi_by_time, kline_by_time):
+    common_times = sorted(set(oi_by_time).intersection(kline_by_time))
+    if not common_times:
+        return None
+    return common_times[-1]
+
+
+def _exchange_supports_homepage_anchor(exchange, oi_by_time, kline_by_time, taker_maps_by_period, anchor_time):
+    return not _collect_exchange_homepage_rejection_reasons(
+        exchange,
+        oi_by_time,
+        kline_by_time,
+        taker_maps_by_period,
+        anchor_time,
+    )
+
+
+def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, taker_maps_by_period):
+    current_time = _get_exchange_common_time(oi_by_time, kline_by_time)
+    if current_time is None:
+        return {
+            'complete': False,
+            'current_time': None,
+            'reasons': _collect_exchange_homepage_rejection_reasons(
+                exchange,
+                oi_by_time,
+                kline_by_time,
+                taker_maps_by_period,
+                None,
+            ),
+        }
+
+    reasons = _collect_exchange_homepage_rejection_reasons(
+        exchange,
+        oi_by_time,
+        kline_by_time,
+        taker_maps_by_period,
+        current_time,
+    )
+    complete = not reasons
+    return {
+        'complete': complete,
+        'current_time': current_time,
+        'reasons': reasons,
+    }
 
 
 def _get_latest_series_time_map(session, model, symbols, time_field_name, upper_bound=None):
@@ -911,86 +1155,364 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
 
 def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
     exchanges = _get_enabled_exchanges()
+    supported_exchanges = set(_normalize_exchange_list(get_supported_exchange_ids()))
     exchange_maps = {}
+    exchange_adapters = {}
     for exchange in exchanges:
+        if exchange not in supported_exchanges:
+            exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
+            exchange_adapters[exchange] = None
+            continue
         exchange_maps[exchange] = _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=upper_bound)
+        try:
+            exchange_adapters[exchange] = get_exchange_adapter(exchange)
+        except Exception:
+            exchange_adapters[exchange] = None
 
     primary_exchange = PRIMARY_PRICE_EXCHANGE.lower()
-    if primary_exchange not in exchange_maps:
-        exchange_maps[primary_exchange] = _load_exchange_homepage_maps(
-            session,
-            primary_exchange,
-            symbols,
-            upper_bound=upper_bound,
-        )
-    primary_kline_map = exchange_maps[primary_exchange][1]
 
     aggregate_oi_map = {symbol: {} for symbol in symbols}
     coverage_map = {
-        symbol: {'source_exchanges': [], 'missing_exchanges': [], 'open_interest_by_exchange': {}, 'net_inflow': {}}
+        symbol: {
+            'source_exchanges': [],
+            'included_exchanges': [],
+            'missing_exchanges': [],
+            'open_interest_by_exchange': {},
+            'net_inflow': {},
+            'status': 'empty',
+        }
         for symbol in symbols
     }
+    selected_kline_map = {symbol: {} for symbol in symbols}
 
     for symbol in symbols:
-        oi_times = set()
+        symbol_exchange_snapshots = {}
+        exchange_rejection_info = {}
         for exchange, (oi_map, _kline_map, taker_maps_by_period) in exchange_maps.items():
-            symbol_oi = oi_map.get(symbol, {})
-            symbol_taker = any(
-                period_map.get(symbol)
-                for period_map in (taker_maps_by_period or {}).values()
-            )
-            if symbol_oi or symbol_taker:
-                coverage_map[symbol]['source_exchanges'].append(exchange)
-            else:
+            if exchange not in supported_exchanges:
+                symbol_exchange_snapshots[exchange] = {
+                    'current_time': None,
+                    'oi_by_time': {},
+                    'kline_by_time': {},
+                    'taker_maps_by_period': {},
+                    'complete': False,
+                    'unsupported': True,
+                    'support_state': {'state': 'unsupported'},
+                    'reasons': [
+                        {
+                            'reason': 'unsupported_exchange',
+                            'details': {'exchange': exchange},
+                        }
+                    ],
+                }
                 coverage_map[symbol]['missing_exchanges'].append(exchange)
-            oi_times.update(symbol_oi.keys())
+                exchange_rejection_info[exchange] = {
+                    'stage': 'unsupported',
+                    'anchor_time': None,
+                    'reasons': symbol_exchange_snapshots[exchange]['reasons'],
+                }
+                continue
 
+            adapter = exchange_adapters.get(exchange)
+            support_state = {'state': 'supported', 'supported': True, 'known': True}
+            if adapter is not None and hasattr(adapter, 'symbol_support_state'):
+                support_state = adapter.symbol_support_state(symbol, session=session)
+
+            if support_state.get('state') == 'unsupported':
+                symbol_exchange_snapshots[exchange] = {
+                    'current_time': None,
+                    'oi_by_time': {},
+                    'kline_by_time': {},
+                    'taker_maps_by_period': {},
+                    'complete': False,
+                    'unsupported': True,
+                    'support_state': support_state,
+                    'reasons': [
+                        {
+                            'reason': 'unsupported_symbol',
+                            'details': {
+                                'exchange': exchange,
+                                'symbol': symbol,
+                            },
+                        }
+                    ],
+                }
+                coverage_map[symbol]['missing_exchanges'].append(exchange)
+                exchange_rejection_info[exchange] = {
+                    'stage': 'unsupported_symbol',
+                    'anchor_time': None,
+                    'reasons': symbol_exchange_snapshots[exchange]['reasons'],
+                }
+                continue
+
+            symbol_oi = oi_map.get(symbol, {})
+            symbol_kline = _kline_map.get(symbol, {})
+            symbol_taker = {
+                period: period_map.get(symbol, {})
+                for period, period_map in (taker_maps_by_period or {}).items()
+            }
+            if symbol_oi or symbol_kline or any(symbol_taker.values()):
+                snapshot = _build_exchange_homepage_snapshot(
+                    exchange=exchange,
+                    oi_by_time=symbol_oi,
+                    kline_by_time=symbol_kline,
+                    taker_maps_by_period=symbol_taker,
+                )
+                symbol_exchange_snapshots[exchange] = {
+                    'current_time': snapshot['current_time'],
+                    'oi_by_time': symbol_oi,
+                    'kline_by_time': symbol_kline,
+                    'taker_maps_by_period': symbol_taker,
+                    'complete': snapshot['complete'],
+                    'unsupported': False,
+                    'support_state': support_state,
+                    'reasons': snapshot.get('reasons') or _collect_exchange_homepage_rejection_reasons(
+                        exchange,
+                        symbol_oi,
+                        symbol_kline,
+                        symbol_taker,
+                        snapshot.get('current_time'),
+                    ),
+                }
+                if snapshot['complete']:
+                    coverage_map[symbol]['source_exchanges'].append(exchange)
+                else:
+                    coverage_map[symbol]['missing_exchanges'].append(exchange)
+                    exchange_rejection_info[exchange] = {
+                        'stage': 'initial_snapshot',
+                        'anchor_time': snapshot.get('current_time'),
+                        'reasons': symbol_exchange_snapshots[exchange]['reasons'],
+                    }
+            else:
+                symbol_exchange_snapshots[exchange] = {
+                    'current_time': None,
+                    'oi_by_time': symbol_oi,
+                    'kline_by_time': symbol_kline,
+                    'taker_maps_by_period': symbol_taker,
+                    'complete': False,
+                    'unsupported': False,
+                    'support_state': support_state,
+                    'reasons': _collect_exchange_homepage_rejection_reasons(
+                        exchange,
+                        symbol_oi,
+                        symbol_kline,
+                        symbol_taker,
+                        None,
+                    ),
+                }
+                coverage_map[symbol]['missing_exchanges'].append(exchange)
+                exchange_rejection_info[exchange] = {
+                    'stage': 'initial_snapshot',
+                    'anchor_time': None,
+                    'reasons': symbol_exchange_snapshots[exchange]['reasons'],
+                }
+
+        included_exchanges = [
+            exchange
+            for exchange, snapshot in symbol_exchange_snapshots.items()
+            if snapshot.get('complete')
+        ]
+        if not included_exchanges:
+            coverage_map[symbol]['status'] = 'empty'
+            coverage_map[symbol]['exchange_statuses'] = _build_exchange_status_rows(
+                exchanges,
+                supported_exchanges,
+                symbol_exchange_snapshots,
+                exchange_rejection_info,
+                {},
+            )
+            for exchange, rejection in exchange_rejection_info.items():
+                _log_homepage_exchange_rejection(
+                    symbol=symbol,
+                    exchange=exchange,
+                    anchor_time=rejection.get('anchor_time'),
+                    stage=rejection.get('stage', 'initial_snapshot'),
+                    reasons=rejection.get('reasons') or [],
+                )
+            _log_homepage_symbol_summary(
+                symbol=symbol,
+                included_exchanges=[],
+                missing_exchanges=_normalize_exchange_list(coverage_map[symbol]['missing_exchanges']),
+                status='empty',
+                current_time=None,
+            )
+            continue
+
+        anchor_candidates = [
+            snapshot['current_time']
+            for snapshot in symbol_exchange_snapshots.values()
+            if snapshot.get('complete') and snapshot.get('current_time') is not None
+        ]
+        if not anchor_candidates:
+            coverage_map[symbol]['status'] = 'empty'
+            coverage_map[symbol]['exchange_statuses'] = _build_exchange_status_rows(
+                exchanges,
+                supported_exchanges,
+                symbol_exchange_snapshots,
+                exchange_rejection_info,
+                {},
+            )
+            for exchange, rejection in exchange_rejection_info.items():
+                _log_homepage_exchange_rejection(
+                    symbol=symbol,
+                    exchange=exchange,
+                    anchor_time=rejection.get('anchor_time'),
+                    stage=rejection.get('stage', 'initial_snapshot'),
+                    reasons=rejection.get('reasons') or [],
+                )
+            _log_homepage_symbol_summary(
+                symbol=symbol,
+                included_exchanges=[],
+                missing_exchanges=_normalize_exchange_list(coverage_map[symbol]['missing_exchanges']),
+                status='empty',
+                current_time=None,
+            )
+            continue
+
+        anchor_time = min(anchor_candidates)
+        stable = False
+        while not stable:
+            included_exchanges = []
+            for exchange, snapshot in symbol_exchange_snapshots.items():
+                if _exchange_supports_homepage_anchor(
+                    exchange=exchange,
+                    oi_by_time=snapshot['oi_by_time'],
+                    kline_by_time=snapshot['kline_by_time'],
+                    taker_maps_by_period=snapshot['taker_maps_by_period'],
+                    anchor_time=anchor_time,
+                ):
+                    included_exchanges.append(exchange)
+                else:
+                    coverage_map[symbol]['missing_exchanges'].append(exchange)
+                    exchange_rejection_info[exchange] = {
+                        'stage': 'anchor_validation',
+                        'anchor_time': anchor_time,
+                        'reasons': _collect_exchange_homepage_rejection_reasons(
+                            exchange,
+                            snapshot['oi_by_time'],
+                            snapshot['kline_by_time'],
+                            snapshot['taker_maps_by_period'],
+                            anchor_time,
+                        ),
+                    }
+
+            included_exchanges = _normalize_exchange_list(included_exchanges)
+            if not included_exchanges:
+                anchor_time = None
+                break
+
+            new_anchor_time = min(symbol_exchange_snapshots[exchange]['current_time'] for exchange in included_exchanges)
+            stable = new_anchor_time == anchor_time
+            anchor_time = new_anchor_time
+
+        if anchor_time is None or not included_exchanges:
+            coverage_map[symbol]['status'] = 'empty'
+            coverage_map[symbol]['included_exchanges'] = []
+            coverage_map[symbol]['source_exchanges'] = []
+            coverage_map[symbol]['missing_exchanges'] = _normalize_exchange_list(coverage_map[symbol]['missing_exchanges'])
+            coverage_map[symbol]['exchange_statuses'] = _build_exchange_status_rows(
+                exchanges,
+                supported_exchanges,
+                symbol_exchange_snapshots,
+                exchange_rejection_info,
+                {},
+            )
+            for exchange, rejection in exchange_rejection_info.items():
+                _log_homepage_exchange_rejection(
+                    symbol=symbol,
+                    exchange=exchange,
+                    anchor_time=rejection.get('anchor_time'),
+                    stage=rejection.get('stage', 'initial_snapshot'),
+                    reasons=rejection.get('reasons') or [],
+                )
+            _log_homepage_symbol_summary(
+                symbol=symbol,
+                included_exchanges=[],
+                missing_exchanges=coverage_map[symbol]['missing_exchanges'],
+                status='empty',
+                current_time=None,
+            )
+            continue
+
+        missing_exchanges = [exchange for exchange in exchanges if exchange not in included_exchanges]
+        coverage_map[symbol]['included_exchanges'] = included_exchanges
+        coverage_map[symbol]['source_exchanges'] = included_exchanges
+        coverage_map[symbol]['missing_exchanges'] = _normalize_exchange_list(
+            [*coverage_map[symbol]['missing_exchanges'], *missing_exchanges]
+        )
+        coverage_map[symbol]['status'] = 'complete' if not coverage_map[symbol]['missing_exchanges'] else 'partial'
+        for exchange in coverage_map[symbol]['missing_exchanges']:
+            rejection = exchange_rejection_info.get(exchange)
+            if rejection:
+                _log_homepage_exchange_rejection(
+                    symbol=symbol,
+                    exchange=exchange,
+                    anchor_time=rejection.get('anchor_time'),
+                    stage=rejection.get('stage', 'initial_snapshot'),
+                    reasons=rejection.get('reasons') or [],
+                )
+        _log_homepage_symbol_summary(
+            symbol=symbol,
+            included_exchanges=included_exchanges,
+            missing_exchanges=coverage_map[symbol]['missing_exchanges'],
+            status=coverage_map[symbol]['status'],
+            current_time=anchor_time,
+        )
+
+        price_exchange = primary_exchange if primary_exchange in included_exchanges else included_exchanges[0]
+        selected_kline_map[symbol] = exchange_maps[price_exchange][1].get(symbol, {})
+
+        oi_times = sorted(
+            set().union(*(snapshot['oi_by_time'].keys() for snapshot in symbol_exchange_snapshots.values()))
+        )
         for event_time in oi_times:
             exchange_points = {}
-            for exchange in exchange_maps:
+            for exchange in included_exchanges:
+                snapshot = symbol_exchange_snapshots[exchange]
                 point = _with_estimated_open_interest_value(
-                    exchange_maps[exchange][0].get(symbol, {}).get(event_time),
-                    primary_kline_map.get(symbol, {}).get(event_time),
+                    snapshot['oi_by_time'].get(event_time),
+                    selected_kline_map[symbol].get(event_time),
                 )
                 if point is not None:
                     exchange_points[exchange] = point
 
-            coverage_map[symbol]['open_interest_by_exchange'][event_time] = exchange_points
-            aggregate_oi_map[symbol][event_time] = _merge_time_points(
-                *exchange_points.values()
-            )
-
-        common_times = sorted(set(aggregate_oi_map[symbol]).intersection(primary_kline_map.get(symbol, {})))
-        current_time = common_times[-1] if common_times else (max(aggregate_oi_map[symbol]) if aggregate_oi_map[symbol] else None)
-        exchange_taker_inflow = {}
-        if current_time is not None:
-            for exchange, (_oi_map, _kline_map, taker_maps_by_period) in exchange_maps.items():
-                try:
-                    adapter = get_exchange_adapter(exchange)
-                except Exception:
-                    adapter = None
-                if adapter is None:
-                    continue
-                exchange_taker_inflow[exchange] = {}
-                for interval in TIME_INTERVALS:
-                    period = adapter.taker_period_for_interval(interval)
-                    if not period:
-                        continue
-                    taker_by_time = (taker_maps_by_period or {}).get(period, {}).get(symbol, {})
-                    inflow = _calc_net_inflow_for_period(taker_by_time, current_time, interval, period)
-                    if inflow is not None:
-                        exchange_taker_inflow[exchange][interval] = inflow
+            merged_point = _merge_time_points(*exchange_points.values())
+            if merged_point is not None:
+                coverage_map[symbol]['open_interest_by_exchange'][event_time] = exchange_points
+                aggregate_oi_map[symbol][event_time] = merged_point
 
         for interval in TIME_INTERVALS:
-            interval_values = [
-                inflow_by_interval[interval]
-                for inflow_by_interval in exchange_taker_inflow.values()
-                if interval in inflow_by_interval
-            ]
+            interval_values = []
+            for exchange in included_exchanges:
+                snapshot = symbol_exchange_snapshots[exchange]
+                adapter = exchange_adapters.get(exchange)
+                if adapter is None:
+                    continue
+                period = adapter.taker_period_for_interval(interval)
+                if not period:
+                    continue
+                taker_by_time = (snapshot['taker_maps_by_period'] or {}).get(period, {})
+                inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
+                if inflow is not None:
+                    interval_values.append(inflow)
+
             if interval_values:
                 coverage_map[symbol]['net_inflow'][interval] = sum(interval_values)
 
-    return aggregate_oi_map, primary_kline_map, {}, coverage_map
+        included_open_interest_rows = _build_exchange_open_interest_rows(
+            coverage_map[symbol]['open_interest_by_exchange'].get(anchor_time, {}),
+            aggregate_oi_map[symbol][anchor_time].sum_open_interest_value if anchor_time in aggregate_oi_map[symbol] else 0,
+            aggregate_oi_map[symbol][anchor_time].sum_open_interest if anchor_time in aggregate_oi_map[symbol] else 0,
+        )
+        coverage_map[symbol]['exchange_statuses'] = _build_exchange_status_rows(
+            exchanges,
+            supported_exchanges,
+            symbol_exchange_snapshots,
+            exchange_rejection_info,
+            {item['exchange']: item for item in included_open_interest_rows},
+        )
+
+    return aggregate_oi_map, selected_kline_map, {}, coverage_map
 
 
 def _load_homepage_series_maps(session, symbols, upper_bound=None):
@@ -1000,8 +1522,35 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
 def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, coverage=None):
     common_times = sorted(set(oi_by_time).intersection(kline_by_time))
     oi_times = sorted(oi_by_time)
+    included_exchanges = list((coverage or {}).get('included_exchanges') or (coverage or {}).get('source_exchanges') or [])
+    missing_exchanges = list((coverage or {}).get('missing_exchanges') or [])
+    status = (coverage or {}).get('status')
+    if status not in ('complete', 'partial', 'empty'):
+        status = 'complete' if included_exchanges and not missing_exchanges else ('partial' if included_exchanges else 'empty')
+
     if not common_times and not oi_times:
-        return None
+        empty_changes = {interval: _empty_change() for interval in TIME_INTERVALS}
+        return {
+            'symbol': symbol,
+            'source_exchanges': included_exchanges,
+            'included_exchanges': included_exchanges,
+            'missing_exchanges': missing_exchanges,
+            'status': 'empty',
+            'exchange_open_interest': [],
+            'exchange_statuses': list((coverage or {}).get('exchange_statuses') or []),
+            'current_open_interest': None,
+            'current_open_interest_formatted': 'N/A',
+            'current_open_interest_value': None,
+            'current_open_interest_value_formatted': 'N/A',
+            'current_price': None,
+            'current_price_formatted': 'N/A',
+            'price_change': None,
+            'price_change_percent': None,
+            'price_change_formatted': 'N/A',
+            'net_inflow': {},
+            'changes': empty_changes,
+            'current_time': None,
+        }
 
     current_time = common_times[-1] if common_times else oi_times[-1]
     net_inflow = dict((coverage or {}).get('net_inflow') or {})
@@ -1009,7 +1558,31 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     if not net_inflow and taker_vol_by_time and any(taker_vol_by_time.values()):
         net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
 
-    current_oi = oi_by_time[current_time]
+    current_oi = oi_by_time.get(current_time)
+    if current_oi is None:
+        empty_changes = {interval: _empty_change() for interval in TIME_INTERVALS}
+        return {
+            'symbol': symbol,
+            'source_exchanges': included_exchanges,
+            'included_exchanges': included_exchanges,
+            'missing_exchanges': missing_exchanges,
+            'status': 'empty',
+            'exchange_open_interest': [],
+            'exchange_statuses': list((coverage or {}).get('exchange_statuses') or []),
+            'current_open_interest': None,
+            'current_open_interest_formatted': 'N/A',
+            'current_open_interest_value': None,
+            'current_open_interest_value_formatted': 'N/A',
+            'current_price': None,
+            'current_price_formatted': 'N/A',
+            'price_change': None,
+            'price_change_percent': None,
+            'price_change_formatted': 'N/A',
+            'net_inflow': net_inflow,
+            'changes': empty_changes,
+            'current_time': current_time,
+        }
+
     current_kline = kline_by_time.get(current_time)
 
     current_open_interest = float(current_oi.sum_open_interest or 0)
@@ -1053,9 +1626,12 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     day_change = changes.get('24h', _empty_change())
     return {
         'symbol': symbol,
-        'source_exchanges': (coverage or {}).get('source_exchanges', []),
-        'missing_exchanges': (coverage or {}).get('missing_exchanges', []),
+        'source_exchanges': included_exchanges,
+        'included_exchanges': included_exchanges,
+        'missing_exchanges': missing_exchanges,
+        'status': status,
         'exchange_open_interest': exchange_open_interest,
+        'exchange_statuses': list((coverage or {}).get('exchange_statuses') or []),
         'current_open_interest': current_open_interest,
         'current_open_interest_formatted': format_number(current_open_interest),
         'current_open_interest_value': current_open_interest_value,
@@ -1146,6 +1722,9 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
             target_symbols,
             upper_bound=target_time,
         )
+
+        if any(((_coverage_map.get(symbol) or {}).get('status')) != 'complete' for symbol in target_symbols):
+            return True
 
         for symbol in target_symbols:
             oi_by_time = recent_open_interest_map.get(symbol, {})
