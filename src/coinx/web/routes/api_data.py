@@ -88,6 +88,10 @@ def _is_complete_homepage_payload(coins_data):
     if not coins_data:
         return False
 
+    for coin in coins_data:
+        if coin.get('status') != 'complete':
+            return False
+
     coin = coins_data[0]
     changes = coin.get('changes') or {}
     if isinstance(changes, list):
@@ -160,11 +164,18 @@ def _clear_homepage_snapshot_cache():
 def _format_homepage_coins_payload(coins_data):
     formatted_data = []
     for coin in coins_data:
+        included_exchanges = coin.get('included_exchanges')
+        if included_exchanges is None:
+            included_exchanges = coin.get('source_exchanges', [])
+
         formatted_coin = {
             'symbol': coin['symbol'],
-            'source_exchanges': coin.get('source_exchanges', []),
+            'source_exchanges': included_exchanges,
+            'included_exchanges': included_exchanges,
             'missing_exchanges': coin.get('missing_exchanges', []),
+            'status': coin.get('status', 'complete' if included_exchanges else 'empty'),
             'exchange_open_interest': coin.get('exchange_open_interest', []),
+            'exchange_statuses': coin.get('exchange_statuses', []),
             'current_open_interest': coin['current_open_interest'],
             'current_open_interest_formatted': coin['current_open_interest_formatted'],
             'current_open_interest_value': coin['current_open_interest_value'],

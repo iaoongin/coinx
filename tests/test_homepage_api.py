@@ -30,6 +30,9 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
             'data': [
                 {
                     'symbol': 'BTCUSDT',
+                    'included_exchanges': ['binance'],
+                    'missing_exchanges': [],
+                    'status': 'complete',
                     'current_open_interest': 100.0,
                     'current_open_interest_formatted': '100.00',
                     'current_open_interest_value': 200.0,
@@ -96,6 +99,9 @@ def test_get_coins_reuses_snapshot_cache_within_same_anchor(monkeypatch):
             'data': [
                 {
                     'symbol': 'BTCUSDT',
+                    'included_exchanges': ['binance'],
+                    'missing_exchanges': [],
+                    'status': 'complete',
                     'current_open_interest': 100.0,
                     'current_open_interest_formatted': '100.00',
                     'current_open_interest_value': 200.0,
@@ -154,6 +160,9 @@ def test_get_coins_cache_expires_when_anchor_changes(monkeypatch):
             'data': [
                 {
                     'symbol': 'BTCUSDT',
+                    'included_exchanges': ['binance'],
+                    'missing_exchanges': [],
+                    'status': 'complete',
                     'current_open_interest': 100.0,
                     'current_open_interest_formatted': '100.00',
                     'current_open_interest_value': 200.0,
@@ -261,11 +270,13 @@ def test_update_data_can_wait_for_homepage_series_refresh(monkeypatch):
 def test_get_coins_returns_complete_interval_contract(db_session, monkeypatch):
     seed_complete_homepage_series(db_session)
 
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
     monkeypatch.setattr(
         'coinx.web.routes.api_data.get_homepage_series_snapshot',
         lambda symbols: repository_get_homepage_series_snapshot(symbols=symbols, session=db_session),
     )
+    monkeypatch.setattr('coinx.web.routes.api_data._start_homepage_refresh_async', lambda *args, **kwargs: False)
 
     client = create_test_client()
 
@@ -300,6 +311,9 @@ def test_get_coins_treats_partial_net_inflow_as_complete_when_changes_are_full(m
 
         return {
             'symbol': 'BTCUSDT',
+            'included_exchanges': ['binance'],
+            'missing_exchanges': [],
+            'status': 'complete',
             'current_open_interest': 100.0,
             'current_open_interest_formatted': '100.00',
             'current_open_interest_value': 200.0,
@@ -371,6 +385,9 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
 
         return {
             'symbol': 'BTCUSDT',
+            'included_exchanges': ['binance'],
+            'missing_exchanges': [],
+            'status': 'complete' if state['repaired'] else 'partial',
             'current_open_interest': 100.0,
             'current_open_interest_formatted': '100.00',
             'current_open_interest_value': 200.0,

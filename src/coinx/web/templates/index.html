@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>多周期矩阵 - CoinX</title>
+  <title>多周期矩阵</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -145,16 +145,17 @@
     }
 
     .coin-head {
-      display: grid;
-      grid-template-columns: minmax(100px, 0.9fr) minmax(120px, 1.2fr) minmax(180px, 2fr);
-      gap: 10px;
+      display: flex;
       align-items: center;
+      gap: 10px;
       padding: 8px 10px;
       background: var(--bg-elevated);
       border-bottom: 1px solid var(--border-subtle);
+      overflow: hidden;
     }
 
     .coin-symbol {
+      flex: 0 0 auto;
       font-family: var(--font-mono);
       color: var(--text-primary);
       font-size: 15px;
@@ -162,44 +163,87 @@
       text-decoration: none;
     }
 
-    .current-strip {
+    .coin-meta-line {
+      flex: 1 1 auto;
       display: flex;
+      align-items: center;
       gap: 10px;
-      flex-wrap: wrap;
-      font-size: 12px;
+      min-width: 0;
+      overflow-x: auto;
+      white-space: nowrap;
+      scrollbar-width: none;
       color: var(--text-muted);
+      font-size: 12px;
     }
 
-    .current-strip b {
+    .coin-meta-line::-webkit-scrollbar {
+      display: none;
+    }
+
+    .coin-meta-total {
+      flex: 0 0 auto;
       color: var(--text-secondary);
-      font-family: var(--font-mono);
+      font-size: 13px;
       font-weight: 600;
     }
 
-    .exchange-strip {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 6px;
-      flex-wrap: wrap;
+    .coin-meta-total b {
+      color: var(--gold-bright);
+      font-family: var(--font-mono);
+      font-weight: 700;
     }
 
     .exchange-pill {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 3px 7px;
+      padding: 3px 8px;
       border: 1px solid var(--border-subtle);
       border-radius: 999px;
       color: var(--text-muted);
       font-size: 11px;
       font-family: var(--font-mono);
       background: rgba(255, 255, 255, 0.025);
+      flex: 0 0 auto;
     }
 
     .exchange-pill b {
       color: var(--text-secondary);
       font-weight: 600;
+    }
+
+    .exchange-pill.included {
+      color: var(--text-secondary);
+      border-color: rgba(212, 175, 55, 0.24);
+      background: rgba(212, 175, 55, 0.06);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .exchange-pill.excluded {
+      color: var(--text-muted);
+      border-color: rgba(212, 175, 55, 0.16);
+      background: rgba(255, 255, 255, 0.015);
+      font-size: 10px;
+      opacity: 0.72;
+    }
+
+    .exchange-pill.unsupported {
+      color: var(--text-muted);
+      border-style: dashed;
+      border-color: rgba(148, 163, 184, 0.2);
+      background: rgba(255, 255, 255, 0.01);
+      font-size: 10px;
+      opacity: 0.6;
+    }
+
+    .exchange-pill.unknown {
+      color: var(--text-muted);
+      border-style: dotted;
+      border-color: rgba(148, 163, 184, 0.18);
+      background: rgba(255, 255, 255, 0.012);
+      font-size: 10px;
+      opacity: 0.7;
     }
 
     .matrix-wrap {
@@ -312,15 +356,14 @@
 
     @media (max-width: 760px) {
       .header-row,
-      .toolbar,
-      .coin-head {
+      .toolbar {
         display: flex;
         flex-direction: column;
         align-items: stretch;
       }
 
-      .exchange-strip {
-        justify-content: flex-start;
+      .coin-head {
+        align-items: center;
       }
 
       .search-input {
@@ -366,14 +409,15 @@
       <article v-for="coin in filteredCoins" :key="coin.symbol" class="coin-panel">
         <div class="coin-head">
           <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-symbol">[[ shortSymbol(coin.symbol) ]]</a>
-          <div class="current-strip">
-            <span>持仓 <b>[[ coin.current_open_interest_formatted || 'N/A' ]]</b></span>
-            <span>价值 <b>[[ coin.current_open_interest_value_formatted || 'N/A' ]]</b></span>
-            <span>价格 <b>[[ coin.current_price_formatted || 'N/A' ]]</b></span>
-          </div>
-          <div class="exchange-strip">
-            <span v-for="item in coin.exchange_open_interest || []" :key="item.exchange" class="exchange-pill">
-              [[ formatExchangeName(item.exchange) ]] <b>[[ formatPercent(item.quantity_share_percent) ]]</b>
+          <div class="coin-meta-line" :title="coinMetaLine(coin)">
+            <span class="coin-meta-total">持仓量 <b>[[ coin.current_open_interest_formatted || 'N/A' ]]</b></span>
+            <span
+              v-for="item in coin.exchange_statuses || []"
+              :key="item.exchange"
+              class="exchange-pill"
+              :class="item.status"
+            >
+              [[ formatExchangeEntry(item) ]]
             </span>
           </div>
         </div>
@@ -382,30 +426,30 @@
           <div class="matrix">
             <div class="cell matrix-head window-cell">窗口</div>
             <div class="cell matrix-head">净流入</div>
-            <div class="cell matrix-head">价格%</div>
             <div class="cell matrix-head">价格</div>
-            <div class="cell matrix-head">量%</div>
+            <div class="cell matrix-head">价格%</div>
             <div class="cell matrix-head">量</div>
-            <div class="cell matrix-head">价值%</div>
+            <div class="cell matrix-head">量%</div>
             <div class="cell matrix-head">价值</div>
+            <div class="cell matrix-head">价值%</div>
 
             <template v-for="row in matrixRows(coin)" :key="coin.symbol + row.interval">
               <div class="cell window-cell">[[ row.interval ]]</div>
               <div class="cell metric" :class="valueClass(row.net_inflow)">
                 [[ formatNetInflow(row.net_inflow) ]]
               </div>
+              <div class="cell raw-value">[[ row.current_price_formatted || 'N/A' ]]</div>
               <div class="cell metric" :class="valueClass(row.price_change_percent)">
                 [[ formatChange(row.price_change_percent) ]]
               </div>
-              <div class="cell raw-value">[[ row.current_price_formatted || 'N/A' ]]</div>
+              <div class="cell raw-value">[[ row.open_interest_formatted || 'N/A' ]]</div>
               <div class="cell metric" :class="valueClass(row.ratio)">
                 [[ formatChange(row.ratio) ]]
               </div>
-              <div class="cell raw-value">[[ row.open_interest_formatted || 'N/A' ]]</div>
+              <div class="cell raw-value">[[ row.open_interest_value_formatted || 'N/A' ]]</div>
               <div class="cell metric" :class="valueClass(row.value_ratio)">
                 [[ formatChange(row.value_ratio) ]]
               </div>
-              <div class="cell raw-value">[[ row.open_interest_value_formatted || 'N/A' ]]</div>
             </template>
           </div>
         </div>
@@ -476,10 +520,38 @@
 
         const formatPercent = (value) => {
           if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-          return `${Number(value).toFixed(1)}%`;
+          return `${Number(value).toFixed(0)}%`;
         };
 
         const formatExchangeName = (exchange) => String(exchange || '--').toUpperCase();
+
+        const formatExchangeList = (exchanges) => {
+          if (!Array.isArray(exchanges) || exchanges.length === 0) return '';
+          return exchanges.map((exchange) => formatExchangeName(exchange)).join('、');
+        };
+
+        const formatExchangeEntry = (item) => {
+          const exchangeName = formatExchangeName(item?.exchange);
+          if (item?.status === 'included') {
+            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(${formatPercent(item.quantity_share_percent)})`;
+          }
+          if (item?.status === 'excluded') {
+            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(剔除)`;
+          }
+          if (item?.status === 'unknown') {
+            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(待确认)`;
+          }
+          return `${exchangeName} 不支持`;
+        };
+
+        const coinMetaLine = (coin) => {
+          const parts = [`${shortSymbol(coin?.symbol || '')}`, `持仓量 ${coin?.current_open_interest_formatted || 'N/A'}`];
+          const items = Array.isArray(coin?.exchange_statuses) ? coin.exchange_statuses : [];
+          items.forEach((item) => {
+            parts.push(formatExchangeEntry(item));
+          });
+          return parts.join(' · ');
+        };
 
         const refreshHomepageSeries = async () => {
           const controller = new AbortController();
@@ -545,6 +617,8 @@
           formatNetInflow,
           formatPercent,
           formatExchangeName,
+          formatExchangeEntry,
+          coinMetaLine,
           loadData,
         };
       },

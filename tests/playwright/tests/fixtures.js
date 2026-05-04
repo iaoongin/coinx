@@ -3,6 +3,9 @@ const { test: base, expect } = require('@playwright/test');
 const mockHomepageCoins = [
   {
     symbol: 'BTCUSDT',
+    included_exchanges: ['binance', 'bybit'],
+    missing_exchanges: ['okx'],
+    status: 'partial',
     current_open_interest: 1234567.89,
     current_open_interest_formatted: '1.23M',
     current_open_interest_value: 85432123.45,
@@ -12,6 +15,38 @@ const mockHomepageCoins = [
     price_change: 2.34,
     price_change_percent: 2.34,
     price_change_formatted: '+2.34%',
+    exchange_statuses: [
+      {
+        exchange: 'binance',
+        status: 'included',
+        open_interest: 890000,
+        open_interest_formatted: '0.89M',
+        open_interest_value: 62000000,
+        open_interest_value_formatted: '$62.00M',
+        share_percent: 72.0,
+        quantity_share_percent: 72.0,
+      },
+      {
+        exchange: 'bybit',
+        status: 'included',
+        open_interest: 344567.89,
+        open_interest_formatted: '0.34M',
+        open_interest_value: 23432123.45,
+        open_interest_value_formatted: '$23.43M',
+        share_percent: 28.0,
+        quantity_share_percent: 28.0,
+      },
+      {
+        exchange: 'okx',
+        status: 'excluded',
+        open_interest: 120000,
+        open_interest_formatted: '0.12M',
+        open_interest_value: 8400000,
+        open_interest_value_formatted: '$8.40M',
+        share_percent: null,
+        quantity_share_percent: null,
+      },
+    ],
     net_inflow: {
       '5m': 120000,
       '15m': 220000,

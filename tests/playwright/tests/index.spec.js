@@ -17,9 +17,11 @@ test.describe('首页测试', () => {
   test('首页渲染了币种数据', async ({ page }) => {
     await visit(page, '/');
     await expect(page.locator('body')).toContainText('BTC');
+    await expect(page.locator('body')).toContainText('BTC · 持仓量 1.23M');
     await expect(page.locator('body')).toContainText('1.23M');
-    await expect(page.locator('body')).toContainText('85.43M');
-    await expect(page.locator('body')).toContainText('120.00K');
+    await expect(page.locator('body')).toContainText('0.89M(72%)');
+    await expect(page.locator('body')).toContainText('0.34M(28%)');
+    await expect(page.locator('body')).toContainText('0.12M(剔除)');
   });
 
   test('首页标题与状态操作在同一标题行', async ({ page }) => {
@@ -28,5 +30,7 @@ test.describe('首页测试', () => {
     await expect(page.getByText('更新时间')).toBeVisible();
     await expect(page.getByText('下次窗口')).toBeVisible();
     await expect(button(page, '刷新')).toBeVisible();
+    await expect(page.locator('.coin-meta-line')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('采集：');
   });
 });
