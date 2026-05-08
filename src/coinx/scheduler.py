@@ -21,6 +21,7 @@ from .config import (
     REPAIR_TRACKED_INTERVAL,
 )
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
+from .repositories.market_structure_score import get_market_structure_score_symbols
 from .utils import logger
 
 
@@ -77,6 +78,33 @@ def scheduled_repair_tracked():
         logger.info('修补跟踪币种最新点完成')
     except Exception as e:
         logger.error(f'修补跟踪币种最新点失败: {e}')
+        logger.exception(e)
+
+
+@scheduler.scheduled_job(
+    'interval',
+    seconds=REPAIR_TRACKED_INTERVAL,
+    id='repair_market_structure_score_job',
+    max_instances=1,
+    coalesce=True
+)
+def scheduled_repair_market_structure_score():
+    """轻量修补评分币种所需的多交易所最新序列"""
+    try:
+        score_symbols = get_market_structure_score_symbols()
+        if not score_symbols:
+            logger.info('无评分币种，跳过市场结构评分修补')
+            return
+        logger.info(f'开始修补市场结构评分币种最新点，共 {len(score_symbols)} 个')
+        repair_rolling_tracked_symbols(
+            symbols=score_symbols,
+            series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            points=REPAIR_ROLLING_POINTS,
+            max_workers=REPAIR_ROLLING_MAX_WORKERS,
+        )
+        logger.info('修补市场结构评分币种最新点完成')
+    except Exception as e:
+        logger.error(f'修补市场结构评分币种最新点失败: {e}')
         logger.exception(e)
 
 

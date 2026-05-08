@@ -10,7 +10,7 @@ module.exports = defineConfig({
   outputDir: './.artifacts/results',
   reporter: [['html', { outputFolder: './.artifacts/report', open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:5500',
+    baseURL: 'http://localhost:5502',
     trace: 'on-first-retry',
     headless: true,
     viewport: { width: 1280, height: 720 },
@@ -22,9 +22,9 @@ module.exports = defineConfig({
     },
   ],
   webServer: {
-    command: 'cd ../.. && WEB_PASSWORD=playwright-test-password PYTHONPATH=src python src/coinx/web/app.py',
-    port: 5500,
+    command: 'cd ../.. && WEB_PASSWORD=admin123 WEB_PORT=5502 PYTHONPATH=src python src/coinx/web/app.py',
+    port: 5502,
     timeout: 120000,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
   },
 });

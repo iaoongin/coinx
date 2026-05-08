@@ -71,6 +71,45 @@ def get_market_tickers(
             db.close()
 
 
+def get_market_ticker_symbols(
+    rank_type: str = 'price_change',
+    direction: str = 'down',
+    limit: int = 100,
+    close_time: Optional[int] = None,
+    session=None,
+) -> List[str]:
+    """获取行情快照中的币种列表，只读取 symbol 列。"""
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        if close_time is None:
+            close_time = db.query(func.max(MarketTickers.close_time)).scalar()
+
+        if close_time is None:
+            return []
+
+        query = db.query(MarketTickers.symbol).filter(MarketTickers.close_time == close_time)
+
+        if rank_type == 'price_change':
+            if direction == 'down':
+                query = query.order_by(asc(MarketTickers.price_change_percent))
+            else:
+                query = query.order_by(desc(MarketTickers.price_change_percent))
+        elif rank_type == 'volume':
+            query = query.order_by(desc(MarketTickers.volume))
+        elif rank_type == 'quote_volume':
+            query = query.order_by(desc(MarketTickers.quote_volume))
+        else:
+            query = query.order_by(asc(MarketTickers.price_change_percent))
+
+        rows = query.limit(limit).all()
+        return [row[0] for row in rows if row and row[0]]
+    finally:
+        if own_session:
+            db.close()
+
+
 def get_latest_close_time(session=None) -> Optional[int]:
     """获取最新的快照时间"""
     own_session = session is None

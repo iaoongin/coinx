@@ -169,31 +169,67 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
     repaired_records = 0
     pages = 0
     window_precise = adapter.supports_time_window(series_type)
+    latest_event_time = None
 
     groups = _group_contiguous_times(target_times, period=period) if window_precise else [sorted(set(target_times))]
     for group in groups:
         start_time = group[0] if window_precise else None
         end_time = group[-1] if window_precise else None
         limit = max(len(group), 2)
-        payload = adapter.fetch_series_payload(
-            series_type=series_type,
-            symbol=symbol,
-            period=period,
-            limit=limit,
-            session=http_session,
-            start_time=start_time,
-            end_time=end_time,
-        )
-        records = adapter.parse_series_payload(series_type, payload, symbol, period)
-        records = _trim_unclosed_records(series_type, records, now_ms, period=period)
         expected_times = set(group)
-        filtered_records = [record for record in records if record.get(time_field) in expected_times]
+        fetch_attempts = [
+            {
+                'start_time': start_time,
+                'end_time': end_time,
+            }
+        ]
+        if window_precise:
+            fetch_attempts.append({'start_time': None, 'end_time': None})
+
+        filtered_records = []
+        for attempt in fetch_attempts:
+            payload = adapter.fetch_series_payload(
+                series_type=series_type,
+                symbol=symbol,
+                period=period,
+                limit=limit,
+                session=http_session,
+                start_time=attempt['start_time'],
+                end_time=attempt['end_time'],
+            )
+            records = adapter.parse_series_payload(series_type, payload, symbol, period)
+            records = _trim_unclosed_records(series_type, records, now_ms, period=period)
+            for record in records:
+                record_time = record.get(time_field)
+                if record_time is not None:
+                    latest_event_time = max(latest_event_time or record_time, record_time)
+            filtered_records = [record for record in records if record.get(time_field) in expected_times]
+            if filtered_records:
+                break
+
         if not filtered_records:
             continue
 
         affected += upsert_series_records(adapter.exchange_id, series_type, filtered_records, session=db_session)
         repaired_records += len(filtered_records)
         pages += 1
+
+    if repaired_records == 0:
+        return {
+            'exchange': adapter.exchange_id,
+            'symbol': symbol,
+            'series_type': series_type,
+            'period': period,
+            'status': 'skipped',
+            'mode': 'rolling',
+            'reason': 'no_data',
+            'window_precise': window_precise,
+            'target_times': sorted(target_times),
+            'affected': 0,
+            'records': 0,
+            'pages': 0,
+            'latest_event_time': latest_event_time,
+        }
 
     return {
         'exchange': adapter.exchange_id,
@@ -207,6 +243,7 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
         'affected': affected,
         'records': repaired_records,
         'pages': pages,
+        'latest_event_time': latest_event_time,
     }
 
 

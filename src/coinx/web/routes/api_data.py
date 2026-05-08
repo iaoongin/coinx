@@ -14,8 +14,12 @@ from coinx.collector import (
     get_long_short_ratio,
     get_open_interest,
     refresh_market_tickers,
+    repair_rolling_tracked_symbols,
     repair_latest_tracked_symbols,
     repair_tracked_symbols,
+)
+from coinx.collector.binance.repair import (
+    repair_rolling_tracked_symbols as repair_binance_rolling_tracked_symbols,
 )
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
 from coinx.config import (
@@ -29,6 +33,7 @@ from coinx.config import (
     BINANCE_SERIES_REPAIR_PERIOD,
     BINANCE_SERIES_REPAIR_SLEEP_MS,
     BINANCE_SERIES_TYPES,
+    ENABLED_EXCHANGES,
     REPAIR_HISTORY_COVERAGE_HOURS,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
@@ -46,11 +51,16 @@ from coinx.repositories.homepage_series import (
     latest_closed_5m_open_time,
     should_refresh_homepage_series,
 )
+from coinx.repositories.market_structure_score import (
+    get_market_structure_score_snapshot,
+    get_market_structure_score_symbols,
+)
 from coinx.utils import logger
 
 
 api_data_bp = Blueprint('api_data', __name__)
 HOME_PAGE_REFRESH_LOCK = threading.Lock()
+MARKET_STRUCTURE_REFRESH_LOCK = threading.Lock()
 HOMEPAGE_SNAPSHOT_CACHE_LOCK = threading.Lock()
 HOMEPAGE_SNAPSHOT_CACHE = {}
 
@@ -60,7 +70,65 @@ SUPPORTED_SERIES_TYPES = {
     'open_interest_hist',
     'klines',
     'global_long_short_account_ratio',
+    'taker_buy_sell_vol',
 }
+MARKET_STRUCTURE_MARKET_SERIES_TYPES = {
+    'klines',
+    'open_interest_hist',
+    'taker_buy_sell_vol',
+}
+MARKET_STRUCTURE_SENTIMENT_SERIES_TYPES = {
+    'top_long_short_position_ratio',
+    'top_long_short_account_ratio',
+    'global_long_short_account_ratio',
+}
+
+
+def _log_market_structure_refresh_component(component_name, summary):
+    if not summary:
+        logger.info('市场结构评分补齐组件跳过: component=%s', component_name)
+        return
+
+    component_stats = _summarize_market_structure_refresh_results(summary)
+
+    logger.info(
+        '市场结构评分补齐组件完成: component=%s mode=%s success=%s failure=%s skipped=%s symbols=%s series_types=%s affected=%s records=%s no_data=%s latest_event_time=%s',
+        component_name,
+        summary.get('mode') or 'history',
+        summary.get('success_count', 0),
+        summary.get('failure_count', 0),
+        summary.get('skipped_count', 0),
+        len(summary.get('symbols') or []),
+        summary.get('series_types') or [],
+        component_stats['affected'],
+        component_stats['records'],
+        component_stats['no_data_count'],
+        component_stats['latest_event_time'],
+    )
+
+
+def _summarize_market_structure_refresh_results(summary):
+    results = (summary or {}).get('results') or []
+    latest_event_time = None
+    no_data_count = 0
+    affected = 0
+    records = 0
+
+    for item in results:
+        affected += item.get('affected') or 0
+        records += item.get('records') or 0
+        if item.get('reason') == 'no_data':
+            no_data_count += 1
+        item_latest_event_time = item.get('latest_event_time')
+        if item_latest_event_time is not None:
+            latest_event_time = max(latest_event_time or item_latest_event_time, item_latest_event_time)
+
+    return {
+        'affected': affected,
+        'records': records,
+        'no_data_count': no_data_count,
+        'latest_event_time': latest_event_time,
+    }
 
 
 def _run_homepage_refresh(symbols, series_types, latest_only=False):
@@ -134,6 +202,155 @@ def _start_homepage_refresh_async(symbols, series_types=None, latest_only=False)
     refresh_thread.daemon = True
     refresh_thread.start()
     return True
+
+
+def _start_market_structure_refresh_async(symbols, series_types=None, exchanges=None):
+    if not symbols:
+        return False
+
+    refresh_thread = threading.Thread(
+        target=_run_market_structure_refresh,
+        kwargs={
+            'symbols': symbols,
+            'series_types': series_types or list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
+            'exchanges': exchanges or list(ENABLED_EXCHANGES),
+        },
+    )
+    refresh_thread.daemon = True
+    refresh_thread.start()
+    return True
+
+
+def _run_market_structure_refresh(symbols, series_types, exchanges=None):
+    if not MARKET_STRUCTURE_REFRESH_LOCK.acquire(blocking=False):
+        logger.info('市场结构评分补齐正在执行，跳过重复触发')
+        return {
+            'status': 'skipped',
+            'message': 'market structure score refresh already running',
+            'symbols': symbols,
+            'series_types': series_types,
+            'exchanges': exchanges,
+            'success_count': 0,
+            'failure_count': 0,
+            'skipped_count': 0,
+            'results': [],
+        }
+
+    try:
+        normalized_series_types = _normalize_series_types(series_types)
+        market_series_types = [
+            series_type
+            for series_type in normalized_series_types
+            if series_type in MARKET_STRUCTURE_MARKET_SERIES_TYPES
+        ]
+        sentiment_series_types = [
+            series_type
+            for series_type in normalized_series_types
+            if series_type in MARKET_STRUCTURE_SENTIMENT_SERIES_TYPES
+        ]
+
+        market_summary = None
+        sentiment_summary = None
+
+        logger.info(
+            '开始执行市场结构评分补齐: symbols=%s exchanges=%s market_series=%s sentiment_series=%s',
+            len(symbols or []),
+            exchanges or [],
+            market_series_types,
+            sentiment_series_types,
+        )
+
+        if market_series_types:
+            market_started_at = time.perf_counter()
+            market_summary = repair_rolling_tracked_symbols(
+                symbols=symbols,
+                series_types=market_series_types,
+                exchanges=exchanges,
+            )
+            logger.info(
+                '市场结构评分行情序列补齐耗时=%.2fs',
+                time.perf_counter() - market_started_at,
+            )
+            _log_market_structure_refresh_component('market_series', market_summary)
+
+        if sentiment_series_types:
+            sentiment_started_at = time.perf_counter()
+            sentiment_summary = repair_binance_rolling_tracked_symbols(
+                symbols=symbols,
+                series_types=sentiment_series_types,
+            )
+            logger.info(
+                '市场结构评分情绪序列补齐耗时=%.2fs',
+                time.perf_counter() - sentiment_started_at,
+            )
+            _log_market_structure_refresh_component('binance_sentiment_series', sentiment_summary)
+
+        component_results = []
+        if market_summary:
+            market_stats = _summarize_market_structure_refresh_results(market_summary)
+            component_results.append(
+                {
+                    'component': 'market_series',
+                    'mode': market_summary.get('mode') or 'history',
+                    'summary': market_summary,
+                    'stats': market_stats,
+                }
+            )
+        if sentiment_summary:
+            sentiment_stats = _summarize_market_structure_refresh_results(sentiment_summary)
+            component_results.append(
+                {
+                    'component': 'binance_sentiment_series',
+                    'mode': sentiment_summary.get('mode') or 'rolling',
+                    'summary': sentiment_summary,
+                    'stats': sentiment_stats,
+                }
+            )
+
+        success_count = sum((item.get('success_count') or 0) for item in (market_summary, sentiment_summary) if item)
+        failure_count = sum((item.get('failure_count') or 0) for item in (market_summary, sentiment_summary) if item)
+        skipped_count = sum((item.get('skipped_count') or 0) for item in (market_summary, sentiment_summary) if item)
+        merged_results = []
+        for item in (market_summary, sentiment_summary):
+            if item:
+                merged_results.extend(item.get('results') or [])
+        total_stats = _summarize_market_structure_refresh_results({'results': merged_results})
+
+        if failure_count == 0:
+            status = 'success'
+        elif success_count > 0 or skipped_count > 0:
+            status = 'partial_success'
+        else:
+            status = 'error'
+
+        logger.info(
+            '市场结构评分补齐完成: status=%s success=%s failure=%s skipped=%s affected=%s records=%s no_data=%s latest_event_time=%s components=%s',
+            status,
+            success_count,
+            failure_count,
+            skipped_count,
+            total_stats['affected'],
+            total_stats['records'],
+            total_stats['no_data_count'],
+            total_stats['latest_event_time'],
+            [item['component'] for item in component_results],
+        )
+
+        return {
+            'status': status,
+            'message': 'market structure score refresh completed',
+            'symbols': symbols,
+            'series_types': normalized_series_types,
+            'exchanges': exchanges,
+            'success_count': success_count,
+            'failure_count': failure_count,
+            'skipped_count': skipped_count,
+            'components': component_results,
+            'stats': total_stats,
+            'results': merged_results,
+        }
+    finally:
+        MARKET_STRUCTURE_REFRESH_LOCK.release()
 
 
 def _get_homepage_cache_anchor():
@@ -234,6 +451,16 @@ def _validate_series_types(series_types):
     return None
 
 
+def _normalize_series_types(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [item for item in value if item]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(',') if item.strip()]
+    return [item for item in value if item]
+
+
 @api_data_bp.route('/api/binance-series/config')
 def get_binance_series_config():
     return jsonify(
@@ -243,8 +470,8 @@ def get_binance_series_config():
             'data': {
                 'collect': {
                     'limit': BINANCE_SERIES_LIMIT,
-                    'series_types': BINANCE_SERIES_TYPES,
-                    'periods': BINANCE_SERIES_PERIODS,
+                    'series_types': _normalize_series_types(BINANCE_SERIES_TYPES),
+                    'periods': _normalize_series_types(BINANCE_SERIES_PERIODS),
                 },
                 'repair': {
                     'enabled': BINANCE_SERIES_REPAIR_ENABLED,
@@ -265,6 +492,77 @@ def get_binance_series_config():
             },
         }
     )
+
+
+@api_data_bp.route('/api/market-structure-score')
+def get_market_structure_score():
+    logger.info('开始加载合约市场结构评分')
+    try:
+        symbol = request.args.get('symbol')
+        limit = request.args.get('limit', 100)
+
+        if symbol:
+            symbols = [symbol.strip().upper()]
+        else:
+            symbols = get_market_structure_score_symbols()
+            try:
+                symbols = symbols[:max(1, min(int(limit), 200))]
+            except Exception:
+                symbols = symbols[:100]
+
+        snapshot = get_market_structure_score_snapshot(symbols=symbols)
+        return jsonify(
+            {
+                'status': 'success',
+                'message': 'market structure score loaded',
+                'data': snapshot.get('data') or [],
+                'cache_update_time': snapshot.get('cache_update_time'),
+                'summary': snapshot.get('summary') or {},
+            }
+        )
+    except Exception as e:
+        logger.error(f'加载合约市场结构评分失败: {e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load market structure score: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/market-structure-score/refresh', methods=['POST'])
+def refresh_market_structure_score():
+    logger.info('开始触发合约市场结构评分补齐')
+    try:
+        payload = request.get_json(silent=True) or {}
+        force = request.args.get('force', 'false').lower() == 'true' or bool(payload.get('force', False))
+        wait_for_completion = request.args.get('wait', 'false').lower() == 'true' or bool(payload.get('wait', False))
+        try:
+            symbols = get_market_structure_score_symbols()
+        except Exception as e:
+            logger.error(f'加载评分补齐所需的评分币种失败: {e}')
+            symbols = []
+
+        refresh_kwargs = {
+            'symbols': symbols,
+            'series_types': _normalize_series_types(BINANCE_SERIES_TYPES),
+            'exchanges': list(ENABLED_EXCHANGES),
+        }
+
+        if wait_for_completion or force:
+            summary = _run_market_structure_refresh(**refresh_kwargs)
+            return jsonify(
+                {
+                    'status': 'success',
+                    'message': 'market structure score refresh completed',
+                    'data': summary,
+                }
+            )
+
+        update_thread = threading.Thread(target=_run_market_structure_refresh, kwargs=refresh_kwargs)
+        update_thread.daemon = True
+        update_thread.start()
+        return jsonify({'status': 'success', 'message': 'market structure score refresh triggered'})
+    except Exception as e:
+        logger.error(f'触发合约市场结构评分补齐失败: {e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to trigger market structure refresh: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/coins')
@@ -292,6 +590,18 @@ def get_coins():
                 series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
                 latest_only=True,
             )
+            try:
+                score_symbols = get_market_structure_score_symbols()
+            except Exception as e:
+                logger.error(f'加载评分修补所需币种失败: {e}')
+                score_symbols = []
+            if score_symbols:
+                logger.info('首页历史序列不完整，开始后台补全评分所需多交易所最新点')
+                _start_market_structure_refresh_async(
+                    score_symbols,
+                    series_types=list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
+                    exchanges=list(ENABLED_EXCHANGES),
+                )
 
         formatted_data = _format_homepage_coins_payload(snapshot['data'])
         payload = {

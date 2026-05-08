@@ -146,6 +146,57 @@ def fetch_open_interest_hist(symbol, period, limit, session=None, start_time=Non
     return _request_bybit('/v5/market/open-interest', params, session=session)
 
 
+def get_funding_rate(symbol, session=None):
+    payload = _request_bybit(
+        '/v5/market/tickers',
+        {
+            'category': BYBIT_CATEGORY,
+            'symbol': symbol,
+        },
+        session=session,
+    )
+    rows = payload.get('list', payload) if isinstance(payload, dict) else payload
+    row = rows[0] if isinstance(rows, list) and rows else None
+    if not isinstance(row, dict):
+        return None
+    return {
+        'exchange': BYBIT_EXCHANGE_ID,
+        'symbol': symbol,
+        'fundingRate': _to_float(row.get('fundingRate')),
+        'nextFundingTime': int(row['nextFundingTime']) if row.get('nextFundingTime') else None,
+    }
+
+
+def get_all_funding_rates(session=None):
+    logger.info('开始加载全量资金费率: exchange=bybit')
+    payload = _request_bybit(
+        '/v5/market/tickers',
+        {
+            'category': BYBIT_CATEGORY,
+        },
+        session=session,
+    )
+    rows = payload.get('list', payload) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return {}
+
+    result = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = row.get('symbol')
+        if not symbol:
+            continue
+        result[symbol] = {
+            'exchange': BYBIT_EXCHANGE_ID,
+            'symbol': symbol,
+            'fundingRate': _to_float(row.get('fundingRate')),
+            'nextFundingTime': int(row['nextFundingTime']) if row.get('nextFundingTime') else None,
+        }
+    logger.info('全量资金费率加载完成: exchange=bybit count=%d', len(result))
+    return result
+
+
 def parse_klines(payload, symbol, period):
     rows = payload.get('list', payload) if isinstance(payload, dict) else payload
     parsed = []

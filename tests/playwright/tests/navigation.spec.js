@@ -1,7 +1,7 @@
 const { test, expect } = require('./fixtures');
 const { NAV_ITEMS, navLinks, visit } = require('./contracts');
 
-const pages = ['/', '/market-rank', '/binance-series', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT'];
+const pages = ['/', '/market-rank', '/market-structure-score', '/binance-series', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT'];
 
 test.describe('导航栏契约', () => {
   test('导航链接文本和 href 稳定', async ({ page }) => {

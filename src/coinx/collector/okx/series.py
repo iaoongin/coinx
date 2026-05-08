@@ -184,6 +184,52 @@ def fetch_taker_buy_sell_vol(symbol, period, limit, session=None, start_time=Non
     return payload
 
 
+def get_funding_rate(symbol, session=None):
+    payload = _request_okx(
+        '/api/v5/public/funding-rate',
+        {'instId': to_exchange_symbol(symbol)},
+        session=session,
+    )
+    row = payload[0] if isinstance(payload, list) and payload else payload
+    if not isinstance(row, dict):
+        return None
+    return {
+        'exchange': OKX_EXCHANGE_ID,
+        'symbol': symbol,
+        'instId': row.get('instId'),
+        'fundingRate': _to_float(row.get('fundingRate')),
+        'nextFundingTime': int(row['nextFundingTime']) if row.get('nextFundingTime') else None,
+        'fundingTime': int(row['fundingTime']) if row.get('fundingTime') else None,
+    }
+
+
+def get_all_funding_rates(session=None):
+    logger.info('开始加载全量资金费率: exchange=okx')
+    payload = _request_okx(
+        '/api/v5/public/funding-rate',
+        {'instId': 'ANY'},
+        session=session,
+    )
+    rows = payload if isinstance(payload, list) else []
+    result = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = to_internal_symbol(row.get('instId', '')) if row.get('instId') else None
+        if not symbol:
+            continue
+        result[symbol] = {
+            'exchange': OKX_EXCHANGE_ID,
+            'symbol': symbol,
+            'instId': row.get('instId'),
+            'fundingRate': _to_float(row.get('fundingRate')),
+            'nextFundingTime': int(row['nextFundingTime']) if row.get('nextFundingTime') else None,
+            'fundingTime': int(row['fundingTime']) if row.get('fundingTime') else None,
+        }
+    logger.info('全量资金费率加载完成: exchange=okx count=%d', len(result))
+    return result
+
+
 def parse_klines(payload, symbol, period):
     parsed = []
     for item in payload:

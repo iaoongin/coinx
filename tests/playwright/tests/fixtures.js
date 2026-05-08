@@ -223,6 +223,150 @@ const mockCoinDetail = {
   },
 };
 
+const mockMarketStructureScores = [
+  {
+    symbol: 'BTCUSDT',
+    rank_index: 1,
+    total_score: 72.4,
+    trend_score: 30,
+    momentum_score: 25,
+    position_score: 25,
+    sentiment_score: 5,
+    risk_score: -5,
+    trend_direction: '多头趋势',
+    momentum_direction: '多',
+    position_structure: '多头开仓推动',
+    sentiment_state: '多头共识增强',
+    risk_level: '低',
+    trade_signal: '强多',
+    operation_advice: '只找回踩做多，不追高',
+    current_time: 1711526400000,
+    current_price: 69234.12,
+    current_open_interest_value: 85432123.45,
+    included_exchanges: ['binance', 'okx', 'bybit'],
+    missing_exchanges: [],
+    exchange_scores: [
+      {
+        exchange: 'binance',
+        weight: 0.52,
+        weight_percent: 52,
+        total_score: 74.1,
+        weighted_total_score: 38.53,
+        open_interest_value: 40000000,
+        open_interest: 1200000,
+        current_price: 69220.11,
+        ema20: 68888.1,
+        ema60: 68444.1,
+        atr: 123.45,
+        volume_ratio: 1.34,
+        taker_net_pressure_ratio: 0.18,
+        open_interest_change_ratio: 0.06,
+        trend_direction: '多头趋势',
+        momentum_direction: '多',
+        position_structure: '多头开仓推动',
+        funding_rate: 0.0009,
+      },
+      {
+        exchange: 'okx',
+        weight: 0.31,
+        weight_percent: 31,
+        total_score: 68.3,
+        weighted_total_score: 21.17,
+        open_interest_value: 25000000,
+        open_interest: 800000,
+        current_price: 69250.45,
+        ema20: 68899.3,
+        ema60: 68451.7,
+        atr: 121.1,
+        volume_ratio: 1.12,
+        taker_net_pressure_ratio: 0.12,
+        open_interest_change_ratio: 0.04,
+        trend_direction: '多头趋势',
+        momentum_direction: '多',
+        position_structure: '蓄势增仓',
+        funding_rate: 0.0007,
+      },
+      {
+        exchange: 'bybit',
+        weight: 0.17,
+        weight_percent: 17,
+        total_score: 61.8,
+        weighted_total_score: 10.51,
+        open_interest_value: 18432123.45,
+        open_interest: 500000,
+        current_price: 69240.27,
+        ema20: 68895.8,
+        ema60: 68460,
+        atr: 119.88,
+        volume_ratio: 1.05,
+        taker_net_pressure_ratio: 0.09,
+        open_interest_change_ratio: 0.03,
+        trend_direction: '震荡',
+        momentum_direction: '弱',
+        position_structure: '蓄势增仓',
+        funding_rate: 0.0005,
+      },
+    ],
+    funding_rate: 0.0008,
+    binance_context: {
+      top_long_short_position_ratio: { current: { long_short_ratio: 1.96 }, previous: { long_short_ratio: 1.83 } },
+      top_long_short_account_ratio: { current: { long_short_ratio: 1.48 }, previous: { long_short_ratio: 1.37 } },
+      global_long_short_account_ratio: { current: { long_short_ratio: 0.88 }, previous: { long_short_ratio: 0.95 } },
+    },
+    top_long_short_ratio: 1.96,
+    global_long_short_ratio: 0.88,
+    top_long_short_ratio_delta: 0.13,
+    global_long_short_ratio_delta: -0.07,
+    exchange_open_interest: [
+      { exchange: 'binance', open_interest: 1200000, open_interest_value: 40000000, share_percent: 52, quantity_share_percent: 55, score: 74.1, weighted_score: 38.53 },
+      { exchange: 'okx', open_interest: 800000, open_interest_value: 25000000, share_percent: 31, quantity_share_percent: 29, score: 68.3, weighted_score: 21.17 },
+      { exchange: 'bybit', open_interest: 500000, open_interest_value: 18432123.45, share_percent: 17, quantity_share_percent: 16, score: 61.8, weighted_score: 10.51 },
+    ],
+    raw_inputs: {},
+  },
+  {
+    symbol: 'ETHUSDT',
+    rank_index: 2,
+    total_score: 38.8,
+    trend_score: 0,
+    momentum_score: 25,
+    position_score: 10,
+    sentiment_score: 5,
+    risk_score: -1,
+    trend_direction: '震荡',
+    momentum_direction: '多',
+    position_structure: '蓄势增仓',
+    sentiment_state: '多头共识增强',
+    risk_level: '低',
+    trade_signal: '偏多',
+    operation_advice: '轻仓做多，或等待回踩确认',
+    current_time: 1711526400000,
+    current_price: 3521.45,
+    current_open_interest_value: 43000000,
+    included_exchanges: ['binance', 'okx'],
+    missing_exchanges: ['bybit'],
+    exchange_scores: [
+      { exchange: 'binance', weight: 0.65, weight_percent: 65, total_score: 40.0, weighted_total_score: 26.0, open_interest_value: 28000000, open_interest: 800000, current_price: 3522.12, ema20: 3510.0, ema60: 3500.0, atr: 55.2, volume_ratio: 1.21, taker_net_pressure_ratio: 0.14, open_interest_change_ratio: 0.02, trend_direction: '震荡', momentum_direction: '多', position_structure: '蓄势增仓', funding_rate: 0.0004 },
+      { exchange: 'okx', weight: 0.35, weight_percent: 35, total_score: 36.5, weighted_total_score: 12.8, open_interest_value: 15000000, open_interest: 420000, current_price: 3519.9, ema20: 3508.5, ema60: 3498.8, atr: 54.8, volume_ratio: 1.08, taker_net_pressure_ratio: 0.11, open_interest_change_ratio: 0.02, trend_direction: '震荡', momentum_direction: '弱', position_structure: '蓄势增仓', funding_rate: 0.0002 },
+    ],
+    funding_rate: 0.0003,
+    binance_context: {
+      top_long_short_position_ratio: { current: { long_short_ratio: 1.58 }, previous: { long_short_ratio: 1.50 } },
+      top_long_short_account_ratio: { current: { long_short_ratio: 1.25 }, previous: { long_short_ratio: 1.18 } },
+      global_long_short_account_ratio: { current: { long_short_ratio: 1.02 }, previous: { long_short_ratio: 0.97 } },
+    },
+    top_long_short_ratio: 1.58,
+    global_long_short_ratio: 1.02,
+    top_long_short_ratio_delta: 0.08,
+    global_long_short_ratio_delta: 0.05,
+    exchange_open_interest: [
+      { exchange: 'binance', open_interest: 800000, open_interest_value: 28000000, share_percent: 65, quantity_share_percent: 66, score: 40.0, weighted_score: 26.0 },
+      { exchange: 'okx', open_interest: 420000, open_interest_value: 15000000, share_percent: 35, quantity_share_percent: 34, score: 36.5, weighted_score: 12.8 },
+    ],
+    raw_inputs: {},
+  },
+];
+
 function jsonResponse(data, status = 200) {
   return {
     status,
@@ -258,6 +402,47 @@ const test = base.extend({
             message: 'homepage data loaded',
             data: mockHomepageCoins,
             cache_update_time: '2026-04-07T01:00:00',
+          })
+        );
+        return;
+      }
+
+      if (pathname === '/api/market-structure-score') {
+        await route.fulfill(
+          jsonResponse({
+            status: 'success',
+            message: 'market structure score loaded',
+            data: mockMarketStructureScores,
+            cache_update_time: 1711526400000,
+            summary: {
+              total_symbols: mockMarketStructureScores.length,
+              complete_symbols: 1,
+              partial_symbols: 1,
+              empty_symbols: 0,
+              strong_long_count: 1,
+              long_count: 1,
+              neutral_count: 0,
+              short_count: 0,
+              strong_short_count: 0,
+              high_risk_count: 0,
+            },
+          })
+        );
+        return;
+      }
+
+      if (pathname === '/api/market-structure-score/refresh' && request.method() === 'POST') {
+        await route.fulfill(
+          jsonResponse({
+            status: 'success',
+            message: 'market structure score refresh completed',
+            data: {
+              status: 'success',
+              message: 'market structure score refresh completed',
+              success_count: 3,
+              failure_count: 0,
+              skipped_count: 0,
+            },
           })
         );
         return;
@@ -404,7 +589,7 @@ const test = base.extend({
   page: async ({ page }, use) => {
     await page.goto('/login');
     await page.locator('#username').fill('admin');
-    await page.locator('#password').fill('playwright-test-password');
+    await page.locator('#password').fill('admin123');
     await page.getByRole('button', { name: '登录' }).click();
     await expect(page).toHaveURL(/\/$/);
 

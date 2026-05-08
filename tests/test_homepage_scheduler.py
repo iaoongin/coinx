@@ -1,5 +1,5 @@
 from coinx.repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
-from coinx.scheduler import scheduled_repair_tracked
+from coinx.scheduler import scheduled_repair_market_structure_score, scheduled_repair_tracked
 
 
 def test_scheduled_repair_tracked_repairs_active_coins(monkeypatch):
@@ -35,3 +35,24 @@ def test_scheduled_repair_tracked_skips_when_no_active_coins(monkeypatch):
     scheduled_repair_tracked()
 
     assert calls['repair'] == 0
+
+
+def test_scheduled_repair_market_structure_score_repairs_score_symbols(monkeypatch):
+    calls = {'repair': None}
+
+    def fake_repair(symbols=None, series_types=None, **kwargs):
+        calls['repair'] = {
+            'symbols': symbols,
+            'series_types': series_types,
+        }
+        return {'status': 'success', 'results': []}
+
+    monkeypatch.setattr('coinx.scheduler.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT'])
+    monkeypatch.setattr('coinx.scheduler.repair_rolling_tracked_symbols', fake_repair)
+
+    scheduled_repair_market_structure_score()
+
+    assert calls['repair'] == {
+        'symbols': ['BTCUSDT', 'ETHUSDT'],
+        'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+    }

@@ -347,6 +347,7 @@ def test_get_coins_treats_partial_net_inflow_as_complete_when_changes_are_full(m
 
 def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete(monkeypatch):
     state = {'repaired': False}
+    score_refresh = {}
 
     def build_coin():
         base_changes = {
@@ -402,6 +403,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
         }
 
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.should_refresh_homepage_series', lambda symbols: not state['repaired'])
 
     def fake_repair(**kwargs):
@@ -418,6 +420,10 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
         }
 
     monkeypatch.setattr('coinx.web.routes.api_data.repair_latest_tracked_symbols', fake_repair)
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data._run_market_structure_refresh',
+        lambda **kwargs: score_refresh.update(kwargs) or {'status': 'success', 'results': []},
+    )
     started = {}
 
     class FakeThread:
@@ -444,6 +450,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
     payload = response.get_json()
     assert started['called'] is True
     assert state['repaired'] is True
+    assert score_refresh['symbols'] == ['BTCUSDT', 'ETHUSDT']
     coin = payload['data'][0]
     assert coin['symbol'] == 'BTCUSDT'
     assert all(change['interval'] != '168h' for change in coin['changes'])

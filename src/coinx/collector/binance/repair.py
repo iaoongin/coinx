@@ -747,6 +747,7 @@ def repair_rolling_series(symbol, series_type, target_times, now_ms=None, http_s
     affected = 0
     repaired_records = 0
     pages = 0
+    latest_event_time = None
 
     for group in _group_contiguous_times(target_times):
         start_time = group[0]
@@ -768,6 +769,10 @@ def repair_rolling_series(symbol, series_type, target_times, now_ms=None, http_s
             now_ms=current_time_ms,
             period=BINANCE_SERIES_REPAIR_PERIOD,
         )
+        for record in records:
+            event_time = record.get(time_field)
+            if event_time is not None:
+                latest_event_time = max(latest_event_time or event_time, event_time)
         expected_times = set(group)
         filtered_records = [record for record in records if record.get(time_field) in expected_times]
         if not filtered_records:
@@ -776,6 +781,20 @@ def repair_rolling_series(symbol, series_type, target_times, now_ms=None, http_s
         affected += upsert_series_records(series_type, filtered_records, session=db_session)
         repaired_records += len(filtered_records)
         pages += 1
+
+    if repaired_records == 0:
+        return {
+            'symbol': symbol,
+            'series_type': series_type,
+            'period': BINANCE_SERIES_REPAIR_PERIOD,
+            'status': 'skipped',
+            'reason': 'no_data',
+            'target_times': sorted(target_times),
+            'affected': 0,
+            'records': 0,
+            'pages': 0,
+            'latest_event_time': latest_event_time,
+        }
 
     return {
         'symbol': symbol,
@@ -786,6 +805,7 @@ def repair_rolling_series(symbol, series_type, target_times, now_ms=None, http_s
         'affected': affected,
         'records': repaired_records,
         'pages': pages,
+        'latest_event_time': latest_event_time,
     }
 
 

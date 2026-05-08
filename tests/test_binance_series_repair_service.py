@@ -490,10 +490,10 @@ def test_repair_tracked_symbols_logs_batch_progress(monkeypatch):
         now_ms=900000,
     )
 
-    assert any('寮€濮嬩慨琛ュ巻鍙插簭鍒? 甯佺鏁伴噺=2' in message for message in info_logs)
-    assert any('淇ˉ杩涘害: 浠诲姟=1/4, 甯佺=BTCUSDT, 绫诲瀷=klines' in message for message in info_logs)
-    assert any('淇ˉ缁撴灉: 浠诲姟=4/4, 甯佺=ETHUSDT, 绫诲瀷=open_interest_hist, 鐘舵€?success' in message for message in info_logs)
-    assert any('鍘嗗彶搴忓垪淇ˉ瀹屾垚: 鎬讳换鍔℃暟=4, 鎴愬姛=4, 澶辫触=0, 璺宠繃=0' in message for message in info_logs)
+    assert any('币种数量=2' in message and '总任务数=4' in message for message in info_logs)
+    assert any('任务=1/4' in message and '币种=BTCUSDT' in message and '类型=klines' in message for message in info_logs)
+    assert any('任务=4/4' in message and '币种=ETHUSDT' in message and '类型=open_interest_hist' in message and '状态=success' in message for message in info_logs)
+    assert any('总任务数=4' in message and '成功=4' in message and '失败=0' in message and '跳过=0' in message for message in info_logs)
 
 
 def test_run_series_repair_job_respects_enabled_flag(monkeypatch):
@@ -576,6 +576,28 @@ def test_repair_rolling_tracked_symbols_skips_existing_points(db_session, monkey
     assert summary['precheck_skipped_count'] == 0
     assert calls == [(900000, 900000)]
     assert [row.open_time for row in rows] == [600000, 900000, 1200000]
+
+
+def test_repair_rolling_series_marks_no_data_as_skipped(monkeypatch):
+    from coinx.collector.binance.repair import repair_rolling_series
+
+    monkeypatch.setattr('coinx.collector.binance.repair.fetch_series_payload', lambda **kwargs: [])
+    monkeypatch.setattr('coinx.collector.binance.repair.parse_series_payload', lambda *args, **kwargs: [])
+
+    result = repair_rolling_series(
+        symbol='BTCUSDT',
+        series_type='top_long_short_position_ratio',
+        target_times=[900000],
+        now_ms=1500000,
+        db_session=object(),
+    )
+
+    assert result['status'] == 'skipped'
+    assert result['reason'] == 'no_data'
+    assert result['records'] == 0
+    assert result['affected'] == 0
+    assert result['pages'] == 0
+    assert result['latest_event_time'] is None
 
 
 def test_run_history_repair_job_uses_configured_batch(monkeypatch):

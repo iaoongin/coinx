@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>合约市场结构评分</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    :root {
+      --page-max-width: 1480px;
+      --page-padding: 20px;
+    }
+
+    body {
+      margin: 0;
+      padding: var(--page-padding);
+      font-family: 'Noto Sans SC', sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(212, 175, 55, 0.08), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(45, 212, 191, 0.06), transparent 30%),
+        var(--bg-primary);
+    }
+
+    #app { max-width: var(--page-max-width); margin: 0 auto; }
+
+    .shell {
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      animation: fadeInUp 0.5s ease;
+    }
+
+    .shell::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+      opacity: 0.25;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), transparent 90%);
+    }
+
+    .header-row {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .header-left h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--text-primary);
+      white-space: nowrap;
+    }
+
+    .header-left h1 span {
+      color: var(--gold-primary);
+    }
+
+    .header-subtitle {
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .time-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      text-align: right;
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    .time-info .value {
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    .time-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .btn {
+      padding: 7px 12px;
+      border: 1px solid var(--border-default);
+      border-radius: 9px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all var(--transition-fast);
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      color: #080808;
+      border-color: var(--gold-primary);
+    }
+
+    .btn-primary:hover {
+      background: var(--gold-bright);
+    }
+
+    .summary-grid {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      flex-wrap: nowrap;
+      gap: 8px;
+      margin-bottom: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: thin;
+    }
+
+    .summary-card {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius);
+      padding: 9px 12px;
+      min-width: 0;
+    }
+
+    .summary-label {
+      flex: 0 0 auto;
+      color: var(--text-muted);
+      font-size: 11px;
+      margin-bottom: 0;
+      white-space: nowrap;
+    }
+
+    .summary-value {
+      flex: 0 0 auto;
+      font-family: var(--font-mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .summary-caption {
+      margin-top: 0;
+      margin-left: auto;
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .controls {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: thin;
+    }
+
+    .controls-left,
+    .controls-right {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .search-input {
+      min-width: 180px;
+      height: 32px;
+      padding: 0 10px;
+      border-radius: 9px;
+      border: 1px solid var(--border-default);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      outline: none;
+      font-size: 12px;
+    }
+
+    .search-input:focus {
+      border-color: var(--gold-primary);
+      box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.12);
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--border-default);
+      border-radius: 999px;
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .chip.chip-strong-long,
+    .chip.chip-low-risk {
+      border-color: rgba(34, 197, 94, 0.16);
+      color: rgba(220, 252, 231, 0.58);
+      background: rgba(22, 163, 74, 0.025);
+    }
+
+    .chip.chip-long {
+      border-color: rgba(45, 212, 191, 0.16);
+      color: rgba(204, 251, 241, 0.56);
+      background: rgba(20, 184, 166, 0.025);
+    }
+
+    .chip.chip-neutral,
+    .chip.chip-medium-risk {
+      border-color: rgba(148, 163, 184, 0.18);
+      color: rgba(226, 232, 240, 0.54);
+      background: rgba(100, 116, 139, 0.02);
+    }
+
+    .chip.chip-short {
+      border-color: rgba(251, 146, 60, 0.16);
+      color: rgba(255, 237, 213, 0.58);
+      background: rgba(234, 88, 12, 0.025);
+    }
+
+    .chip.chip-strong-short,
+    .chip.chip-high-risk {
+      border-color: rgba(248, 113, 113, 0.16);
+      color: rgba(254, 226, 226, 0.58);
+      background: rgba(220, 38, 38, 0.03);
+    }
+
+    .chip.active {
+      border-color: rgba(212, 175, 55, 0.45);
+      background: rgba(212, 175, 55, 0.10);
+      color: var(--gold-bright);
+    }
+
+    .chip.chip-all.active {
+      border-color: rgba(212, 175, 55, 0.45);
+      background: rgba(212, 175, 55, 0.12);
+      color: var(--gold-bright);
+    }
+
+    .chip.chip-strong-long.active,
+    .chip.chip-low-risk.active {
+      border-color: rgba(34, 197, 94, 0.72);
+      background: linear-gradient(135deg, rgba(22, 163, 74, 0.42), rgba(21, 128, 61, 0.24));
+      color: #dcfce7;
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .chip.chip-long.active {
+      border-color: rgba(45, 212, 191, 0.64);
+      background: linear-gradient(135deg, rgba(20, 184, 166, 0.36), rgba(13, 148, 136, 0.20));
+      color: #ccfbf1;
+      box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .chip.chip-neutral.active,
+    .chip.chip-medium-risk.active {
+      border-color: rgba(148, 163, 184, 0.56);
+      background: linear-gradient(135deg, rgba(100, 116, 139, 0.34), rgba(71, 85, 105, 0.18));
+      color: #e2e8f0;
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .chip.chip-short.active {
+      border-color: rgba(251, 146, 60, 0.64);
+      background: linear-gradient(135deg, rgba(234, 88, 12, 0.36), rgba(194, 65, 12, 0.20));
+      color: #ffedd5;
+      box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .chip.chip-strong-short.active,
+    .chip.chip-high-risk.active {
+      border-color: rgba(248, 113, 113, 0.72);
+      background: linear-gradient(135deg, rgba(220, 38, 38, 0.40), rgba(153, 27, 27, 0.22));
+      color: #fee2e2;
+      box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .chip:hover {
+      border-color: var(--border-strong);
+      color: var(--text-primary);
+    }
+
+    .rules-panel {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--card-radius);
+      background: rgba(255, 255, 255, 0.015);
+      margin-bottom: 10px;
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.4;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .rules-panel strong {
+      color: var(--text-secondary);
+    }
+
+    .table-wrap {
+      position: relative;
+      z-index: 1;
+      overflow-x: auto;
+      border: 1px solid var(--border-default);
+      border-radius: var(--card-radius-lg);
+      background: var(--bg-secondary);
+    }
+
+    .table-wrap.loading {
+      overflow: hidden;
+    }
+
+    .table-loading-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(10, 12, 18, 0.58);
+      backdrop-filter: blur(2px);
+    }
+
+    .table-loading-spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      border-top-color: var(--gold-primary);
+      animation: spin 0.8s linear infinite;
+    }
+
+    .table-loading-text {
+      color: var(--text-secondary);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+
+    .score-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1360px;
+    }
+
+    .score-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      padding: 14px 12px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border-subtle);
+      white-space: nowrap;
+    }
+
+    .score-table tbody td {
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: center;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .score-table tbody tr:hover {
+      background: var(--bg-hover);
+    }
+
+    .score-table tbody tr.row-toggle {
+      cursor: pointer;
+    }
+
+    .symbol-cell {
+      text-align: left !important;
+    }
+
+    .symbol-link {
+      color: var(--text-primary);
+      text-decoration: none;
+      font-family: var(--font-mono);
+      font-weight: 700;
+    }
+
+    .rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 8px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-weight: 700;
+    }
+
+    .signal-badge,
+    .risk-badge,
+    .mini-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .signal-strong-long {
+      background: linear-gradient(135deg, rgba(22, 163, 74, 0.30), rgba(21, 128, 61, 0.18));
+      color: #dcfce7;
+      border: 1px solid rgba(34, 197, 94, 0.55);
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    .signal-long {
+      background: linear-gradient(135deg, rgba(20, 184, 166, 0.24), rgba(13, 148, 136, 0.14));
+      color: #ccfbf1;
+      border: 1px solid rgba(45, 212, 191, 0.45);
+      box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    .signal-neutral {
+      background: linear-gradient(135deg, rgba(100, 116, 139, 0.28), rgba(71, 85, 105, 0.16));
+      color: #e2e8f0;
+      border: 1px solid rgba(148, 163, 184, 0.42);
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+    .signal-short {
+      background: linear-gradient(135deg, rgba(234, 88, 12, 0.26), rgba(194, 65, 12, 0.16));
+      color: #ffedd5;
+      border: 1px solid rgba(251, 146, 60, 0.45);
+      box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    .signal-strong-short {
+      background: linear-gradient(135deg, rgba(220, 38, 38, 0.32), rgba(153, 27, 27, 0.18));
+      color: #fee2e2;
+      border: 1px solid rgba(248, 113, 113, 0.55);
+      box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .risk-low { background: rgba(45, 212, 191, 0.12); color: #8ef5e6; border: 1px solid rgba(45, 212, 191, 0.18); }
+    .risk-medium { background: rgba(245, 158, 11, 0.12); color: #ffd58a; border: 1px solid rgba(245, 158, 11, 0.18); }
+    .risk-high { background: rgba(239, 68, 68, 0.12); color: #ffafaf; border: 1px solid rgba(239, 68, 68, 0.18); }
+
+    .metric-positive { color: var(--positive); font-family: var(--font-mono); font-weight: 700; }
+    .metric-negative { color: var(--negative); font-family: var(--font-mono); font-weight: 700; }
+    .metric-muted { color: var(--text-muted); font-family: var(--font-mono); }
+    .metric-score { font-family: var(--font-mono); font-size: 16px; font-weight: 700; }
+    .metric-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+    }
+
+    .help-tip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      margin-left: 6px;
+      border-radius: 50%;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: help;
+      user-select: none;
+      vertical-align: middle;
+    }
+
+    .help-tip:hover {
+      border-color: var(--gold-primary);
+      color: var(--gold-bright);
+      background: rgba(212, 175, 55, 0.08);
+    }
+
+    .help-tip::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 10px);
+      transform: translateX(-50%);
+      min-width: 240px;
+      max-width: 320px;
+      padding: 10px 12px;
+      border: 1px solid var(--border-default);
+      border-radius: 10px;
+      background: rgba(11, 15, 23, 0.98);
+      box-shadow: var(--shadow-card);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1.5;
+      white-space: normal;
+      text-align: left;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    .help-tip::before {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 4px);
+      transform: translateX(-50%);
+      border: 6px solid transparent;
+      border-bottom-color: var(--border-default);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    .help-tip:hover::after,
+    .help-tip:hover::before {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .exchange-tags {
+      display: inline-flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .exchange-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-family: var(--font-mono);
+    }
+
+    .expand-row td {
+      padding: 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), rgba(255, 255, 255, 0.025));
+    }
+
+    .expand-panel {
+      padding: 10px 12px 12px;
+      text-align: left;
+    }
+
+    .diagnostic-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 0 0 10px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .diagnostic-label {
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .diagnostic-pills {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .diagnostic-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--text-secondary);
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .diagnostic-pill strong {
+      font-family: var(--font-mono);
+      font-weight: 700;
+    }
+
+    .diagnostic-pill.diag-missing {
+      border-color: rgba(251, 146, 60, 0.28);
+      background: rgba(234, 88, 12, 0.08);
+      color: #ffedd5;
+    }
+
+    .diagnostic-pill.diag-anchor {
+      border-color: rgba(248, 113, 113, 0.30);
+      background: rgba(220, 38, 38, 0.09);
+      color: #fee2e2;
+    }
+
+    .diagnostic-pill.diag-common {
+      border-color: rgba(148, 163, 184, 0.26);
+      background: rgba(100, 116, 139, 0.10);
+      color: #e2e8f0;
+    }
+
+    .exchange-name {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .bar-track {
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--gold-primary), rgba(45, 212, 191, 0.9));
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .detail-item {
+      padding: 9px 11px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .detail-item .label {
+      color: var(--text-muted);
+      font-size: 10px;
+      margin-bottom: 3px;
+    }
+
+    .detail-item .value {
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .state-row {
+      text-align: center;
+      padding: 54px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .state-row.loading {
+      color: var(--text-secondary);
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .mini-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1100px) {
+      .summary-grid {
+        flex-wrap: nowrap;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .summary-grid {
+        flex-wrap: nowrap;
+      }
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 12px;
+      }
+
+      .header-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .header-left {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+
+      .time-info {
+        align-items: flex-start;
+      }
+
+      .summary-grid {
+        flex-wrap: wrap;
+        overflow-x: visible;
+      }
+
+      .controls {
+        flex-wrap: wrap;
+        overflow-x: visible;
+      }
+
+      .controls-left,
+      .controls-right {
+        flex-wrap: wrap;
+      }
+
+      .search-input {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .rules-panel {
+        flex-wrap: wrap;
+        white-space: normal;
+        overflow-x: visible;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    {% include 'components/nav.html' %}
+
+    <div class="shell">
+{% raw %}
+      <script>
+        const DEFAULT_PAGE_LIMIT = 100;
+      </script>
+      <div class="header-row">
+        <div class="header-left">
+          <h1><span>◎</span> 合约市场结构评分</h1>
+          <div class="header-subtitle">5m 主周期 · 启用交易所聚合 · OI 加权 · 先看总分，再看交易所贡献</div>
+        </div>
+        <div class="header-right">
+          <div class="time-info">
+            <div class="time-row">最后更新 <span class="value">{{ lastUpdateTime || '--' }}</span></div>
+            <div class="time-row">刷新倒计时 <span class="value">{{ refreshCountdown }}</span></div>
+          </div>
+          <button class="btn btn-primary" @click="refreshData">
+            ↻ 刷新评分
+          </button>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="summary-label">评分币种</div>
+          <div class="summary-value">{{ summary.total_symbols || filteredRows.length }}</div>
+          <div class="summary-caption">可评分标的</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">强多 / 偏多</div>
+          <div class="summary-value" style="color: var(--positive);">{{ summary.strong_long_count || 0 }}<span style="font-size: 15px; color: var(--text-muted);"> / {{ summary.long_count || 0 }}</span></div>
+          <div class="summary-caption">看多信号</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">震荡 / 偏空</div>
+          <div class="summary-value" style="color: var(--text-secondary);">{{ summary.neutral_count || 0 }}<span style="font-size: 15px; color: var(--text-muted);"> / {{ summary.short_count || 0 }}</span></div>
+          <div class="summary-caption">观望与弱空</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">强空 / 风险高</div>
+          <div class="summary-value" style="color: var(--negative);">{{ summary.strong_short_count || 0 }}<span style="font-size: 15px; color: var(--text-muted);"> / {{ summary.high_risk_count || 0 }}</span></div>
+          <div class="summary-caption">追空与过热</div>
+        </div>
+        <div class="summary-card" v-if="summary.sentiment_health">
+          <div class="summary-label">情绪健康度</div>
+          <div class="summary-value">{{ formatPercentPlain(summary.sentiment_health.overall_coverage_percent) }}</div>
+          <div class="summary-caption">
+            {{ summary.sentiment_health.available_symbols || 0 }}/{{ summary.sentiment_health.symbol_count || 0 }} 可用 · {{ summary.sentiment_health.ready_symbols || 0 }} 就绪 · 滞后 {{ summary.sentiment_health.max_lag_bars || 0 }} 根
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="controls-left">
+          <input
+            v-model="searchText"
+            class="search-input"
+            type="text"
+            placeholder="搜索币种，例如 BTCUSDT"
+          >
+          <button class="chip chip-all" :class="{ active: signalFilter === 'all' }" @click="signalFilter = 'all'">全部</button>
+          <button class="chip chip-strong-long" :class="{ active: signalFilter === '强多' }" @click="signalFilter = '强多'">强多</button>
+          <button class="chip chip-long" :class="{ active: signalFilter === '偏多' }" @click="signalFilter = '偏多'">偏多</button>
+          <button class="chip chip-neutral" :class="{ active: signalFilter === '震荡' }" @click="signalFilter = '震荡'">震荡</button>
+          <button class="chip chip-short" :class="{ active: signalFilter === '偏空' }" @click="signalFilter = '偏空'">偏空</button>
+          <button class="chip chip-strong-short" :class="{ active: signalFilter === '强空' }" @click="signalFilter = '强空'">强空</button>
+        </div>
+        <div class="controls-right">
+          <label class="mini-note">
+            <span>币种数量</span>
+            <select v-model="pageLimit" class="chip" style="padding-right: 24px;">
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="150">150</option>
+              <option :value="200">200</option>
+            </select>
+          </label>
+          <button class="chip chip-all" :class="{ active: riskFilter === 'all' }" @click="riskFilter = 'all'">全部风险</button>
+          <button class="chip chip-low-risk" :class="{ active: riskFilter === '低' }" @click="riskFilter = '低'">低风险</button>
+          <button class="chip chip-medium-risk" :class="{ active: riskFilter === '中' }" @click="riskFilter = '中'">中风险</button>
+          <button class="chip chip-high-risk" :class="{ active: riskFilter === '高' }" @click="riskFilter = '高'">高风险</button>
+        </div>
+      </div>
+
+      <div class="rules-panel">
+        <span><strong>规则：</strong>5m 主周期，按启用交易所 OI 加权。</span>
+        <span><strong>范围：</strong>默认前 100 候选，可切换数量。</span>
+        <span><strong>信号：</strong>≥60 强多，30-59 偏多，-29~29 震荡，-59~-30 偏空，≤-60 强空。</span>
+        <span><strong>刷新：</strong>先补齐，再重拉评分。</span>
+      </div>
+
+      <div class="table-wrap" :class="{ loading: loading }" v-if="filteredRows.length > 0">
+        <div v-if="loading" class="table-loading-overlay">
+          <div class="table-loading-spinner"></div>
+          <div class="table-loading-text">加载评分中...</div>
+        </div>
+        <table class="score-table">
+          <thead>
+            <tr>
+              <th>排名</th>
+              <th>币种</th>
+              <th>总分 <span class="help-tip" data-tip="多交易所按 OI 持仓价值加权后的综合分数，由趋势、动量、仓位、情绪和风险加总得到。">?</span></th>
+              <th>交易信号 <span class="help-tip" data-tip="根据总分分档：强多、偏多、震荡、偏空、强空。">?</span></th>
+              <th>风险 <span class="help-tip" data-tip="结合资金费率、短周期价格波动和 ATR 计算风险分，再映射为低/中/高。">?</span></th>
+              <th>趋势 <span class="help-tip" data-tip="使用 5m K 线计算 EMA20 和 EMA60，价格在双均线之上/之下判定多空趋势。">?</span></th>
+              <th>动量 <span class="help-tip" data-tip="根据主动买卖压力和成交量放大倍数判断动量强弱。">?</span></th>
+              <th>仓位结构 <span class="help-tip" data-tip="比较当前和前一根 5m 的价格与 OI 变化，判断是开仓推动、回补还是减仓。">?</span></th>
+              <th>情绪 <span class="help-tip" data-tip="对比 Binance 大户与全市场多空比的变化方向，判断情绪偏多/偏空/中性。">?</span></th>
+              <th>交易所</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="row in filteredRows" :key="row.symbol">
+              <tr class="row-toggle" @click="toggleExpanded(row.symbol)">
+                <td>
+                  <span class="rank-badge">{{ row.rank_index || '--' }}</span>
+                </td>
+                <td class="symbol-cell">
+                  <a class="symbol-link" :href="`/coin-detail?symbol=${row.symbol}`" @click.stop>{{ row.symbol }}</a>
+                </td>
+                <td :class="scoreClass(row.total_score)">
+                  <span class="metric-score">{{ formatScore(row.total_score) }}</span>
+                </td>
+                <td>
+                  <span class="signal-badge" :class="signalClass(row.trade_signal)">{{ row.trade_signal || 'N/A' }}</span>
+                  <span class="metric-muted">({{ formatScore(row.total_score) }})</span>
+                </td>
+                <td>
+                  <span class="risk-badge" :class="riskClass(row.risk_level)">{{ row.risk_level || 'N/A' }}</span>
+                  <span class="metric-muted">({{ formatScore(row.risk_score) }})</span>
+                </td>
+                <td>{{ row.trend_direction || 'N/A' }} <span class="metric-muted">({{ formatScore(row.trend_score) }})</span></td>
+                <td>{{ row.momentum_direction || 'N/A' }} <span class="metric-muted">({{ formatScore(row.momentum_score) }})</span></td>
+                <td>{{ row.position_structure || 'N/A' }} <span class="metric-muted">({{ formatScore(row.position_score) }})</span></td>
+                <td>{{ row.sentiment_state || 'N/A' }} <span class="metric-muted">({{ formatScore(row.sentiment_score) }})</span></td>
+                <td>
+                  <div class="exchange-tags">
+                    <span class="exchange-tag" v-for="exchange in row.included_exchanges" :key="exchange">{{ exchange }}</span>
+                  </div>
+                </td>
+                <td class="metric-muted">{{ formatTime(row.current_time) }}</td>
+              </tr>
+              <tr v-if="expandedSymbol === row.symbol" class="expand-row">
+                <td colspan="11">
+                  <div class="expand-panel">
+                    <div v-if="getMissingExchangeDiagnostics(row).length" class="diagnostic-strip">
+                      <span class="diagnostic-label">未纳入交易所</span>
+                      <div class="diagnostic-pills">
+                        <span
+                          v-for="item in getMissingExchangeDiagnostics(row)"
+                          :key="`${row.symbol}-${item.exchange}-${item.reason}`"
+                          class="diagnostic-pill"
+                          :class="diagnosticClass(item.reason)"
+                          :title="formatExchangeDiagnosticDetail(item)"
+                        >
+                          <strong>{{ item.exchange }}</strong>
+                          <span>{{ item.reason_label }}</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="table-wrap">
+                      <table class="score-table exchange-detail-table">
+                        <thead>
+                          <tr>
+                            <th>交易所</th>
+                            <th>OI 占比</th>
+                            <th>OI 持仓价值</th>
+                            <th>基础分</th>
+                            <th>加权贡献</th>
+                            <th>当前价格</th>
+                            <th>EMA20</th>
+                            <th>EMA60</th>
+                            <th>资金费率</th>
+                            <th>平均振幅</th>
+                            <th>成交量放大</th>
+                            <th>OI 变化</th>
+                            <th>主动买卖压力</th>
+                            <th>趋势方向</th>
+                            <th>动量方向</th>
+                            <th>仓位结构</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="exchange in getExchangeRows(row)" :key="`${row.symbol}-${exchange.exchange}`">
+                            <td class="symbol-cell">
+                              <span class="exchange-name">{{ exchange.exchange }}</span>
+                            </td>
+                            <td>{{ formatPercentPlain(exchange.share_percent) }}</td>
+                            <td>{{ formatCompactNumber(exchange.open_interest_value, 2) }}</td>
+                            <td>
+                              <div :class="scoreClass(exchange.score)">{{ formatScore(exchange.score) }}</div>
+                            </td>
+                            <td>
+                              <div class="metric-stack">
+                                <div :class="scoreClass(exchange.weighted_score)">{{ formatScore(exchange.weighted_score) }}</div>
+                                <div class="metric-muted">{{ formatPercentPlain(exchange.share_percent) }}</div>
+                              </div>
+                            </td>
+                            <td>{{ formatPriceLike(exchange.current_price) }}</td>
+                            <td>{{ formatPriceLike(exchange.ema20) }}</td>
+                            <td>{{ formatPriceLike(exchange.ema60) }}</td>
+                            <td>{{ formatPercent(exchange.funding_rate * 100, 4) }}</td>
+                            <td>{{ formatPriceLike(exchange.atr) }}</td>
+                            <td>{{ formatMultiple(exchange.volume_ratio) }}</td>
+                            <td>{{ formatPercent(exchange.open_interest_change_ratio * 100) }}</td>
+                            <td>{{ formatPercent(exchange.taker_net_pressure_ratio * 100) }}</td>
+                            <td>{{ exchange.trend_direction || 'N/A' }}</td>
+                            <td>{{ exchange.momentum_direction || 'N/A' }}</td>
+                            <td>{{ exchange.position_structure || 'N/A' }}</td>
+                          </tr>
+                          <tr v-if="!getExchangeRows(row).length">
+                            <td colspan="16" class="state-row">暂无交易所明细</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="state-row loading" v-else-if="loading">加载中...</div>
+      <div class="state-row" v-else>暂无可用评分数据</div>
+{% endraw %}
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
+
+    const App = {
+      setup() {
+        const tableData = ref([]);
+        const loading = ref(false);
+        const lastUpdateTime = ref('');
+        const anchorLabel = ref('');
+        const refreshCountdown = ref('--');
+        const summary = ref({});
+        const pageLimit = ref(DEFAULT_PAGE_LIMIT);
+        const searchText = ref('');
+        const signalFilter = ref('all');
+        const riskFilter = ref('all');
+        const expandedSymbol = ref('');
+
+        let refreshTimer = null;
+        let countdownTimer = null;
+        const AUTO_REFRESH_MS = 5 * 60 * 1000;
+        let nextRefreshAt = null;
+
+        const formatNumber = (value, digits = 2) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          const num = Number(value);
+          return num.toLocaleString('zh-CN', {
+            minimumFractionDigits: digits,
+            maximumFractionDigits: digits,
+          });
+        };
+
+        const formatCompactNumber = (value, digits = 2) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          const num = Number(value);
+          const absNum = Math.abs(num);
+          if (absNum >= 1_000_000_000_000) return `${(num / 1_000_000_000_000).toFixed(digits)}T`;
+          if (absNum >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(digits)}B`;
+          if (absNum >= 1_000_000) return `${(num / 1_000_000).toFixed(digits)}M`;
+          if (absNum >= 1_000) return `${(num / 1_000).toFixed(digits)}K`;
+          return formatNumber(num, digits);
+        };
+
+        const formatLag = (bars, minutes) => {
+          if (bars === null || bars === undefined || Number.isNaN(Number(bars))) return 'N/A';
+          return `${Number(bars)} 根 5m / ${Number(minutes || 0)} 分钟`;
+        };
+
+        const updateRefreshCountdown = () => {
+          if (!nextRefreshAt) {
+            refreshCountdown.value = '--';
+            return;
+          }
+          const diffMs = Math.max(0, nextRefreshAt - Date.now());
+          const totalSeconds = Math.ceil(diffMs / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          refreshCountdown.value = `${minutes}:${String(seconds).padStart(2, '0')}`;
+        };
+
+        const formatPriceLike = (value) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          const num = Number(value);
+          return num.toLocaleString('zh-CN', {
+            minimumFractionDigits: num < 1 ? 6 : 2,
+            maximumFractionDigits: num < 1 ? 6 : 2,
+          });
+        };
+
+        const formatPercent = (value, digits = 2) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          const num = Number(value);
+          const sign = num > 0 ? '+' : '';
+          return `${sign}${num.toFixed(digits)}%`;
+        };
+
+        const formatPercentPlain = (value, digits = 2) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          const num = Number(value);
+          return `${num.toFixed(digits)}%`;
+        };
+
+        const formatMultiple = (value, digits = 2) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          return `${Number(value).toFixed(digits)}x`;
+        };
+
+        const formatScore = (value) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+          const num = Number(value);
+          const sign = num > 0 ? '+' : '';
+          return `${sign}${num.toFixed(1)}`;
+        };
+
+        const formatTime = (value) => {
+          if (!value) return '--';
+          const date = new Date(value);
+          if (Number.isNaN(date.getTime())) return '--';
+          return date.toLocaleString('zh-CN');
+        };
+
+        const signalClass = (signal) => {
+          switch (signal) {
+            case '强多':
+              return 'signal-strong-long';
+            case '偏多':
+              return 'signal-long';
+            case '偏空':
+              return 'signal-short';
+            case '强空':
+              return 'signal-strong-short';
+            default:
+              return 'signal-neutral';
+          }
+        };
+
+        const riskClass = (risk) => {
+          switch (risk) {
+            case '高':
+              return 'risk-high';
+            case '中':
+              return 'risk-medium';
+            default:
+              return 'risk-low';
+          }
+        };
+
+        const scoreClass = (value) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return 'metric-muted';
+          return Number(value) >= 0 ? 'metric-positive' : 'metric-negative';
+        };
+
+        const primaryMetric = (row) => {
+          if (!row || !row.exchange_scores || !row.exchange_scores.length) {
+            return {};
+          }
+          return row.exchange_scores[0] || {};
+        };
+
+        const getExchangeRows = (row) => {
+          if (!row) {
+            return [];
+          }
+          const exchangeScores = Array.isArray(row.exchange_scores) ? row.exchange_scores : [];
+          const exchangeOpenInterest = Array.isArray(row.exchange_open_interest) ? row.exchange_open_interest : [];
+          if (!exchangeScores.length && !exchangeOpenInterest.length) {
+            return [];
+          }
+
+          const openInterestByExchange = new Map(
+            exchangeOpenInterest.map((item) => [item.exchange, item]),
+          );
+
+          const sourceRows = exchangeScores.length ? exchangeScores : exchangeOpenInterest;
+
+          return sourceRows.map((metric) => {
+            const openInterestRow = openInterestByExchange.get(metric.exchange) || {};
+            return {
+              exchange: metric.exchange,
+              share_percent: openInterestRow.share_percent ?? metric.weight_percent,
+              quantity_share_percent: openInterestRow.quantity_share_percent ?? metric.weight_percent,
+              open_interest_value: openInterestRow.open_interest_value ?? metric.open_interest_value,
+              score: metric.total_score ?? openInterestRow.score,
+              weighted_score: metric.weighted_total_score ?? openInterestRow.weighted_score,
+              current_price: metric.current_price,
+              ema20: metric.ema20,
+              ema60: metric.ema60,
+              atr: metric.atr,
+              volume_ratio: metric.volume_ratio,
+              taker_net_pressure_ratio: metric.taker_net_pressure_ratio,
+              open_interest_change_ratio: metric.open_interest_change_ratio,
+              trend_direction: metric.trend_direction,
+              momentum_direction: metric.momentum_direction,
+              position_structure: metric.position_structure,
+              funding_rate: metric.funding_rate,
+            };
+          });
+        };
+
+        const getMissingExchangeDiagnostics = (row) => {
+          if (!row || !Array.isArray(row.exchange_diagnostics)) {
+            return [];
+          }
+          return row.exchange_diagnostics.filter((item) => item && item.included === false);
+        };
+
+        const diagnosticClass = (reason) => {
+          if (!reason) {
+            return 'diag-common';
+          }
+          if (String(reason).startsWith('anchor_')) {
+            return 'diag-anchor';
+          }
+          if (reason === 'no_common_anchor' || reason === 'metric_unavailable') {
+            return 'diag-common';
+          }
+          return 'diag-missing';
+        };
+
+        const formatExchangeDiagnosticDetail = (item) => {
+          if (!item || !item.detail) {
+            return item?.reason_label || '未知原因';
+          }
+          const detail = item.detail;
+          const parts = [];
+          if (detail.symbol_anchor_time) {
+            parts.push(`评分锚点 ${formatTime(detail.symbol_anchor_time)}`);
+          }
+          if (detail.latest_oi_time) {
+            parts.push(`最新 OI ${formatTime(detail.latest_oi_time)}`);
+          }
+          if (detail.latest_kline_time) {
+            parts.push(`最新 K 线 ${formatTime(detail.latest_kline_time)}`);
+          }
+          if (detail.latest_common_time) {
+            parts.push(`共同时间点 ${formatTime(detail.latest_common_time)}`);
+          }
+          return parts.length ? `${item.reason_label}：${parts.join(' | ')}` : (item.reason_label || '未知原因');
+        };
+
+        const filteredRows = computed(() => {
+          const keyword = searchText.value.trim().toUpperCase();
+          const signalPriority = {
+            '强多': 0,
+            '强空': 1,
+            '偏多': 2,
+            '偏空': 3,
+            '震荡': 4,
+          };
+
+          return (tableData.value || [])
+            .filter((row) => {
+              const matchesKeyword = !keyword || (row.symbol || '').toUpperCase().includes(keyword);
+              const matchesSignal = signalFilter.value === 'all' || row.trade_signal === signalFilter.value;
+              const matchesRisk = riskFilter.value === 'all' || row.risk_level === riskFilter.value;
+              return matchesKeyword && matchesSignal && matchesRisk;
+            })
+            .slice()
+            .sort((a, b) => {
+              const signalDiff = (signalPriority[a.trade_signal] ?? 99) - (signalPriority[b.trade_signal] ?? 99);
+              if (signalDiff !== 0) {
+                return signalDiff;
+              }
+
+              const scoreDiff = Number(b.total_score || 0) - Number(a.total_score || 0);
+              if (scoreDiff !== 0) {
+                return scoreDiff;
+              }
+
+              const oiDiff = Number(b.current_open_interest_value || 0) - Number(a.current_open_interest_value || 0);
+              if (oiDiff !== 0) {
+                return oiDiff;
+              }
+
+              return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+            });
+        });
+
+        const loadData = async (forceRefresh = false) => {
+          if (loading.value) {
+            return;
+          }
+
+          loading.value = true;
+          try {
+            if (forceRefresh) {
+              await fetch('/api/market-structure-score/refresh?wait=true', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+              });
+            }
+
+            const response = await fetch(`/api/market-structure-score?limit=${pageLimit.value}`);
+            const result = await response.json();
+            if (result.status === 'success') {
+              tableData.value = result.data || [];
+              summary.value = result.summary || {};
+              lastUpdateTime.value = formatTime(result.cache_update_time);
+              anchorLabel.value = formatTime(result.cache_update_time);
+              nextRefreshAt = Date.now() + AUTO_REFRESH_MS;
+              updateRefreshCountdown();
+            }
+          } catch (error) {
+            console.error('加载市场结构评分失败:', error);
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const refreshData = async () => {
+          await loadData(true);
+        };
+
+        const toggleExpanded = (symbol) => {
+          expandedSymbol.value = expandedSymbol.value === symbol ? '' : symbol;
+        };
+
+        watch(pageLimit, async () => {
+          expandedSymbol.value = '';
+          await loadData(false);
+        });
+
+        onMounted(() => {
+          loadData();
+          refreshTimer = setInterval(() => loadData(false), AUTO_REFRESH_MS);
+          updateRefreshCountdown();
+          countdownTimer = setInterval(updateRefreshCountdown, 1000);
+        });
+
+        onUnmounted(() => {
+          if (refreshTimer) {
+            clearInterval(refreshTimer);
+          }
+          if (countdownTimer) {
+            clearInterval(countdownTimer);
+          }
+        });
+
+        return {
+          tableData,
+          loading,
+          lastUpdateTime,
+          anchorLabel,
+          refreshCountdown,
+          summary,
+          pageLimit,
+          searchText,
+          signalFilter,
+          riskFilter,
+          expandedSymbol,
+          filteredRows,
+          refreshData,
+          toggleExpanded,
+          signalClass,
+          riskClass,
+          scoreClass,
+          formatNumber,
+          formatCompactNumber,
+          formatPriceLike,
+          formatPercent,
+          formatPercentPlain,
+          formatMultiple,
+          formatScore,
+          formatTime,
+          formatLag,
+          primaryMetric,
+          getExchangeRows,
+          getMissingExchangeDiagnostics,
+          diagnosticClass,
+          formatExchangeDiagnosticDetail,
+        };
+      }
+    };
+
+    createApp(App).mount('#app');
+  </script>
+</body>
+</html>

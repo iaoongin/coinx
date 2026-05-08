@@ -3,6 +3,7 @@ import time
 from coinx.repositories.market_tickers import (
     save_market_tickers,
     get_market_tickers,
+    get_market_ticker_symbols,
     get_latest_close_time,
     delete_old_records,
 )
@@ -129,6 +130,17 @@ def test_get_market_tickers_with_limit(db_session):
     results = get_market_tickers(rank_type='quote_volume', limit=5, session=db_session)
     
     assert len(results) == 5
+
+
+def test_get_market_ticker_symbols_returns_symbols_only(db_session):
+    close_time = int(time.time() * 1000)
+    seed_market_tickers(db_session, close_time, count=20)
+
+    symbols = get_market_ticker_symbols(rank_type='quote_volume', limit=5, session=db_session)
+
+    assert len(symbols) == 5
+    assert symbols[0].endswith('USDT')
+    assert isinstance(symbols[0], str)
 
 
 def test_get_market_tickers_empty(db_session):

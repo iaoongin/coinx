@@ -59,6 +59,37 @@ def test_collect_binance_series_api_validates_required_fields():
     assert payload['status'] == 'error'
 
 
+def test_collect_binance_series_api_accepts_top_long_short_account_ratio(monkeypatch):
+    def fake_collect(series_type, symbol, period, limit):
+        assert series_type == 'top_long_short_account_ratio'
+        return {
+            'series_type': series_type,
+            'symbol': symbol,
+            'period': period,
+            'limit': limit,
+            'affected': 1,
+            'records': [],
+        }
+
+    monkeypatch.setattr('coinx.web.routes.api_data.collect_and_store_series', fake_collect)
+    client = create_test_client()
+
+    response = client.post(
+        '/api/binance-series/collect',
+        json={
+            'series_type': 'top_long_short_account_ratio',
+            'symbol': 'BTCUSDT',
+            'period': '5m',
+            'limit': 20,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['status'] == 'success'
+    assert payload['data']['series_type'] == 'top_long_short_account_ratio'
+
+
 def test_get_binance_series_config_api_returns_defaults():
     client = create_test_client()
 

@@ -171,6 +171,75 @@ def test_exchange_rolling_repair_skips_unsupported_symbols(db_session, monkeypat
     assert any('PROMUSDT' in message for message in info_logs)
 
 
+def test_exchange_rolling_repair_falls_back_to_latest_page_when_precise_window_misses(db_session, monkeypatch):
+    calls = []
+
+    @dataclass(frozen=True)
+    class FallbackAdapter:
+        exchange_id: str = 'okx'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((symbol, start_time, end_time))
+            if start_time is not None or end_time is not None:
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'open_time': 900000,
+                        'close_time': 1199999,
+                        'open_price': 1,
+                        'high_price': 2,
+                        'low_price': 1,
+                        'close_price': 1.5,
+                    }
+                ]
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'open_time': 1200000,
+                    'close_time': 1499999,
+                    'open_price': 1,
+                    'high_price': 2,
+                    'low_price': 1,
+                    'close_price': 1.8,
+                }
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [FallbackAdapter()])
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['okx'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    rows = db_session.query(MarketKline).filter(MarketKline.exchange == 'okx').all()
+
+    assert summary['success_count'] == 1
+    assert calls == [('BTCUSDT', 1200000, 1200000), ('BTCUSDT', None, None)]
+    assert len(rows) == 1
+    assert rows[0].open_time == 1200000
+
+
 def test_exchange_history_repair_collects_adapter_series_periods(db_session, monkeypatch):
     calls = []
     adapter = FakeAdapter(

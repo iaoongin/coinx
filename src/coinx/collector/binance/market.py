@@ -318,6 +318,49 @@ def get_funding_rate(symbol):
         logger.error(f"获取资金费率失败: {symbol}, 错误: {e}")
         return None
 
+
+def get_all_funding_rates():
+    """
+    获取全量 USDT 合约资金费率快照
+    :return: symbol -> funding rate payload
+    """
+    try:
+        url = f"{BINANCE_BASE_URL}/fapi/v1/premiumIndex"
+        session = get_session()
+        logger.info("开始加载全量资金费率: exchange=binance url=%s", url)
+        response = request_with_retry(session, url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list):
+            return {}
+
+        result = {}
+        for item in data:
+            symbol = item.get('symbol') if isinstance(item, dict) else None
+            if not symbol:
+                continue
+            result[symbol] = {
+                'symbol': symbol,
+                'markPrice': float(item['markPrice']) if item.get('markPrice') is not None else None,
+                'indexPrice': float(item['indexPrice']) if item.get('indexPrice') is not None else None,
+                'estimatedSettlePrice': float(item['estimatedSettlePrice']) if item.get('estimatedSettlePrice') is not None else None,
+                'lastFundingRate': float(item['lastFundingRate']) if item.get('lastFundingRate') is not None else None,
+                'nextFundingTime': int(item['nextFundingTime']) if item.get('nextFundingTime') else None,
+                'interestRate': float(item['interestRate']) if item.get('interestRate') is not None else None,
+                'time': int(item['time']) if item.get('time') else None,
+            }
+        logger.info("全量资金费率加载完成: exchange=binance count=%d", len(result))
+        return result
+    except requests.exceptions.RequestException as e:
+        logger.error(f"全量资金费率网络请求失败, 错误: {e}")
+        return {}
+    except Exception as e:
+        logger.error(f"获取全量资金费率失败, 错误: {e}")
+        return {}
+
 def get_long_short_ratio(symbol, period='5m', limit=30):
     """
     获取指定币种的多空比数据

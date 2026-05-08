@@ -38,6 +38,8 @@ class HomepageOpenInterestPoint:
 class HomepageKlinePoint:
     symbol: str
     open_time: int
+    high_price: Optional[float]
+    low_price: Optional[float]
     close_price: Optional[float]
     quote_volume: Optional[float]
     taker_buy_quote_volume: Optional[float]
@@ -389,6 +391,8 @@ def _build_kline_point(row):
     return HomepageKlinePoint(
         symbol=row.symbol,
         open_time=int(row.open_time),
+        high_price=float(row.high_price) if hasattr(row, 'high_price') and row.high_price is not None else None,
+        low_price=float(row.low_price) if hasattr(row, 'low_price') and row.low_price is not None else None,
         close_price=float(row.close_price) if row.close_price is not None else None,
         quote_volume=float(row.quote_volume) if row.quote_volume is not None else None,
         taker_buy_quote_volume=float(row.taker_buy_quote_volume) if row.taker_buy_quote_volume is not None else None,
@@ -789,6 +793,8 @@ def _load_recent_klines(session, symbol, upper_bound=None):
     query = session.query(
         BinanceKline.symbol,
         BinanceKline.open_time,
+        BinanceKline.high_price,
+        BinanceKline.low_price,
         BinanceKline.close_price,
         BinanceKline.quote_volume,
         BinanceKline.taker_buy_quote_volume,
@@ -992,6 +998,8 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
     query = session.query(
         model.symbol,
         model.open_time,
+        model.high_price,
+        model.low_price,
         model.close_price,
         model.quote_volume,
         model.taker_buy_quote_volume,
@@ -1083,6 +1091,10 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         adapter = None
         taker_periods = ['5m']
 
+    start_time = __import__('time').perf_counter()
+    logger.info('首页映射加载开始: exchange=%s symbols=%d', exchange, len(symbols))
+
+    oi_start = __import__('time').perf_counter()
     oi_map = _load_open_interest_model_map(
         session,
         MarketOpenInterestHist,
@@ -1090,6 +1102,14 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         upper_bound=upper_bound,
         exchange=exchange,
     )
+    logger.info(
+        '首页映射 OI 完成: exchange=%s symbols=%d 耗时=%.2fs',
+        exchange,
+        len(symbols),
+        __import__('time').perf_counter() - oi_start,
+    )
+
+    kline_start = __import__('time').perf_counter()
     kline_map = _load_kline_model_map(
         session,
         MarketKline,
@@ -1097,6 +1117,14 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         upper_bound=upper_bound,
         exchange=exchange,
     )
+    logger.info(
+        '首页映射 Kline 完成: exchange=%s symbols=%d 耗时=%.2fs',
+        exchange,
+        len(symbols),
+        __import__('time').perf_counter() - kline_start,
+    )
+
+    taker_start = __import__('time').perf_counter()
     taker_maps_by_period = {
         period: _load_taker_vol_model_map(
             session,
@@ -1107,9 +1135,17 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
             period=period,
         )
         for period in taker_periods
-    }
+        }
+    logger.info(
+        '首页映射 Taker 完成: exchange=%s periods=%d symbols=%d 耗时=%.2fs',
+        exchange,
+        len(taker_maps_by_period),
+        len(symbols),
+        __import__('time').perf_counter() - taker_start,
+    )
 
     if exchange == 'binance':
+        legacy_start = __import__('time').perf_counter()
         missing_oi_symbols = [symbol for symbol in symbols if not oi_map.get(symbol)]
         missing_kline_symbols = [symbol for symbol in symbols if not kline_map.get(symbol)]
         missing_taker_symbols = [
@@ -1150,6 +1186,16 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
             for symbol in missing_taker_symbols:
                 taker_maps_by_period['5m'][symbol] = legacy_taker_map.get(symbol, {})
 
+        logger.info(
+            '首页映射 Binance 兼容加载完成: exchange=%s missing_oi=%d missing_kline=%d missing_taker=%d 耗时=%.2fs',
+            exchange,
+            len(missing_oi_symbols),
+            len(missing_kline_symbols),
+            len(missing_taker_symbols),
+            __import__('time').perf_counter() - legacy_start,
+        )
+
+    logger.info('首页映射加载完成: exchange=%s 耗时=%.2fs', exchange, __import__('time').perf_counter() - start_time)
     return oi_map, kline_map, taker_maps_by_period
 
 
