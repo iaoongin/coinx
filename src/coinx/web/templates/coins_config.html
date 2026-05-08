@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>币种配置管理</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
@@ -247,7 +248,7 @@
 
     <div class="config-container">
       <div class="header">
-        <h1><span>□</span> 币种配置管理</h1>
+        <h1><span>CoinX</span> 币种配置管理</h1>
         <button class="btn btn-success" @click="updateFromBinance" :disabled="loading.updateBinance">
           <span v-if="loading.updateBinance">更新中...</span><span v-else>从币安更新币种</span>
         </button>

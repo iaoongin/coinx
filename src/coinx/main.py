@@ -39,7 +39,13 @@ def main():
     try:
         if not WEB_DEBUG or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
             start_runtime_services(with_startup_repair=True, startup_delay_seconds=1)
+        
+        logger.info("")
+        logger.info("============================================================")
         logger.info(f"启动Web服务: http://{WEB_HOST}:{WEB_PORT}")
+        logger.info(f"启动Web服务: http://127.0.0.1:{WEB_PORT}")
+        logger.info("============================================================")
+        logger.info("")
         app.run(debug=WEB_DEBUG, host=WEB_HOST, port=WEB_PORT, use_reloader=WEB_DEBUG)
     except KeyboardInterrupt:
         logger.info("接收到键盘中断信号")

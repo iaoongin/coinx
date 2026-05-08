@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CoinX 登录</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
@@ -52,10 +53,21 @@
       font-size: 28px;
       font-weight: 600;
       color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     h1 span {
       color: var(--accent);
+    }
+
+    .login-brand-mark {
+      width: 34px;
+      height: 34px;
+      display: block;
+      border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0, 212, 170, 0.18);
     }
 
     .subtitle {
@@ -127,7 +139,16 @@
 </head>
 <body>
   <main class="panel">
-    <h1><span>◈</span> CoinX</h1>
+    <h1>
+      <img
+        class="login-brand-mark"
+        src="{{ url_for('static', filename='brand/coinx-mark.svg') }}"
+        alt="CoinX logo"
+        width="34"
+        height="34"
+      >
+      <span>CoinX</span>
+    </h1>
     <p class="subtitle">网页服务已启用登录保护，请输入用户名和密码继续。</p>
     <form method="post" action="{{ url_for('auth.login') }}">
       <input type="hidden" name="next" value="{{ next_target }}" />

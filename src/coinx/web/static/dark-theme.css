@@ -126,19 +126,62 @@ body::after {
   border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   box-shadow: var(--shadow-card);
-  height: var(--nav-height);
+  min-height: var(--nav-height);
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 14px;
   padding: 0 16px;
   margin-bottom: 16px;
   backdrop-filter: blur(12px);
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .nav {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: var(--nav-height);
+  min-height: var(--nav-height);
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: block;
+  box-shadow: 0 10px 24px rgba(212, 175, 55, 0.18);
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+
+.brand-copy strong {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brand-copy small {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .nav-item {
@@ -166,7 +209,10 @@ body::after {
 }
 
 .nav-icon {
-  font-size: 12px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--gold-primary);
+  letter-spacing: 0.08em;
 }
 
 /* ==================== 标题 ==================== */
@@ -827,6 +873,10 @@ textarea:focus {
     padding: 16px;
   }
 
+  .brand-copy small {
+    display: none;
+  }
+
   h1 {
     font-size: 20px;
   }
@@ -839,5 +889,15 @@ textarea:focus {
 
   .container {
     padding: 12px;
+  }
+
+  .brand-copy strong {
+    font-size: 14px;
+    letter-spacing: 0.05em;
+  }
+
+  .nav-item {
+    padding: 0 12px;
+    font-size: 13px;
   }
 }
