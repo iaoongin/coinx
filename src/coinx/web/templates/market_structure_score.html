@@ -989,10 +989,16 @@
                         <thead>
                           <tr>
                             <th>交易所</th>
-                            <th>OI 占比</th>
                             <th>OI 持仓价值</th>
-                            <th>基础分</th>
-                            <th>加权贡献</th>
+                            <th>OI 占比</th>
+                            <th>总分</th>
+                            <th>加权分</th>
+                            <th>趋势分</th>
+                            <th>动量分</th>
+                            <th>仓位分</th>
+                            <th>趋势方向</th>
+                            <th>动量方向</th>
+                            <th>仓位结构</th>
                             <th>当前价格</th>
                             <th>EMA20</th>
                             <th>EMA60</th>
@@ -1001,9 +1007,6 @@
                             <th>成交量放大</th>
                             <th>OI 变化</th>
                             <th>主动买卖压力</th>
-                            <th>趋势方向</th>
-                            <th>动量方向</th>
-                            <th>仓位结构</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1011,17 +1014,18 @@
                             <td class="symbol-cell">
                               <span class="exchange-name">{{ exchange.exchange }}</span>
                             </td>
-                            <td>{{ formatPercentPlain(exchange.share_percent) }}</td>
                             <td>{{ formatCompactNumber(exchange.open_interest_value, 2) }}</td>
+                            <td>{{ formatPercentPlain(exchange.share_percent) }}</td>
                             <td>
                               <div :class="scoreClass(exchange.score)">{{ formatScore(exchange.score) }}</div>
                             </td>
-                            <td>
-                              <div class="metric-stack">
-                                <div :class="scoreClass(exchange.weighted_score)">{{ formatScore(exchange.weighted_score) }}</div>
-                                <div class="metric-muted">{{ formatPercentPlain(exchange.share_percent) }}</div>
-                              </div>
-                            </td>
+                            <td><div :class="scoreClass(exchange.weighted_score)">{{ formatScore(exchange.weighted_score) }}</div></td>
+                            <td><div :class="scoreClass(exchange.trend_score)">{{ formatScore(exchange.trend_score) }}</div></td>
+                            <td><div :class="scoreClass(exchange.momentum_score)">{{ formatScore(exchange.momentum_score) }}</div></td>
+                            <td><div :class="scoreClass(exchange.position_score)">{{ formatScore(exchange.position_score) }}</div></td>
+                            <td>{{ exchange.trend_direction || 'N/A' }}</td>
+                            <td>{{ exchange.momentum_direction || 'N/A' }}</td>
+                            <td>{{ exchange.position_structure || 'N/A' }}</td>
                             <td>{{ formatPriceLike(exchange.current_price) }}</td>
                             <td>{{ formatPriceLike(exchange.ema20) }}</td>
                             <td>{{ formatPriceLike(exchange.ema60) }}</td>
@@ -1030,12 +1034,9 @@
                             <td>{{ formatMultiple(exchange.volume_ratio) }}</td>
                             <td>{{ formatPercent(exchange.open_interest_change_ratio * 100) }}</td>
                             <td>{{ formatPercent(exchange.taker_net_pressure_ratio * 100) }}</td>
-                            <td>{{ exchange.trend_direction || 'N/A' }}</td>
-                            <td>{{ exchange.momentum_direction || 'N/A' }}</td>
-                            <td>{{ exchange.position_structure || 'N/A' }}</td>
                           </tr>
                           <tr v-if="!getExchangeRows(row).length">
-                            <td colspan="16" class="state-row">暂无交易所明细</td>
+                            <td colspan="19" class="state-row">暂无交易所明细</td>
                           </tr>
                         </tbody>
                       </table>
@@ -1212,11 +1213,13 @@
             const openInterestRow = openInterestByExchange.get(metric.exchange) || {};
             return {
               exchange: metric.exchange,
-              share_percent: openInterestRow.share_percent ?? metric.weight_percent,
-              quantity_share_percent: openInterestRow.quantity_share_percent ?? metric.weight_percent,
               open_interest_value: openInterestRow.open_interest_value ?? metric.open_interest_value,
+              share_percent: openInterestRow.share_percent ?? metric.weight_percent,
               score: metric.total_score ?? openInterestRow.score,
               weighted_score: metric.weighted_total_score ?? openInterestRow.weighted_score,
+              trend_score: metric.trend_score,
+              momentum_score: metric.momentum_score,
+              position_score: metric.position_score,
               current_price: metric.current_price,
               ema20: metric.ema20,
               ema60: metric.ema60,

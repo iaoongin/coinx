@@ -17,11 +17,28 @@ test.describe('结构评分页面', () => {
     await button(page, '展开').first().click();
 
     const expandedRow = page.locator('.expand-row');
-    await expect(expandedRow.getByRole('columnheader', { name: '交易所' })).toBeVisible();
-    await expect(expandedRow.getByRole('columnheader', { name: 'OI 占比' })).toBeVisible();
-    await expect(expandedRow.getByRole('columnheader', { name: '当前价格' })).toBeVisible();
-    await expect(expandedRow.getByRole('columnheader', { name: '资金费率' })).toBeVisible();
-    await expect(expandedRow.getByRole('columnheader', { name: '平均振幅' })).toBeVisible();
+    const headers = expandedRow.getByRole('columnheader');
+    await expect(headers).toHaveText([
+      '交易所',
+      'OI 持仓价值',
+      'OI 占比',
+      '总分',
+      '加权分',
+      '趋势分',
+      '动量分',
+      '仓位分',
+      '趋势方向',
+      '动量方向',
+      '仓位结构',
+      '当前价格',
+      'EMA20',
+      'EMA60',
+      '资金费率',
+      '平均振幅',
+      '成交量放大',
+      'OI 变化',
+      '主动买卖压力',
+    ]);
     await expect(page.locator('body')).toContainText('binance');
     await expect(page.locator('body')).toContainText('EMA20');
     await expect(page.locator('body')).toContainText('OI 变化');
@@ -39,6 +56,8 @@ test.describe('结构评分页面', () => {
     const expandedRow = page.locator('.expand-row');
     await expect(expandedRow.getByRole('columnheader', { name: '交易所' })).toBeVisible();
     await expect(expandedRow.getByRole('columnheader', { name: 'OI 持仓价值' })).toBeVisible();
+    await expect(expandedRow.getByRole('columnheader', { name: 'OI 占比' })).toBeVisible();
+    await expect(expandedRow.getByRole('columnheader', { name: '趋势分' })).toBeVisible();
     await expect(page.locator('body')).toContainText('当前价格');
     await expect(button(page, '收起').first()).toBeVisible();
   });
