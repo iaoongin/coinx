@@ -195,21 +195,17 @@ def test_get_coins_cache_expires_when_anchor_changes(monkeypatch):
 def test_update_data_uses_homepage_series_refresh(monkeypatch):
     captured = {}
 
-    class FakeThread:
-        def __init__(self, target=None, kwargs=None):
-            captured['target'] = target
-            captured['kwargs'] = kwargs or {}
-            self.daemon = False
-
-        def start(self):
-            captured['started'] = True
-
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.should_refresh_homepage_series', lambda symbols: True)
-    monkeypatch.setattr('coinx.web.routes.api_data.threading.Thread', FakeThread)
     monkeypatch.setattr(
-        'coinx.web.routes.api_data.repair_tracked_symbols',
-        lambda **kwargs: {'status': 'success', 'results': [], **kwargs},
+        'coinx.web.routes.api_data._start_homepage_refresh_async',
+        lambda symbols=None, series_types=None, latest_only=False: captured.update(
+            {
+                'symbols': symbols,
+                'series_types': series_types,
+                'latest_only': latest_only,
+            }
+        ) or True,
     )
     client = create_test_client()
 
@@ -218,10 +214,10 @@ def test_update_data_uses_homepage_series_refresh(monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload['status'] == 'success'
-    assert captured['target'] is not None
-    assert captured['kwargs']['symbols'] == ['BTCUSDT']
-    assert captured['kwargs']['series_types'] == ['klines', 'open_interest_hist', 'taker_buy_sell_vol']
-    assert captured['started'] is True
+    assert captured['symbols'] == ['BTCUSDT']
+    assert captured['series_types'] == ['klines', 'open_interest_hist', 'taker_buy_sell_vol']
+    assert captured['latest_only'] is False
+    assert payload['message'] == 'homepage rolling repair triggered'
 
 
 def test_update_data_can_wait_for_homepage_series_refresh(monkeypatch):
@@ -244,7 +240,7 @@ def test_update_data_can_wait_for_homepage_series_refresh(monkeypatch):
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.should_refresh_homepage_series', lambda symbols: True)
     monkeypatch.setattr('coinx.web.routes.api_data.HOME_PAGE_REFRESH_LOCK', threading.Lock())
-    monkeypatch.setattr('coinx.web.routes.api_data.repair_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.web.routes.api_data.repair_rolling_tracked_symbols', fake_repair)
     monkeypatch.setattr(
         'coinx.web.routes.api_data.threading.Thread',
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('should not create thread when wait=true')),
@@ -258,13 +254,38 @@ def test_update_data_can_wait_for_homepage_series_refresh(monkeypatch):
     payload = response.get_json()
     assert payload['status'] == 'success'
     assert payload['message'] == 'homepage series refresh completed'
-    assert payload['data']['success_count'] == 1
-    assert calls == [
+    assert calls[0]['points'] == 5
+
+
+def test_update_data_waits_for_existing_homepage_refresh(monkeypatch):
+    import threading
+
+    lock = threading.Lock()
+    lock.acquire()
+
+    monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data.HOME_PAGE_REFRESH_LOCK', lock)
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.HOME_PAGE_LAST_REFRESH_SUMMARY',
         {
-            'symbols': ['BTCUSDT'],
-            'series_types': ['klines', 'open_interest_hist', 'taker_buy_sell_vol'],
-        }
-    ]
+            'status': 'success',
+            'message': 'existing homepage run finished',
+            'results': [],
+            'success_count': 1,
+            'failure_count': 0,
+            'skipped_count': 0,
+        },
+    )
+    monkeypatch.setattr('coinx.web.routes.api_data.time.sleep', lambda seconds: lock.release())
+    client = create_test_client()
+
+    response = client.get('/api/update?force=true&wait=true')
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['status'] == 'success'
+    assert payload['message'] == 'existing homepage run finished'
+    assert payload['data']['success_count'] == 1
 
 
 def test_get_coins_returns_complete_interval_contract(db_session, monkeypatch):
@@ -419,7 +440,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
             'results': [],
         }
 
-    monkeypatch.setattr('coinx.web.routes.api_data.repair_latest_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.web.routes.api_data.repair_rolling_tracked_symbols', fake_repair)
     monkeypatch.setattr(
         'coinx.web.routes.api_data._run_market_structure_refresh',
         lambda **kwargs: score_refresh.update(kwargs) or {'status': 'success', 'results': []},
@@ -451,6 +472,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
     assert started['called'] is True
     assert state['repaired'] is True
     assert score_refresh['symbols'] == ['BTCUSDT', 'ETHUSDT']
+    assert set(score_refresh['series_types']) == {'taker_buy_sell_vol', 'klines', 'open_interest_hist'}
     coin = payload['data'][0]
     assert coin['symbol'] == 'BTCUSDT'
     assert all(change['interval'] != '168h' for change in coin['changes'])
@@ -479,7 +501,7 @@ def test_homepage_refresh_skips_duplicate_inflight_requests(monkeypatch):
             'results': [],
         }
 
-    monkeypatch.setattr('coinx.web.routes.api_data.repair_tracked_symbols', fake_repair)
+    monkeypatch.setattr('coinx.web.routes.api_data.repair_rolling_tracked_symbols', fake_repair)
 
     thread = threading.Thread(
         target=lambda: __import__('coinx.web.routes.api_data', fromlist=['_run_homepage_refresh'])._run_homepage_refresh(

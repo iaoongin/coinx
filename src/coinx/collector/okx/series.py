@@ -1,6 +1,10 @@
 ﻿import time
+from email.utils import parsedate_to_datetime
+from threading import Lock
 
-from coinx.config import OKX_BASE_URL
+import requests
+
+from coinx.config import OKX_BASE_URL, OKX_RUBIK_MIN_INTERVAL_MS, OKX_429_RETRY_FALLBACK_SECONDS
 from coinx.collector.binance.client import get_session, request_with_retry
 from coinx.repositories.series import upsert_series_records
 from coinx.utils import logger
@@ -21,6 +25,8 @@ _supported_symbols_cache = {
     'failed_at': 0,
     'symbols': None,
 }
+_okx_rate_limit_lock = Lock()
+_okx_rate_limit_state = {}
 
 
 def _to_float(value):
@@ -100,10 +106,108 @@ def is_symbol_supported(symbol, series_type=None, session=None):
         return True
 
 
+def _okx_rate_limit_group(path):
+    if path.startswith('/api/v5/rubik/'):
+        return 'rubik'
+    return 'default'
+
+
+def _wait_for_okx_slot(rate_limit_group):
+    min_interval_ms = OKX_RUBIK_MIN_INTERVAL_MS if rate_limit_group == 'rubik' else 0
+    if min_interval_ms <= 0:
+        return
+
+    while True:
+        with _okx_rate_limit_lock:
+            state = _okx_rate_limit_state.setdefault(rate_limit_group, {'next_allowed_at': 0.0})
+            now = time.time()
+            wait_seconds = state['next_allowed_at'] - now
+            if wait_seconds <= 0:
+                state['next_allowed_at'] = now + (min_interval_ms / 1000.0)
+                return
+        time.sleep(wait_seconds)
+
+
+def _parse_retry_after_seconds(value):
+    if value in (None, ''):
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        pass
+    try:
+        retry_at = parsedate_to_datetime(value)
+        return max(0.0, retry_at.timestamp() - time.time())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _parse_okx_reset_seconds(headers):
+    candidates = (
+        headers.get('X-RateLimit-Reset'),
+        headers.get('x-ratelimit-reset'),
+        headers.get('RateLimit-Reset'),
+        headers.get('ratelimit-reset'),
+    )
+    now_ms = int(time.time() * 1000)
+    for value in candidates:
+        if value in (None, ''):
+            continue
+        try:
+            reset_raw = float(value)
+        except (TypeError, ValueError):
+            continue
+        if reset_raw > 1_000_000_000_000:
+            return max(0.0, (reset_raw - now_ms) / 1000.0)
+        if reset_raw > 1_000_000_000:
+            return max(0.0, reset_raw - time.time())
+        return max(0.0, reset_raw)
+    return None
+
+
+def _compute_okx_backoff_seconds(response):
+    headers = response.headers if response is not None else {}
+    retry_after_seconds = _parse_retry_after_seconds(headers.get('Retry-After'))
+    if retry_after_seconds is not None:
+        return retry_after_seconds
+    reset_seconds = _parse_okx_reset_seconds(headers)
+    if reset_seconds is not None:
+        return reset_seconds
+    return float(OKX_429_RETRY_FALLBACK_SECONDS)
+
+
+def _format_okx_rate_limit_headers(response):
+    if response is None:
+        return {}
+    interesting = {}
+    for key, value in response.headers.items():
+        lower_key = key.lower()
+        if lower_key == 'retry-after' or 'ratelimit' in lower_key:
+            interesting[key] = value
+    return interesting
+
+
 def _request_okx(path, params, session=None, timeout=10):
     http_session = session or get_session()
     url = f"{OKX_BASE_URL}{path}"
-    response = request_with_retry(http_session, url, params=params, timeout=timeout)
+    rate_limit_group = _okx_rate_limit_group(path)
+    _wait_for_okx_slot(rate_limit_group)
+    try:
+        response = request_with_retry(http_session, url, params=params, timeout=timeout)
+    except requests.exceptions.HTTPError as exc:
+        response = getattr(exc, 'response', None)
+        if response is not None and response.status_code == 429:
+            backoff_seconds = _compute_okx_backoff_seconds(response)
+            logger.warning(
+                'OKX 触发限频: path=%s params=%s status=%s wait=%.2fs headers=%s',
+                path,
+                params,
+                response.status_code,
+                backoff_seconds,
+                _format_okx_rate_limit_headers(response),
+            )
+            time.sleep(backoff_seconds)
+        raise
     response.raise_for_status()
     payload = response.json()
     if isinstance(payload, dict) and payload.get('code') not in (None, '0', 0):

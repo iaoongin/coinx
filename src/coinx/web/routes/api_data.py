@@ -63,6 +63,8 @@ HOME_PAGE_REFRESH_LOCK = threading.Lock()
 MARKET_STRUCTURE_REFRESH_LOCK = threading.Lock()
 HOMEPAGE_SNAPSHOT_CACHE_LOCK = threading.Lock()
 HOMEPAGE_SNAPSHOT_CACHE = {}
+HOME_PAGE_LAST_REFRESH_SUMMARY = None
+MARKET_STRUCTURE_LAST_REFRESH_SUMMARY = None
 
 SUPPORTED_SERIES_TYPES = {
     'top_long_short_position_ratio',
@@ -132,6 +134,7 @@ def _summarize_market_structure_refresh_results(summary):
 
 
 def _run_homepage_refresh(symbols, series_types, latest_only=False):
+    global HOME_PAGE_LAST_REFRESH_SUMMARY
     if not HOME_PAGE_REFRESH_LOCK.acquire(blocking=False):
         logger.info('首页历史序列补全正在执行，跳过重复触发')
         return {
@@ -146,8 +149,15 @@ def _run_homepage_refresh(symbols, series_types, latest_only=False):
         }
 
     try:
-        repair_func = repair_latest_tracked_symbols if latest_only else repair_tracked_symbols
-        return repair_func(symbols=symbols, series_types=series_types)
+        points = 2 if latest_only else REPAIR_ROLLING_POINTS
+        summary = repair_rolling_tracked_symbols(
+            symbols=symbols,
+            series_types=series_types,
+            points=points,
+            max_workers=REPAIR_ROLLING_MAX_WORKERS,
+        )
+        HOME_PAGE_LAST_REFRESH_SUMMARY = summary
+        return summary
     finally:
         HOME_PAGE_REFRESH_LOCK.release()
 
@@ -221,7 +231,27 @@ def _start_market_structure_refresh_async(symbols, series_types=None, exchanges=
     return True
 
 
+def _wait_for_refresh_completion(refresh_lock, summary_getter, message, poll_interval=0.2, timeout_seconds=120):
+    deadline = time.time() + timeout_seconds
+    while refresh_lock.locked() and time.time() < deadline:
+        time.sleep(poll_interval)
+
+    summary = summary_getter()
+    if summary is not None:
+        return summary
+
+    return {
+        'status': 'success' if not refresh_lock.locked() else 'timeout',
+        'message': message if not refresh_lock.locked() else f'{message} (timeout)',
+        'results': [],
+        'success_count': 0,
+        'failure_count': 0,
+        'skipped_count': 0,
+    }
+
+
 def _run_market_structure_refresh(symbols, series_types, exchanges=None):
+    global MARKET_STRUCTURE_LAST_REFRESH_SUMMARY
     if not MARKET_STRUCTURE_REFRESH_LOCK.acquire(blocking=False):
         logger.info('市场结构评分补齐正在执行，跳过重复触发')
         return {
@@ -336,7 +366,7 @@ def _run_market_structure_refresh(symbols, series_types, exchanges=None):
             [item['component'] for item in component_results],
         )
 
-        return {
+        summary = {
             'status': status,
             'message': 'market structure score refresh completed',
             'symbols': symbols,
@@ -349,6 +379,8 @@ def _run_market_structure_refresh(symbols, series_types, exchanges=None):
             'stats': total_stats,
             'results': merged_results,
         }
+        MARKET_STRUCTURE_LAST_REFRESH_SUMMARY = summary
+        return summary
     finally:
         MARKET_STRUCTURE_REFRESH_LOCK.release()
 
@@ -528,7 +560,7 @@ def get_market_structure_score():
 
 @api_data_bp.route('/api/market-structure-score/refresh', methods=['POST'])
 def refresh_market_structure_score():
-    logger.info('开始触发合约市场结构评分补齐')
+    logger.info('开始触发合约市场结构评分滚动修补')
     try:
         payload = request.get_json(silent=True) or {}
         force = request.args.get('force', 'false').lower() == 'true' or bool(payload.get('force', False))
@@ -541,9 +573,17 @@ def refresh_market_structure_score():
 
         refresh_kwargs = {
             'symbols': symbols,
-            'series_types': _normalize_series_types(BINANCE_SERIES_TYPES),
+            'series_types': list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
             'exchanges': list(ENABLED_EXCHANGES),
         }
+
+        if MARKET_STRUCTURE_REFRESH_LOCK.locked():
+            summary = _wait_for_refresh_completion(
+                MARKET_STRUCTURE_REFRESH_LOCK,
+                lambda: MARKET_STRUCTURE_LAST_REFRESH_SUMMARY,
+                'market structure score refresh reused existing rolling repair',
+            )
+            return jsonify({'status': 'success', 'message': summary.get('message'), 'data': summary})
 
         if wait_for_completion or force:
             summary = _run_market_structure_refresh(**refresh_kwargs)
@@ -555,12 +595,10 @@ def refresh_market_structure_score():
                 }
             )
 
-        update_thread = threading.Thread(target=_run_market_structure_refresh, kwargs=refresh_kwargs)
-        update_thread.daemon = True
-        update_thread.start()
-        return jsonify({'status': 'success', 'message': 'market structure score refresh triggered'})
+        _start_market_structure_refresh_async(**refresh_kwargs)
+        return jsonify({'status': 'success', 'message': 'market structure score rolling repair triggered'})
     except Exception as e:
-        logger.error(f'触发合约市场结构评分补齐失败: {e}')
+        logger.error(f'触发合约市场结构评分滚动修补失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to trigger market structure refresh: {str(e)}'}), 500
 
@@ -627,7 +665,7 @@ def get_coins():
 
 @api_data_bp.route('/api/update')
 def update_data():
-    logger.info('开始触发首页历史序列刷新')
+    logger.info('开始触发首页滚动修补')
     try:
         force = request.args.get('force', 'false').lower() == 'true'
         wait_for_completion = request.args.get('wait', 'false').lower() == 'true'
@@ -644,11 +682,21 @@ def update_data():
 
             if not wait_for_completion:
                 _start_homepage_refresh_async(symbols, series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES))
-                return jsonify({'status': 'success', 'message': 'homepage series refresh triggered'})
+                return jsonify({'status': 'success', 'message': 'homepage rolling repair triggered'})
+
+        if HOME_PAGE_REFRESH_LOCK.locked():
+            summary = _wait_for_refresh_completion(
+                HOME_PAGE_REFRESH_LOCK,
+                lambda: HOME_PAGE_LAST_REFRESH_SUMMARY,
+                'homepage rolling repair reused existing run',
+            )
+            _clear_homepage_snapshot_cache()
+            return jsonify({'status': 'success', 'message': summary.get('message'), 'data': summary})
 
         refresh_kwargs = {
             'symbols': symbols,
             'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            'latest_only': not force,
         }
 
         if wait_for_completion:
@@ -662,14 +710,12 @@ def update_data():
                 }
             )
 
-        update_thread = threading.Thread(target=_run_homepage_refresh, kwargs=refresh_kwargs)
-        update_thread.daemon = True
-        update_thread.start()
+        _start_homepage_refresh_async(**refresh_kwargs)
         _clear_homepage_snapshot_cache()
 
-        return jsonify({'status': 'success', 'message': 'homepage series refresh triggered'})
+        return jsonify({'status': 'success', 'message': 'homepage rolling repair triggered'})
     except Exception as e:
-        logger.error(f'触发首页历史序列刷新失败: {e}')
+        logger.error(f'触发首页滚动修补失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to trigger homepage refresh: {str(e)}'}), 500
 

@@ -1,7 +1,8 @@
+import threading
+
 from flask import Flask
 import werkzeug
 
-from coinx.config import BINANCE_SERIES_TYPES
 from coinx.web.routes.api_data import api_data_bp
 
 
@@ -66,8 +67,8 @@ def test_market_structure_score_api_defaults_to_first_hundred(monkeypatch):
     assert captured['symbols'][-1] == 'SYM099USDT'
 
 
-def test_market_structure_score_refresh_repairs_market_and_sentiment_series(monkeypatch):
-    captured = {'market': None, 'sentiment': None}
+def test_market_structure_score_refresh_repairs_market_series_only(monkeypatch):
+    captured = {'market': None, 'sentiment': 0}
 
     def fake_market_repair(**kwargs):
         captured['market'] = kwargs
@@ -86,40 +87,8 @@ def test_market_structure_score_refresh_repairs_market_and_sentiment_series(monk
             ],
         }
 
-    def fake_sentiment_repair(**kwargs):
-        captured['sentiment'] = kwargs
-        return {
-            'status': 'success',
-            'mode': 'rolling',
-            'symbols': kwargs.get('symbols'),
-            'series_types': kwargs.get('series_types'),
-            'success_count': 1,
-            'failure_count': 0,
-            'skipped_count': 8,
-            'results': [
-                {
-                    'symbol': 'BTCUSDT',
-                    'series_type': 'top_long_short_position_ratio',
-                    'status': 'success',
-                    'affected': 1,
-                    'records': 1,
-                    'latest_event_time': 1711526400000,
-                },
-                {
-                    'symbol': 'ETHUSDT',
-                    'series_type': 'top_long_short_account_ratio',
-                    'status': 'skipped',
-                    'reason': 'no_data',
-                    'affected': 0,
-                    'records': 0,
-                    'latest_event_time': None,
-                },
-            ],
-        }
-
     monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.repair_rolling_tracked_symbols', fake_market_repair)
-    monkeypatch.setattr('coinx.web.routes.api_data.repair_binance_rolling_tracked_symbols', fake_sentiment_repair)
     client = create_test_client()
 
     response = client.post('/api/market-structure-score/refresh?wait=true')
@@ -128,25 +97,40 @@ def test_market_structure_score_refresh_repairs_market_and_sentiment_series(monk
     payload = response.get_json()
     assert payload['status'] == 'success'
     assert captured['market']['symbols'] == ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-    assert captured['sentiment']['symbols'] == ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-    expected_series_types = BINANCE_SERIES_TYPES.split(',') if isinstance(BINANCE_SERIES_TYPES, str) else list(BINANCE_SERIES_TYPES)
-    assert payload['data']['series_types'] == expected_series_types
-    assert captured['market']['series_types'] == ['open_interest_hist', 'klines', 'taker_buy_sell_vol']
-    assert captured['sentiment']['series_types'] == [
-        'top_long_short_position_ratio',
-        'top_long_short_account_ratio',
-        'global_long_short_account_ratio',
-    ]
+    assert set(captured['market']['series_types']) == {'open_interest_hist', 'klines', 'taker_buy_sell_vol'}
     assert captured['market']['exchanges']
-    assert payload['data']['success_count'] == 4
-    assert len(payload['data']['components']) == 2
-    assert payload['data']['stats']['affected'] == 4
-    assert payload['data']['stats']['records'] == 4
-    assert payload['data']['stats']['no_data_count'] == 1
-    assert payload['data']['stats']['latest_event_time'] == 1711526400000
-    sentiment_component = payload['data']['components'][1]
-    assert sentiment_component['component'] == 'binance_sentiment_series'
-    assert sentiment_component['stats']['affected'] == 1
-    assert sentiment_component['stats']['records'] == 1
-    assert sentiment_component['stats']['no_data_count'] == 1
-    assert sentiment_component['stats']['latest_event_time'] == 1711526400000
+    assert set(payload['data']['series_types']) == {'open_interest_hist', 'klines', 'taker_buy_sell_vol'}
+    assert payload['data']['success_count'] == 3
+    assert len(payload['data']['components']) == 1
+    assert payload['data']['components'][0]['component'] == 'market_series'
+    assert payload['data']['stats']['affected'] == 3
+    assert payload['data']['stats']['records'] == 3
+    assert payload['data']['stats']['no_data_count'] == 0
+    assert payload['data']['stats']['latest_event_time'] is None
+
+
+def test_market_structure_score_refresh_waits_for_existing_run(monkeypatch):
+    lock = threading.Lock()
+    lock.acquire()
+
+    monkeypatch.setattr('coinx.web.routes.api_data.MARKET_STRUCTURE_REFRESH_LOCK', lock)
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.MARKET_STRUCTURE_LAST_REFRESH_SUMMARY',
+        {
+            'status': 'success',
+            'message': 'existing run finished',
+            'results': [],
+            'success_count': 1,
+            'failure_count': 0,
+            'skipped_count': 0,
+        },
+    )
+    monkeypatch.setattr('coinx.web.routes.api_data.time.sleep', lambda seconds: lock.release())
+    client = create_test_client()
+
+    response = client.post('/api/market-structure-score/refresh?wait=true')
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['status'] == 'success'
+    assert payload['message'] == 'existing run finished'

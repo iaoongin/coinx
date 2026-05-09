@@ -26,7 +26,7 @@ def test_start_runtime_services_starts_scheduler_and_bootstrap(monkeypatch):
     monkeypatch.setattr(runtime, 'scheduler', SimpleNamespace(running=True))
     monkeypatch.setattr(runtime, 'get_active_coins', lambda: ['BTCUSDT'])
     monkeypatch.setattr(runtime, 'start_scheduler', fake_start_scheduler)
-    monkeypatch.setattr(runtime, 'scheduled_repair_tracked', fake_startup_repair)
+    monkeypatch.setattr(runtime, 'scheduled_repair_market_rolling', fake_startup_repair)
     monkeypatch.setattr(runtime.threading, 'Thread', FakeThread)
     monkeypatch.setattr(runtime.time, 'sleep', lambda seconds: None)
 

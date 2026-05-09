@@ -5,6 +5,7 @@ from coinx.utils import logger
 
 # 创建一个全局会话对象，用于复用连接
 _global_session = None
+RETRYABLE_HTTP_STATUS_CODES = {403, 408, 409, 425, 429, 500, 502, 503, 504}
 
 def get_session():
     """创建带代理配置的会话"""
@@ -35,12 +36,16 @@ def request_with_retry(session, url, params=None, timeout=10, max_retries=3, bas
     while True:
         try:
             response = session.get(url, params=params, timeout=timeout)
-            # 对于 429/403 主动做退避重试
-            if response.status_code in (403, 429):
-                raise requests.exceptions.HTTPError(f"{response.status_code} {response.reason}")
+            if response.status_code in RETRYABLE_HTTP_STATUS_CODES:
+                error = requests.exceptions.HTTPError(f"{response.status_code} {response.reason}")
+                error.response = response
+                raise error
             response.raise_for_status()
             return response
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
+            response = getattr(e, 'response', None)
+            if response is not None and response.status_code not in RETRYABLE_HTTP_STATUS_CODES:
+                raise e
             attempt += 1
             if attempt > max_retries:
                 raise e

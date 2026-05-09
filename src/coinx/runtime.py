@@ -2,7 +2,7 @@ import threading
 import time
 
 from coinx.coin_manager import get_active_coins
-from coinx.scheduler import scheduler, scheduled_repair_tracked, start_scheduler
+from coinx.scheduler import scheduler, scheduled_repair_market_rolling, start_scheduler
 from coinx.utils import logger
 
 
@@ -20,7 +20,7 @@ def log_startup_self_check():
 
 def start_startup_repair():
     logger.info('启动启动期首页序列补全任务')
-    repair_thread = threading.Thread(target=scheduled_repair_tracked, daemon=True)
+    repair_thread = threading.Thread(target=scheduled_repair_market_rolling, daemon=True)
     repair_thread.start()
     return repair_thread
 

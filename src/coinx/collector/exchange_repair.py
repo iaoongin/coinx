@@ -123,6 +123,27 @@ def _sample_values(values, limit=8):
     return f"{','.join(values[:limit])}...(+{len(values) - limit})"
 
 
+def _summarize_results(results):
+    return {
+        'success_count': sum(1 for item in results if item.get('status') == 'success'),
+        'failure_count': sum(1 for item in results if item.get('status') == 'error'),
+        'skipped_count': sum(1 for item in results if item.get('status') == 'skipped'),
+    }
+
+
+def _format_exchange_progress(stats_by_exchange):
+    parts = []
+    for exchange in sorted(stats_by_exchange):
+        stats = stats_by_exchange.get(exchange) or {}
+        parts.append(
+            f"{exchange}(支持={stats.get('supported_symbols', 0)},"
+            f"已完整={stats.get('complete', 0)},"
+            f"待补={stats.get('pending', 0)},"
+            f"不支持={stats.get('unsupported', 0)})"
+        )
+    return '; '.join(parts)
+
+
 def _log_repair_summary(summary):
     logger.info(
         f"交易所{summary['mode']}补齐完成: exchanges={','.join(summary['exchanges'])}, "
@@ -160,6 +181,41 @@ def _run_tasks(tasks, worker_func, max_workers, db_session=None):
         future_to_task = {executor.submit(worker_func, task, db_session=None): task for task in tasks}
         for future in as_completed(future_to_task):
             results.append(future.result())
+    return results
+
+
+def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_session=None, group_runner=None):
+    grouped_tasks = {}
+    for task in tasks:
+        grouped_tasks.setdefault(group_key_func(task), []).append(task)
+
+    if not grouped_tasks:
+        return []
+
+    def run_group(group_key, group_tasks):
+        if group_runner is not None:
+            return group_runner(group_key, group_tasks, worker_func, db_session)
+        return _run_tasks(group_tasks, worker_func, 1, db_session=db_session)
+
+    if len(grouped_tasks) <= 1:
+        group_key, group_tasks = next(iter(grouped_tasks.items()))
+        return run_group(group_key, group_tasks)
+
+    worker_count = max(1, min(int(max_workers or 1), len(grouped_tasks)))
+    if db_session is not None or worker_count <= 1:
+        results = []
+        for group_key, group_tasks in grouped_tasks.items():
+            results.extend(run_group(group_key, group_tasks))
+        return results
+
+    results = []
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_group = {
+            executor.submit(run_group, group_key, group_tasks): group_key
+            for group_key, group_tasks in grouped_tasks.items()
+        }
+        for future in as_completed(future_to_group):
+            results.extend(future.result())
     return results
 
 
@@ -263,12 +319,25 @@ def repair_rolling_symbols(
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     worker_count = max_workers if max_workers is not None else REPAIR_ROLLING_MAX_WORKERS
     started_at = time.perf_counter()
+    precheck_started_at = time.perf_counter()
     results = []
     tasks = []
     precheck_skipped_count = 0
     all_target_times = set()
+    exchange_progress = {}
+
+    logger.info(
+        f"开始交易所rolling预检查: symbols={len(target_symbols)} "
+        f"exchanges={','.join(target_exchanges)} "
+        f"series_types={','.join(series_types or HOMEPAGE_SERIES_TYPES)} "
+        f"points={points or REPAIR_ROLLING_POINTS} max_workers={worker_count}"
+    )
 
     for adapter in adapters:
+        exchange_stats = exchange_progress.setdefault(
+            adapter.exchange_id,
+            {'supported_symbols': 0, 'unsupported': 0, 'complete': 0, 'pending': 0},
+        )
         for series_type in _active_series_types(adapter, series_types):
             periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             supported_symbols = []
@@ -276,6 +345,7 @@ def repair_rolling_symbols(
                 if adapter.supports_symbol(symbol, series_type=series_type, session=http_session):
                     supported_symbols.append(symbol)
                 else:
+                    exchange_stats['unsupported'] += 1
                     results.append(
                         _unsupported_symbol_result(
                             adapter,
@@ -288,6 +358,7 @@ def repair_rolling_symbols(
                     )
             if not supported_symbols:
                 continue
+            exchange_stats['supported_symbols'] += len(supported_symbols)
             for period in periods:
                 target_times = _build_rolling_target_times(current_time_ms, points or REPAIR_ROLLING_POINTS, period=period)
                 all_target_times.update(target_times)
@@ -307,6 +378,7 @@ def repair_rolling_symbols(
                     ]
                     if not missing_times:
                         precheck_skipped_count += 1
+                        exchange_stats['complete'] += 1
                         results.append(
                             {
                                 'exchange': adapter.exchange_id,
@@ -324,6 +396,7 @@ def repair_rolling_symbols(
                             }
                         )
                     else:
+                        exchange_stats['pending'] += 1
                         tasks.append(
                             {
                                 'adapter': adapter,
@@ -334,6 +407,14 @@ def repair_rolling_symbols(
                                 'target_times': missing_times,
                             }
                         )
+
+    precheck_duration_ms = (time.perf_counter() - precheck_started_at) * 1000
+    unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
+    logger.info(
+        f"交易所rolling预检查完成: 耗时={precheck_duration_ms:.2f}ms "
+        f"已完整={precheck_skipped_count} 待补={len(tasks)} 不支持={unsupported_count} "
+        f"明细={_format_exchange_progress(exchange_progress) if exchange_progress else '无'}"
+    )
 
     def worker(task, db_session=None):
         own_session = db_session is None
@@ -367,7 +448,39 @@ def repair_rolling_symbols(
             if own_session:
                 session.close()
 
-    results.extend(_run_tasks(tasks, worker, worker_count, db_session=db_session))
+    def run_exchange_group(exchange, group_tasks, group_worker, db_session):
+        started = time.perf_counter()
+        series_counts = {}
+        symbol_counts = set()
+        for task in group_tasks:
+            series_counts[task['series_type']] = series_counts.get(task['series_type'], 0) + 1
+            symbol_counts.add(task['symbol'])
+        logger.info(
+            f"开始执行交易所rolling补齐: exchange={exchange} "
+            f"symbols={len(symbol_counts)} tasks={len(group_tasks)} "
+            f"series={','.join(f'{series_type}:{count}' for series_type, count in sorted(series_counts.items()))}"
+        )
+        group_results = _run_tasks(group_tasks, group_worker, 1, db_session=db_session)
+        result_stats = _summarize_results(group_results)
+        logger.info(
+            f"交易所rolling补齐完成: exchange={exchange} "
+            f"success={result_stats['success_count']} "
+            f"failure={result_stats['failure_count']} "
+            f"skipped={result_stats['skipped_count']} "
+            f"duration_ms={(time.perf_counter() - started) * 1000:.2f}"
+        )
+        return group_results
+
+    results.extend(
+        _run_grouped_tasks(
+            tasks,
+            worker,
+            worker_count,
+            group_key_func=lambda task: task['exchange'],
+            db_session=db_session,
+            group_runner=run_exchange_group,
+        )
+    )
     summary = _build_summary(
         mode='rolling',
         symbols=target_symbols,
@@ -378,6 +491,10 @@ def repair_rolling_symbols(
         extra={
             'target_times': sorted(all_target_times),
             'precheck_skipped_count': precheck_skipped_count,
+            'precheck_duration_ms': precheck_duration_ms,
+            'pending_task_count': len(tasks),
+            'unsupported_count': unsupported_count,
+            'exchange_progress': exchange_progress,
         },
     )
     _log_repair_summary(summary)
@@ -422,6 +539,7 @@ def repair_history_symbols(
     started_at = time.perf_counter()
     tasks = []
     skipped_results = []
+    exchange_task_counts = {}
     summary_end_time = latest_closed_5m_open_time(current_time_ms)
     summary_start_time = max(0, summary_end_time - effective_coverage_hours * 60 * 60 * 1000)
 
@@ -459,6 +577,7 @@ def repair_history_symbols(
                             'end_time': target_end_time,
                         }
                     )
+                    exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + 1
 
     def worker(task, db_session=None):
         own_session = db_session is None
@@ -546,7 +665,38 @@ def repair_history_symbols(
             if own_session:
                 session.close()
 
-    results = skipped_results + _run_tasks(tasks, worker, worker_count, db_session=db_session)
+    def run_exchange_group(exchange, group_tasks, group_worker, db_session):
+        started = time.perf_counter()
+        logger.info(
+            f"开始执行交易所history补齐: exchange={exchange} "
+            f"tasks={len(group_tasks)} symbols={len({task['symbol'] for task in group_tasks})}"
+        )
+        group_results = _run_tasks(group_tasks, group_worker, 1, db_session=db_session)
+        result_stats = _summarize_results(group_results)
+        logger.info(
+            f"交易所history补齐完成: exchange={exchange} "
+            f"success={result_stats['success_count']} "
+            f"failure={result_stats['failure_count']} "
+            f"skipped={result_stats['skipped_count']} "
+            f"duration_ms={(time.perf_counter() - started) * 1000:.2f}"
+        )
+        return group_results
+
+    if tasks:
+        logger.info(
+            f"开始交易所history执行: exchanges={','.join(sorted(exchange_task_counts))} "
+            f"pending={len(tasks)} "
+            f"明细={'; '.join(f'{exchange}(待补={count})' for exchange, count in sorted(exchange_task_counts.items()))}"
+        )
+
+    results = skipped_results + _run_grouped_tasks(
+        tasks,
+        worker,
+        worker_count,
+        group_key_func=lambda task: task['exchange'],
+        db_session=db_session,
+        group_runner=run_exchange_group,
+    )
     summary = _build_summary(
         mode='history',
         symbols=target_symbols,

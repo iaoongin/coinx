@@ -1,3 +1,6 @@
+import requests
+
+from coinx.collector.okx import series as okx_series
 from coinx.collector.okx.series import (
     clear_supported_symbols_cache,
     fetch_open_interest_hist,
@@ -179,3 +182,83 @@ def test_okx_is_symbol_supported_false_for_missing_swap(monkeypatch):
 
     assert is_symbol_supported('BTCUSDT') is True
     assert is_symbol_supported('PROMUSDT') is False
+
+
+def test_okx_request_uses_retry_after_header_on_429(monkeypatch):
+    sleeps = []
+
+    class FakeResponse:
+        status_code = 429
+        reason = 'Too Many Requests'
+        headers = {'Retry-After': '7'}
+
+    def fake_request(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5):
+        error = requests.exceptions.HTTPError('429 Too Many Requests')
+        error.response = FakeResponse()
+        raise error
+
+    monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
+    monkeypatch.setattr(okx_series.time, 'sleep', lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
+
+    try:
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+    except requests.exceptions.HTTPError:
+        pass
+
+    assert sleeps == [7.0]
+
+
+def test_okx_request_uses_fallback_backoff_without_retry_header(monkeypatch):
+    sleeps = []
+
+    class FakeResponse:
+        status_code = 429
+        reason = 'Too Many Requests'
+        headers = {}
+
+    def fake_request(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5):
+        error = requests.exceptions.HTTPError('429 Too Many Requests')
+        error.response = FakeResponse()
+        raise error
+
+    monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
+    monkeypatch.setattr(okx_series.time, 'sleep', lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
+    monkeypatch.setattr(okx_series, 'OKX_429_RETRY_FALLBACK_SECONDS', 9)
+
+    try:
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+    except requests.exceptions.HTTPError:
+        pass
+
+    assert sleeps == [9.0]
+
+
+def test_okx_rubik_requests_respect_min_interval(monkeypatch):
+    okx_series._okx_rate_limit_state.clear()
+    sleep_calls = []
+    time_values = iter([10.0, 10.3, 11.3])
+
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 1000)
+    monkeypatch.setattr(okx_series.time, 'time', lambda: next(time_values))
+    monkeypatch.setattr(okx_series.time, 'sleep', lambda seconds: sleep_calls.append(round(seconds, 2)))
+    monkeypatch.setattr(
+        okx_series,
+        'request_with_retry',
+        lambda session, url, params=None, timeout=10, max_retries=3, base_delay=0.5: type(
+            'Resp',
+            (),
+            {
+                'status_code': 200,
+                'headers': {},
+                'raise_for_status': lambda self: None,
+                'json': lambda self: {'code': '0', 'data': []},
+            },
+        )(),
+    )
+
+    okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+    okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+
+    assert sleep_calls == [0.7]

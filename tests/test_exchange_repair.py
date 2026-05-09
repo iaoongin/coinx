@@ -1,4 +1,5 @@
 ﻿from dataclasses import dataclass
+import threading
 
 from coinx.collector.exchange_repair import repair_history_symbols, repair_rolling_symbols
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
@@ -270,3 +271,94 @@ def test_exchange_history_repair_collects_adapter_series_periods(db_session, mon
     assert [call[4] for call in calls] == [3_600_000, 0]
     assert [call[5] for call in calls] == [7_200_000, 3_600_000]
     assert [(row.period, row.event_time) for row in rows] == [('1H', 900000), ('5m', 3600000)]
+
+
+def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monkeypatch):
+    starts = []
+    releases = {}
+    overlaps = {'seen': False}
+    state_lock = threading.Lock()
+    started_event = threading.Event()
+
+    @dataclass(frozen=True)
+    class ParallelAdapter:
+        exchange_id: str
+
+        @property
+        def supported_series_types(self):
+            return ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            event = releases.setdefault(self.exchange_id, threading.Event())
+            with state_lock:
+                starts.append(self.exchange_id)
+                if len(set(starts)) > 1:
+                    overlaps['seen'] = True
+                if len(starts) >= 2:
+                    started_event.set()
+            event.wait(timeout=2)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'open_time': start_time or 900000,
+                    'close_time': (start_time or 900000) + 299999,
+                    'open_price': 1,
+                    'high_price': 2,
+                    'low_price': 1,
+                    'close_price': 1.5,
+                }
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_exchange_adapters',
+        lambda exchanges: [ParallelAdapter('binance'), ParallelAdapter('okx')],
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda **kwargs: {},
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records',
+        lambda exchange, series_type, records, session=None: len(records),
+    )
+
+    result_holder = {}
+
+    worker_thread = threading.Thread(
+        target=lambda: result_holder.setdefault(
+            'summary',
+            repair_rolling_symbols(
+                symbols=['BTCUSDT'],
+                series_types=['klines'],
+                exchanges=['binance', 'okx'],
+                now_ms=1500000,
+                points=1,
+                max_workers=2,
+                db_session=None,
+            ),
+        )
+    )
+    worker_thread.start()
+
+    assert started_event.wait(timeout=2), 'expected both exchange workers to start'
+
+    releases['binance'].set()
+    releases['okx'].set()
+    worker_thread.join(timeout=2)
+
+    assert not worker_thread.is_alive()
+    assert overlaps['seen'] is True
+    assert result_holder['summary']['success_count'] == 2

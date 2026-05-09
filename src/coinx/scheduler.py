@@ -57,101 +57,61 @@ def scheduled_market_rank_refresh():
 @scheduler.scheduled_job(
     'interval',
     seconds=REPAIR_TRACKED_INTERVAL,
-    id='repair_tracked_job',
+    id='repair_market_rolling_job',
     max_instances=1,
     coalesce=True
 )
-def scheduled_repair_tracked():
-    """轻量修补跟踪币种最新首页序列"""
-    try:
-        tracked_coins = get_active_coins()
-        if not tracked_coins:
-            logger.info('无跟踪币种，跳过修补')
-            return
-        logger.info(f'开始修补跟踪币种最新点，共 {len(tracked_coins)} 个')
-        repair_rolling_tracked_symbols(
-            symbols=tracked_coins,
-            series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-            points=REPAIR_ROLLING_POINTS,
-            max_workers=REPAIR_ROLLING_MAX_WORKERS,
-        )
-        logger.info('修补跟踪币种最新点完成')
-    except Exception as e:
-        logger.error(f'修补跟踪币种最新点失败: {e}')
-        logger.exception(e)
-
-
-@scheduler.scheduled_job(
-    'interval',
-    seconds=REPAIR_TRACKED_INTERVAL,
-    id='repair_market_structure_score_job',
-    max_instances=1,
-    coalesce=True
-)
-def scheduled_repair_market_structure_score():
-    """轻量修补评分币种所需的多交易所最新序列"""
+def scheduled_repair_market_rolling():
+    """轻量滚动修补市场币种所需的多交易所最新序列"""
     try:
         score_symbols = get_market_structure_score_symbols()
         if not score_symbols:
-            logger.info('无评分币种，跳过市场结构评分修补')
+            logger.info('无市场币种，跳过市场滚动修补')
             return
-        logger.info(f'开始修补市场结构评分币种最新点，共 {len(score_symbols)} 个')
-        repair_rolling_tracked_symbols(
+        logger.info(
+            '开始滚动修补市场币种最新点: symbols=%d series_types=%s points=%s max_workers=%s',
+            len(score_symbols),
+            ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            REPAIR_ROLLING_POINTS,
+            REPAIR_ROLLING_MAX_WORKERS,
+        )
+        summary = repair_rolling_tracked_symbols(
             symbols=score_symbols,
             series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
             points=REPAIR_ROLLING_POINTS,
             max_workers=REPAIR_ROLLING_MAX_WORKERS,
         )
-        logger.info('修补市场结构评分币种最新点完成')
+        precheck_complete = summary.get('precheck_skipped_count', 0)
+        task_total = (
+            (summary.get('success_count', 0) or 0)
+            + (summary.get('failure_count', 0) or 0)
+            + max(0, (summary.get('skipped_count', 0) or 0) - precheck_complete)
+        )
+        logger.info(
+            '滚动修补市场币种最新点完成: symbols=%d precheck_complete=%d pending_tasks=%d '
+            'success=%d failure=%d skipped=%d duration_ms=%.2f',
+            len(score_symbols),
+            precheck_complete,
+            task_total,
+            summary.get('success_count', 0),
+            summary.get('failure_count', 0),
+            summary.get('skipped_count', 0),
+            summary.get('duration_ms', 0.0),
+        )
     except Exception as e:
-        logger.error(f'修补市场结构评分币种最新点失败: {e}')
+        logger.error(f'滚动修补市场币种最新点失败: {e}')
         logger.exception(e)
-
-
-if FETCH_COINS_ENABLED:
-    @scheduler.scheduled_job(
-        'interval',
-        seconds=FETCH_COINS_INTERVAL,
-        id='repair_top_volume_job',
-        max_instances=1,
-        coalesce=True
-    )
-    def scheduled_repair_top_volume():
-        """修补成交额前N币种历史序列"""
-        try:
-            all_tickers = get_all_24hr_tickers()
-            if not all_tickers:
-                logger.warning('获取成交额排行失败')
-                return
-            top_volume_symbols = [
-                t['symbol'] for t in sorted(
-                    all_tickers,
-                    key=lambda x: x.get('quoteVolume', 0),
-                    reverse=True
-                )[:FETCH_COINS_TOP_VOLUME_COUNT]
-            ]
-            logger.info(f'开始修补成交额前{FETCH_COINS_TOP_VOLUME_COUNT}，共 {len(top_volume_symbols)} 个')
-            repair_rolling_tracked_symbols(
-                symbols=top_volume_symbols,
-                series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                points=REPAIR_ROLLING_POINTS,
-                max_workers=REPAIR_ROLLING_MAX_WORKERS,
-            )
-            logger.info('修补成交额前N完成')
-        except Exception as e:
-            logger.error(f'修补成交额前N失败: {e}')
-            logger.exception(e)
 
 
 if REPAIR_HISTORY_ENABLED:
     @scheduler.scheduled_job(
         'interval',
         seconds=REPAIR_HISTORY_INTERVAL,
-        id='repair_history_job',
+        id='repair_market_history_job',
         max_instances=1,
         coalesce=True
     )
-    def scheduled_repair_history():
+    def scheduled_repair_market_history():
         """Low-frequency historical gap repair."""
         try:
             logger.info('开始执行低频历史补齐任务')
@@ -169,14 +129,25 @@ if REPAIR_HISTORY_ENABLED:
                     symbols = list(dict.fromkeys([*symbols, *top_volume_symbols]))
                 else:
                     logger.warning('低频历史补齐获取成交额排行失败，仅修补跟踪币种')
+            logger.info(
+                '开始低频历史补齐: symbols=%d series_types=%s coverage_hours=%s max_workers=%s',
+                len(symbols),
+                ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                REPAIR_HISTORY_COVERAGE_HOURS,
+                REPAIR_HISTORY_MAX_WORKERS,
+            )
             summary = run_history_repair_job(
                 symbols=symbols,
                 series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
             )
             logger.info(
-                f"低频历史补齐任务完成: 状态={summary.get('status')}, "
-                f"成功={summary.get('success_count', 0)}, 失败={summary.get('failure_count', 0)}, "
-                f"跳过={summary.get('skipped_count', 0)}"
+                '低频历史补齐任务完成: status=%s symbols=%d success=%d failure=%d skipped=%d duration_ms=%.2f',
+                summary.get('status'),
+                len(symbols),
+                summary.get('success_count', 0),
+                summary.get('failure_count', 0),
+                summary.get('skipped_count', 0),
+                summary.get('duration_ms', 0.0),
             )
         except Exception as e:
             logger.error(f'低频历史补齐任务失败: {e}')
