@@ -1,6 +1,7 @@
 from coinx.repositories.homepage_series import (
     FIVE_MINUTES_MS,
     TIME_INTERVALS,
+    _summarize_homepage_rejection_reasons,
     get_homepage_series_snapshot,
     get_homepage_series_data,
     get_homepage_series_update_time,
@@ -74,6 +75,14 @@ def seed_series(
                 )
             )
     session.commit()
+
+
+def capture_log(messages):
+    def _capture(message, *args, **kwargs):
+        if args:
+            message = message % args
+        messages.append(message)
+    return _capture
 
 
 def test_get_homepage_series_data_builds_coin_payload_from_5m_series(db_session, monkeypatch):
@@ -182,8 +191,8 @@ def test_get_homepage_series_data_logs_kline_rejection_reason(db_session, monkey
 
     info_logs = []
     warning_logs = []
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', info_logs.append)
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', warning_logs.append)
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', capture_log(info_logs))
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', capture_log(warning_logs))
 
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
@@ -208,8 +217,8 @@ def test_get_homepage_series_data_logs_open_interest_rejection_reason(db_session
 
     info_logs = []
     warning_logs = []
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', info_logs.append)
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', warning_logs.append)
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', capture_log(info_logs))
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', capture_log(warning_logs))
 
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
@@ -219,6 +228,20 @@ def test_get_homepage_series_data_logs_open_interest_rejection_reason(db_session
     assert coin['missing_exchanges'] == ['binance']
     assert any('missing_open_interest_history' in message or 'missing_open_interest_target' in message for message in warning_logs)
     assert any('symbol=BTCUSDT' in message and 'exchange=binance' in message for message in warning_logs)
+    assert any('summary=' in message for message in warning_logs)
+
+
+def test_summarize_homepage_rejection_reasons_compacts_missing_intervals():
+    summary = _summarize_homepage_rejection_reasons(
+        [
+            {'reason': 'missing_open_interest_history', 'details': {'missing': 'open_interest_hist'}},
+            {'reason': 'missing_open_interest_target', 'details': {'interval': '24h', 'target_time': 1}},
+            {'reason': 'missing_open_interest_target', 'details': {'interval': '48h', 'target_time': 2}},
+            {'reason': 'unsupported_symbol', 'details': {'exchange': 'okx', 'symbol': 'QUSDT'}},
+        ]
+    )
+
+    assert summary == 'symbol_not_supported; missing_oi_history; missing_oi=24h,48h'
 
 
 def test_get_homepage_series_data_does_not_reject_when_taker_mapping_is_missing(db_session, monkeypatch):
@@ -236,8 +259,8 @@ def test_get_homepage_series_data_does_not_reject_when_taker_mapping_is_missing(
 
     info_logs = []
     warning_logs = []
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', info_logs.append)
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', warning_logs.append)
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', capture_log(info_logs))
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', capture_log(warning_logs))
 
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
@@ -258,8 +281,8 @@ def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(d
 
     info_logs = []
     warning_logs = []
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', info_logs.append)
-    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', warning_logs.append)
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.info', capture_log(info_logs))
+    monkeypatch.setattr('coinx.repositories.homepage_series.logger.warning', capture_log(warning_logs))
 
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
@@ -365,6 +388,22 @@ def test_get_homepage_series_snapshot_returns_data_and_update_time_together(db_s
     )
 
     assert len(snapshot['data']) == 2
+    assert snapshot['cache_update_time'] == start_time + 2016 * FIVE_MINUTES_MS
+
+
+def test_get_homepage_series_snapshot_ignores_empty_symbol_current_time_when_computing_update_time(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 2017, include_taker_vol=True)
+    seed_series(db_session, 'QUSDT', start_time, 10, include_taker_vol=True)
+
+    snapshot = get_homepage_series_snapshot(
+        symbols=['BTCUSDT', 'QUSDT'],
+        session=db_session,
+    )
+
+    assert len(snapshot['data']) == 2
+    assert next(coin for coin in snapshot['data'] if coin['symbol'] == 'QUSDT')['status'] == 'empty'
     assert snapshot['cache_update_time'] == start_time + 2016 * FIVE_MINUTES_MS
 
 

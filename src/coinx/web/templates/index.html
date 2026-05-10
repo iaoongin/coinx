@@ -474,6 +474,7 @@
         const FIVE_MINUTES_MS = 5 * 60 * 1000;
         const REFRESH_TIMEOUT_MS = 15000;
         let countdownTimer = null;
+        let lastAutoRefreshTarget = null;
 
         const filteredCoins = computed(() => {
           const term = keyword.value.toUpperCase();
@@ -570,7 +571,10 @@
           const nextCloseTime = now - (now % FIVE_MINUTES_MS) + FIVE_MINUTES_MS;
           const seconds = Math.max(0, Math.floor((nextCloseTime - now) / 1000));
           countdown.value = `${seconds}s`;
-          if (seconds <= 1) loadData(false);
+          if (seconds <= 1 && lastAutoRefreshTarget !== nextCloseTime && !loading.value) {
+            lastAutoRefreshTarget = nextCloseTime;
+            loadData(false);
+          }
         };
 
         const startCountdown = () => {

@@ -1,4 +1,7 @@
 const { defineConfig, devices } = require('@playwright/test');
+const path = require('path');
+
+const projectRoot = path.resolve(__dirname, '..', '..');
 
 module.exports = defineConfig({
   testDir: './tests',
@@ -22,7 +25,16 @@ module.exports = defineConfig({
     },
   ],
   webServer: {
-    command: 'cd ../.. && WEB_PASSWORD=admin123 WEB_PORT=5502 PYTHONPATH=src python src/coinx/web/app.py',
+    command: 'python src/coinx/web/app.py',
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+      WEB_PASSWORD: 'admin123',
+      WEB_PORT: '5502',
+      PYTHONPATH: 'src',
+    },
     port: 5502,
     timeout: 120000,
     reuseExistingServer: false,

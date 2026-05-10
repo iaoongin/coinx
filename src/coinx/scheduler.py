@@ -1,3 +1,6 @@
+import threading
+import time
+
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from .collector import (
@@ -13,6 +16,8 @@ from .config import (
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
     FETCH_COINS_TOP_VOLUME_COUNT,
+    REPAIR_HISTORY_COVERAGE_HOURS,
+    REPAIR_HISTORY_MAX_WORKERS,
     UPDATE_INTERVAL,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
@@ -26,6 +31,55 @@ from .utils import logger
 
 
 scheduler = BackgroundScheduler()
+JOB_METADATA_LOCK = threading.Lock()
+JOB_METADATA = {}
+
+
+def _update_job_metadata(job_id, **fields):
+    with JOB_METADATA_LOCK:
+        metadata = JOB_METADATA.setdefault(job_id, {})
+        metadata.update(fields)
+        metadata['job_id'] = job_id
+        return dict(metadata)
+
+
+def _mark_job_started(job_id):
+    return _update_job_metadata(
+        job_id,
+        running=True,
+        last_started_at_ms=int(time.time() * 1000),
+        last_finished_at_ms=None,
+        last_duration_ms=None,
+        last_status='running',
+        last_summary=None,
+        last_error=None,
+    )
+
+
+def _mark_job_finished(job_id, status='success', summary=None, error=None, started_at=None):
+    finished_at_ms = int(time.time() * 1000)
+    duration_ms = None
+    if started_at is not None:
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    return _update_job_metadata(
+        job_id,
+        running=False,
+        last_finished_at_ms=finished_at_ms,
+        last_duration_ms=duration_ms,
+        last_status=status,
+        last_summary=summary,
+        last_error=str(error) if error else None,
+    )
+
+
+def get_job_runtime_metadata(job_id):
+    with JOB_METADATA_LOCK:
+        return dict(JOB_METADATA.get(job_id) or {})
+
+
+def get_all_job_runtime_metadata():
+    with JOB_METADATA_LOCK:
+        return {job_id: dict(metadata) for job_id, metadata in JOB_METADATA.items()}
 
 
 @scheduler.scheduled_job(
@@ -37,8 +91,11 @@ scheduler = BackgroundScheduler()
 )
 def scheduled_market_rank_refresh():
     """定时刷新行情榜快照数据"""
+    started_at = time.perf_counter()
+    _mark_job_started('market_rank_refresh_job')
     try:
         summary = refresh_market_tickers()
+        _mark_job_finished('market_rank_refresh_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
         if summary.get('status') == 'success':
             logger.info(
                 f"行情榜快照定时刷新完成: 状态={summary.get('status')}, "
@@ -50,6 +107,7 @@ def scheduled_market_rank_refresh():
                 f"消息={summary.get('message')}"
             )
     except Exception as e:
+        _mark_job_finished('market_rank_refresh_job', status='error', error=e, started_at=started_at)
         logger.error(f'行情榜快照定时刷新任务失败: {e}')
         logger.exception(e)
 
@@ -63,9 +121,17 @@ def scheduled_market_rank_refresh():
 )
 def scheduled_repair_market_rolling():
     """轻量滚动修补市场币种所需的多交易所最新序列"""
+    started_at = time.perf_counter()
+    _mark_job_started('repair_market_rolling_job')
     try:
         score_symbols = get_market_structure_score_symbols()
         if not score_symbols:
+            _mark_job_finished(
+                'repair_market_rolling_job',
+                status='success',
+                summary={'status': 'success', 'message': 'no market symbols', 'symbols': []},
+                started_at=started_at,
+            )
             logger.info('无市场币种，跳过市场滚动修补')
             return
         logger.info(
@@ -81,6 +147,7 @@ def scheduled_repair_market_rolling():
             points=REPAIR_ROLLING_POINTS,
             max_workers=REPAIR_ROLLING_MAX_WORKERS,
         )
+        _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
         precheck_complete = summary.get('precheck_skipped_count', 0)
         task_total = (
             (summary.get('success_count', 0) or 0)
@@ -99,6 +166,7 @@ def scheduled_repair_market_rolling():
             summary.get('duration_ms', 0.0),
         )
     except Exception as e:
+        _mark_job_finished('repair_market_rolling_job', status='error', error=e, started_at=started_at)
         logger.error(f'滚动修补市场币种最新点失败: {e}')
         logger.exception(e)
 
@@ -113,6 +181,8 @@ if REPAIR_HISTORY_ENABLED:
     )
     def scheduled_repair_market_history():
         """Low-frequency historical gap repair."""
+        started_at = time.perf_counter()
+        _mark_job_started('repair_market_history_job')
         try:
             logger.info('开始执行低频历史补齐任务')
             symbols = get_active_coins()
@@ -140,6 +210,7 @@ if REPAIR_HISTORY_ENABLED:
                 symbols=symbols,
                 series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
             )
+            _mark_job_finished('repair_market_history_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
             logger.info(
                 '低频历史补齐任务完成: status=%s symbols=%d success=%d failure=%d skipped=%d duration_ms=%.2f',
                 summary.get('status'),
@@ -150,6 +221,7 @@ if REPAIR_HISTORY_ENABLED:
                 summary.get('duration_ms', 0.0),
             )
         except Exception as e:
+            _mark_job_finished('repair_market_history_job', status='error', error=e, started_at=started_at)
             logger.error(f'低频历史补齐任务失败: {e}')
             logger.exception(e)
 
@@ -157,13 +229,17 @@ if REPAIR_HISTORY_ENABLED:
 @scheduler.scheduled_job('interval', seconds=BINANCE_SERIES_REPAIR_INTERVAL, id='binance_series_repair_job')
 def scheduled_binance_series_repair_update():
     """Run the configured generic Binance series repair job."""
+    started_at = time.perf_counter()
+    _mark_job_started('binance_series_repair_job')
     try:
         summary = run_series_repair_job()
+        _mark_job_finished('binance_series_repair_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
         logger.info(
             f"Binance 历史序列定时修补完成: 状态={summary.get('status')}, "
             f"成功={summary.get('success_count', 0)}, 失败={summary.get('failure_count', 0)}"
         )
     except Exception as e:
+        _mark_job_finished('binance_series_repair_job', status='error', error=e, started_at=started_at)
         logger.error(f'Binance 历史序列定时修补任务失败: {e}')
         logger.exception(e)
 
@@ -171,11 +247,20 @@ def scheduled_binance_series_repair_update():
 @scheduler.scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')
 def scheduled_coins_config_update():
     """Refresh tracked coin configuration once per day."""
+    started_at = time.perf_counter()
+    _mark_job_started('update_coins_config_job')
     try:
         logger.info('开始执行定时币种配置刷新任务')
         update_coins_config()
+        _mark_job_finished(
+            'update_coins_config_job',
+            status='success',
+            summary={'status': 'success', 'message': 'coins config updated'},
+            started_at=started_at,
+        )
         logger.info('定时币种配置刷新任务完成')
     except Exception as e:
+        _mark_job_finished('update_coins_config_job', status='error', error=e, started_at=started_at)
         logger.error(f'定时币种配置刷新任务失败: {e}')
         logger.exception(e)
 

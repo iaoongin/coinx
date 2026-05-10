@@ -132,7 +132,7 @@ body::after {
   justify-content: space-between;
   gap: 14px;
   padding: 0 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   backdrop-filter: blur(12px);
   overflow-x: auto;
   overflow-y: hidden;

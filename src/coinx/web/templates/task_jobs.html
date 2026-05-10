@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>任务管理</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: var(--page-padding);
+      background:
+        radial-gradient(circle at top right, rgba(212, 175, 55, 0.08), transparent 28%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 28%),
+        var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+    }
+
+    .page-frame {
+      max-width: var(--page-max-width);
+      margin: 0 auto;
+    }
+
+    .page-frame .nav-container {
+      width: 100%;
+    }
+
+    .shell {
+      padding: 12px;
+      border-radius: var(--page-surface-radius);
+      border: 1px solid var(--border-default);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01));
+      box-shadow: var(--shadow-card);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .hero-main,
+    .hero-side {
+      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--gold-primary);
+    }
+
+    h1 {
+      margin: 8px 0 6px;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .stat-grid {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .stat-card {
+      border-radius: 12px;
+      padding: 10px;
+      border: 1px solid rgba(212, 175, 55, 0.14);
+      background: rgba(212, 175, 55, 0.05);
+    }
+
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 18px;
+      color: var(--gold-bright);
+      font-weight: 700;
+    }
+
+    .hero-side {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .scheduler-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      width: fit-content;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .scheduler-state.running {
+      color: var(--gold-bright);
+      border-color: rgba(212, 175, 55, 0.35);
+      background: rgba(212, 175, 55, 0.08);
+    }
+
+    .scheduler-state.stopped {
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .toolbar {
+      margin-top: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-left,
+    .toolbar-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .search-input,
+    .select-input {
+      height: 32px;
+      border-radius: 7px;
+      border: 1px solid var(--border-default);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      padding: 0 10px;
+      outline: none;
+    }
+
+    .search-input {
+      width: 170px;
+    }
+
+    .btn {
+      height: 30px;
+      border-radius: 7px;
+      border: 1px solid var(--border-default);
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      padding: 0 10px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .btn:hover {
+      border-color: rgba(212, 175, 55, 0.3);
+    }
+
+    .btn-primary {
+      color: var(--gold-bright);
+      border-color: rgba(212, 175, 55, 0.4);
+      background: rgba(212, 175, 55, 0.08);
+    }
+
+    .btn-danger {
+      color: #ffb4b4;
+      border-color: rgba(255, 120, 120, 0.26);
+      background: rgba(255, 120, 120, 0.06);
+    }
+
+    .table-shell {
+      margin-top: 12px;
+      border-radius: 16px;
+      border: 1px solid var(--border-default);
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .job-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .job-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: rgba(17, 17, 17, 0.96);
+      color: var(--text-muted);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+      text-align: left;
+      padding: 9px 8px;
+      border-bottom: 1px solid var(--border-default);
+      white-space: normal;
+      line-height: 1.35;
+    }
+
+    .job-table tbody tr {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .job-table tbody tr:hover {
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .job-table td {
+      padding: 10px 8px;
+      vertical-align: top;
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-align: left;
+      line-height: 1.45;
+    }
+
+    .cell-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .cell-id {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      word-break: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.35;
+    }
+
+    .cell-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: flex-start;
+    }
+
+    .cell-mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+
+    .job-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+    }
+
+    .badge.running {
+      color: var(--gold-bright);
+      border-color: rgba(212, 175, 55, 0.35);
+      background: rgba(212, 175, 55, 0.08);
+    }
+
+    .badge.success {
+      color: #95f2bc;
+      border-color: rgba(80, 220, 140, 0.26);
+      background: rgba(80, 220, 140, 0.08);
+    }
+
+    .badge.paused {
+      color: #ffd67a;
+      border-color: rgba(255, 214, 122, 0.28);
+      background: rgba(255, 214, 122, 0.08);
+    }
+
+    .badge.offline {
+      color: #c3cedd;
+      border-color: rgba(195, 206, 221, 0.24);
+      background: rgba(195, 206, 221, 0.08);
+    }
+
+    .badge.ready {
+      color: #8fd3ff;
+      border-color: rgba(143, 211, 255, 0.26);
+      background: rgba(143, 211, 255, 0.08);
+    }
+
+    .badge.error {
+      color: #ffb4b4;
+      border-color: rgba(255, 120, 120, 0.26);
+      background: rgba(255, 120, 120, 0.08);
+    }
+
+    .message-box {
+      min-height: 20px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .message-box.error {
+      color: #ffb4b4;
+    }
+
+    .message-box.success {
+      color: #95f2bc;
+    }
+
+    .empty-state {
+      padding: 28px 18px;
+      text-align: center;
+      color: var(--text-muted);
+      border: 1px dashed var(--border-default);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.015);
+    }
+
+    @media (max-width: 960px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+      .table-wrap {
+        overflow: auto;
+      }
+      .job-table {
+        min-width: 980px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 10px;
+      }
+
+      .stat-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .job-actions {
+        justify-content: flex-start;
+      }
+
+      .search-input,
+      .select-input {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-frame">
+    {% include 'components/nav.html' %}
+
+    <div id="app" class="shell">
+      <section class="hero">
+        <div class="hero-main">
+          <div class="eyebrow">任务调度控制台</div>
+          <h1>任务注册表与执行控制台</h1>
+          <p class="subtitle">
+            查看当前注册的 APScheduler 任务、下一次触发时间、最近执行结果，并直接执行、暂停、恢复或删除调度任务。
+          </p>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <div class="stat-label">任务总数</div>
+              <div class="stat-value">[[ filteredJobs.length ]]</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">运行中</div>
+              <div class="stat-value">[[ runningCount ]]</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">暂停或移除</div>
+              <div class="stat-value">[[ inactiveCount ]]</div>
+            </div>
+          </div>
+        </div>
+        <div class="hero-side">
+          <div>
+            <div class="eyebrow">调度器状态</div>
+            <h2 style="margin:10px 0 8px;font-size:18px;">调度器概况</h2>
+            <div :class="['scheduler-state', schedulerRunning ? 'running' : 'stopped']">
+              <span>[[ schedulerRunning ? '运行中' : '未启动' ]]</span>
+            </div>
+          </div>
+          <div class="subtitle">
+            任务由代码在启动时统一注册；这里仅提供立即执行、暂停和恢复，不提供删除。
+          </div>
+        </div>
+      </section>
+
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input v-model.trim="keyword" class="search-input" placeholder="搜索 job id / 名称 / trigger">
+          <select v-model="statusFilter" class="select-input">
+            <option value="all">全部状态</option>
+            <option value="running">运行中</option>
+            <option value="paused">已暂停</option>
+            <option value="active">已注册</option>
+            <option value="offline">调度器未运行</option>
+          </select>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn" @click="loadJobs" :disabled="loading">刷新</button>
+          <button class="btn btn-primary" @click="toggleAutoRefresh">
+            [[ autoRefresh ? '关闭自动刷新' : '开启自动刷新' ]]
+          </button>
+        </div>
+      </div>
+
+      <div :class="['message-box', flash.type]" style="margin-top:10px;">[[ flash.message ]]</div>
+
+      <div class="table-shell" v-if="filteredJobs.length">
+        <div class="table-wrap">
+          <table class="job-table">
+            <colgroup>
+              <col style="width: 23%;">
+              <col style="width: 9%;">
+              <col style="width: 17%;">
+              <col style="width: 17%;">
+              <col style="width: 10%;">
+              <col style="width: 10%;">
+              <col style="width: 14%;">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>任务</th>
+                <th>状态</th>
+                <th>调度 / 下次</th>
+                <th>最近执行</th>
+                <th>耗时 / 并发</th>
+                <th>错误</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="job in filteredJobs" :key="job.id">
+                <td>
+                  <div class="cell-name">[[ job.display_name || job.name ]]</div>
+                  <div class="cell-id">任务 ID：[[ job.id ]]</div>
+                  <div class="cell-id">函数：[[ job.name ]]</div>
+                </td>
+                <td>
+                  <span :class="['badge', statusClass(job)]">
+                    [[ statusLabel(job) ]]
+                  </span>
+                </td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="cell-mono">[[ job.trigger ]]</span>
+                    <span class="cell-mono">下次：[[ formatTime(job.next_run_time_ms) ]]</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="cell-mono">开始：[[ formatTime(job.runtime?.last_started_at_ms) ]]</span>
+                    <span class="cell-mono">结束：[[ formatTime(job.runtime?.last_finished_at_ms) ]]</span>
+                  </div>
+                </td>
+                <td><span class="cell-mono">[[ formatDuration(job.runtime?.last_duration_ms) ]] / [[ job.max_instances ?? '--' ]]</span></td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="cell-mono">[[ job.runtime?.last_error || '--' ]]</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="job-actions">
+                <button class="btn" @click="runAction(job.id, 'run')" :disabled="loading || !job.registered || !schedulerRunning">立即执行</button>
+                <button class="btn" @click="runAction(job.id, 'pause')" :disabled="loading || !job.registered || !schedulerRunning || job.paused">暂停</button>
+                <button class="btn" @click="runAction(job.id, 'resume')" :disabled="loading || !job.registered || !schedulerRunning || !job.paused">恢复</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div v-else class="empty-state">
+        没有匹配到任务。可以调整筛选条件，或确认调度器是否已经启动。
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+    createApp({
+      delimiters: ['[[', ']]'],
+      setup() {
+        const jobs = ref([]);
+        const loading = ref(false);
+        const keyword = ref('');
+        const statusFilter = ref('all');
+        const schedulerRunning = ref(false);
+        const autoRefresh = ref(true);
+        const flash = ref({ type: '', message: '' });
+        let timer = null;
+
+        const filteredJobs = computed(() => {
+          const term = keyword.value.trim().toLowerCase();
+          return jobs.value.filter((job) => {
+            const haystack = `${job.id} ${job.name} ${job.trigger}`.toLowerCase();
+            const matchesKeyword = !term || haystack.includes(term);
+            if (!matchesKeyword) return false;
+
+            if (statusFilter.value === 'running') return !!job.runtime?.running;
+            if (statusFilter.value === 'paused') return !!job.paused;
+            if (statusFilter.value === 'active') return !!job.registered;
+            if (statusFilter.value === 'offline') return !!job.registered && !job.scheduler_running;
+            return true;
+          });
+        });
+
+        const runningCount = computed(() => jobs.value.filter((job) => job.runtime?.running).length);
+        const inactiveCount = computed(() => jobs.value.filter((job) => job.paused || !job.scheduler_running).length);
+
+        const showFlash = (message, type = '') => {
+          flash.value = { message, type };
+        };
+
+        const formatTime = (timestamp) => {
+          if (!timestamp) return '--';
+          return new Date(timestamp).toLocaleString('zh-CN');
+        };
+
+        const formatDuration = (durationMs) => {
+          if (durationMs === null || durationMs === undefined) return '--';
+          if (durationMs < 1000) return `${durationMs.toFixed(0)}ms`;
+          return `${(durationMs / 1000).toFixed(2)}s`;
+        };
+
+        const statusText = (status, registered = true) => {
+          if (!status) return registered ? '已注册' : '--';
+          const normalized = String(status).toLowerCase();
+          if (normalized === 'running') return '运行中';
+          if (normalized === 'success') return '成功';
+          if (normalized === 'error') return '失败';
+          if (normalized === 'skipped') return '跳过';
+          if (normalized === 'paused') return '已暂停';
+          if (normalized === 'ready') return '就绪';
+          if (normalized === 'offline') return '未启动';
+          return status;
+        };
+
+        const statusKey = (job) => {
+          if (job.runtime?.running) return 'running';
+          if (!job.scheduler_running) return 'offline';
+          if (job.paused) return 'paused';
+          const normalized = String(job.runtime?.last_status || '').toLowerCase();
+          if (normalized === 'error') return 'error';
+          if (normalized === 'success') return 'success';
+          return 'ready';
+        };
+
+        const statusClass = (job) => statusKey(job);
+
+        const statusLabel = (job) => {
+          if (job.runtime?.running) return '运行中';
+          if (!job.scheduler_running) return '未启动';
+          if (job.paused) return '已暂停';
+          if (job.runtime?.last_status) return statusText(job.runtime.last_status);
+          return '就绪';
+        };
+
+        const loadJobs = async () => {
+          loading.value = true;
+          try {
+            const response = await fetch('/api/task-jobs');
+            const result = await response.json();
+            if (result.status !== 'success') throw new Error(result.message || 'failed to load jobs');
+            jobs.value = result.data?.jobs || [];
+            schedulerRunning.value = !!result.data?.scheduler_running;
+          } catch (error) {
+            console.error(error);
+            showFlash(`加载任务失败: ${error.message}`, 'error');
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const runAction = async (jobId, action) => {
+          loading.value = true;
+          try {
+            const response = await fetch(`/api/task-jobs/${jobId}/action`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action }),
+            });
+            const result = await response.json();
+            if (result.status !== 'success') throw new Error(result.message || `failed to ${action} job`);
+            jobs.value = result.data?.jobs || jobs.value;
+            showFlash(result.message || `${action} success`, 'success');
+          } catch (error) {
+            console.error(error);
+            showFlash(`任务操作失败: ${error.message}`, 'error');
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const startAutoRefresh = () => {
+          if (timer) clearInterval(timer);
+          if (!autoRefresh.value) return;
+          timer = setInterval(() => {
+            if (!loading.value) loadJobs();
+          }, 10000);
+        };
+
+        const toggleAutoRefresh = () => {
+          autoRefresh.value = !autoRefresh.value;
+          startAutoRefresh();
+        };
+
+        onMounted(async () => {
+          await loadJobs();
+          startAutoRefresh();
+        });
+
+        onUnmounted(() => {
+          if (timer) clearInterval(timer);
+        });
+
+        return {
+          jobs,
+          loading,
+          keyword,
+          statusFilter,
+          schedulerRunning,
+          autoRefresh,
+          flash,
+          filteredJobs,
+          runningCount,
+          inactiveCount,
+          formatTime,
+          formatDuration,
+          statusText,
+          statusClass,
+          statusLabel,
+          loadJobs,
+          runAction,
+          toggleAutoRefresh,
+        };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

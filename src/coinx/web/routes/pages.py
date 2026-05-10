@@ -64,3 +64,10 @@ def market_structure_score():
     """合约市场结构评分页面"""
     logger.info("访问合约市场结构评分页面")
     return render_template('market_structure_score.html')
+
+
+@pages_bp.route('/task-jobs')
+def task_jobs():
+    """任务管理页面"""
+    logger.info("访问任务管理页面")
+    return render_template('task_jobs.html')

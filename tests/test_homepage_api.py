@@ -471,12 +471,80 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
     payload = response.get_json()
     assert started['called'] is True
     assert state['repaired'] is True
-    assert score_refresh['symbols'] == ['BTCUSDT', 'ETHUSDT']
+    assert score_refresh['symbols'] == ['ETHUSDT']
     assert set(score_refresh['series_types']) == {'taker_buy_sell_vol', 'klines', 'open_interest_hist'}
     coin = payload['data'][0]
     assert coin['symbol'] == 'BTCUSDT'
     assert all(change['interval'] != '168h' for change in coin['changes'])
     assert '168h' not in coin['net_inflow']
+
+
+def test_get_coins_deduplicates_market_structure_refresh_symbols_against_homepage_refresh(monkeypatch):
+    started = {}
+    score_refresh = {}
+
+    monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT', 'ETHUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_homepage_series_snapshot',
+        lambda symbols: {
+            'data': [
+                {
+                    'symbol': 'BTCUSDT',
+                    'included_exchanges': ['binance'],
+                    'missing_exchanges': [],
+                    'status': 'partial',
+                    'current_open_interest': 100.0,
+                    'current_open_interest_formatted': '100.00',
+                    'current_open_interest_value': 200.0,
+                    'current_open_interest_value_formatted': '200.00',
+                    'current_price': 10.0,
+                    'current_price_formatted': '10.00',
+                    'price_change': 1.0,
+                    'price_change_percent': 1.0,
+                    'price_change_formatted': '1.00',
+                    'net_inflow': {'5m': 12.0},
+                    'changes': {
+                        '5m': {
+                            'ratio': 1.0,
+                            'value_ratio': 1.0,
+                            'open_interest': 100.0,
+                            'open_interest_formatted': '100.00',
+                            'open_interest_value': 200.0,
+                            'open_interest_value_formatted': '200.00',
+                            'price_change': 1.0,
+                            'price_change_percent': 1.0,
+                            'price_change_formatted': '1.00',
+                            'current_price': 10.0,
+                            'current_price_formatted': '10.00',
+                        }
+                    },
+                }
+            ],
+            'cache_update_time': 1234567890000,
+        },
+    )
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data._start_homepage_refresh_async',
+        lambda symbols=None, series_types=None, latest_only=False: started.update(
+            {'symbols': symbols, 'series_types': series_types, 'latest_only': latest_only}
+        ) or True,
+    )
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data._start_market_structure_refresh_async',
+        lambda symbols=None, series_types=None, exchanges=None: score_refresh.update(
+            {'symbols': symbols, 'series_types': series_types, 'exchanges': exchanges}
+        ) or True,
+    )
+
+    client = create_test_client()
+
+    response = client.get('/api/coins?wait=true')
+
+    assert response.status_code == 200
+    assert started['symbols'] == ['BTCUSDT', 'ETHUSDT']
+    assert score_refresh['symbols'] == ['SOLUSDT']
+    assert set(score_refresh['series_types']) == {'taker_buy_sell_vol', 'klines', 'open_interest_hist'}
 
 
 def test_homepage_refresh_skips_duplicate_inflight_requests(monkeypatch):

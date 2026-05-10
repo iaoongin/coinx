@@ -7,9 +7,9 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "playwright test",
-    "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui"
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new(); chcp 65001 > $null; npx playwright test\"",
+    "test:headed": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new(); chcp 65001 > $null; npx playwright test --headed\"",
+    "test:ui": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new(); chcp 65001 > $null; npx playwright test --ui\""
   },
   "repository": {
     "type": "git",

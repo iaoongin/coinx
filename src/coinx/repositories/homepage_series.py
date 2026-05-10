@@ -210,15 +210,76 @@ def _format_homepage_log_details(details):
     return json.dumps(details, ensure_ascii=False, sort_keys=True)
 
 
+def _summarize_homepage_rejection_reasons(reasons):
+    if not reasons:
+        return 'unknown'
+
+    buckets = {
+        'missing_open_interest_history': False,
+        'missing_kline_history': False,
+        'missing_exchange_anchor': False,
+        'unsupported_symbol': False,
+        'missing_open_interest_target': [],
+        'missing_kline_target': [],
+    }
+
+    for item in reasons:
+        reason = item.get('reason')
+        details = item.get('details') or {}
+        if reason in ('missing_open_interest_target', 'missing_kline_target'):
+            interval = details.get('interval')
+            if interval:
+                buckets[reason].append(interval)
+        elif reason in buckets:
+            buckets[reason] = True
+
+    summary_parts = []
+    if buckets['unsupported_symbol']:
+        summary_parts.append('symbol_not_supported')
+    if buckets['missing_open_interest_history']:
+        summary_parts.append('missing_oi_history')
+    if buckets['missing_kline_history']:
+        summary_parts.append('missing_kline_history')
+    if buckets['missing_exchange_anchor']:
+        summary_parts.append('missing_anchor')
+    if buckets['missing_open_interest_target']:
+        summary_parts.append(f"missing_oi={','.join(buckets['missing_open_interest_target'])}")
+    if buckets['missing_kline_target']:
+        summary_parts.append(f"missing_kline={','.join(buckets['missing_kline_target'])}")
+
+    if not summary_parts:
+        summary_parts.append(','.join(sorted({item.get("reason", "unknown") for item in reasons})))
+    return '; '.join(summary_parts)
+
+
+def _compact_homepage_rejection_reasons(reasons):
+    compact = []
+    for item in reasons:
+        reason = item.get('reason', 'unknown')
+        details = item.get('details') or {}
+        compact_item = {'reason': reason}
+        if 'interval' in details:
+            compact_item['interval'] = details['interval']
+        if 'missing' in details:
+            compact_item['missing'] = details['missing']
+        if reason == 'unsupported_symbol':
+            compact_item['symbol'] = details.get('symbol')
+            compact_item['exchange'] = details.get('exchange')
+        compact.append(compact_item)
+    return compact
+
+
 def _log_homepage_exchange_rejection(symbol, exchange, anchor_time, stage, reasons):
     if not reasons:
         return
 
     summary_reason = reasons[0].get('reason', 'homepage_exchange_rejected')
+    summary = _summarize_homepage_rejection_reasons(reasons)
     logger.warning(
         '首页交易所门禁否决: '
         f'symbol={symbol} exchange={exchange} stage={stage} anchor_time={anchor_time} '
-        f'reason={summary_reason} details={_format_homepage_log_details(reasons)}'
+        f'reason={summary_reason} summary="{summary}" '
+        f'details={_format_homepage_log_details(_compact_homepage_rejection_reasons(reasons))}'
     )
 
 
@@ -1730,7 +1791,9 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
             if coin is None:
                 continue
 
-            update_time = coin['current_time'] if update_time is None else min(update_time, coin['current_time'])
+            coin_current_time = coin.get('current_time')
+            if coin_current_time is not None:
+                update_time = coin_current_time if update_time is None else min(update_time, coin_current_time)
             coin.pop('current_time', None)
             data.append(coin)
 

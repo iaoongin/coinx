@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
@@ -55,6 +56,10 @@ from coinx.repositories.market_structure_score import (
     get_market_structure_score_snapshot,
     get_market_structure_score_symbols,
 )
+from coinx.scheduler import (
+    get_all_job_runtime_metadata,
+    scheduler,
+)
 from coinx.utils import logger
 
 
@@ -84,6 +89,44 @@ MARKET_STRUCTURE_SENTIMENT_SERIES_TYPES = {
     'top_long_short_account_ratio',
     'global_long_short_account_ratio',
 }
+
+TASK_JOB_ACTIONS = {'run', 'pause', 'resume'}
+TASK_JOB_LABELS = {
+    'market_rank_refresh_job': '行情榜快照刷新',
+    'repair_market_rolling_job': '市场滚动补齐',
+    'repair_market_history_job': '低频历史补齐',
+    'binance_series_repair_job': 'Binance 历史修补',
+    'update_coins_config_job': '币种配置刷新',
+}
+
+
+def _format_scheduler_job(job):
+    runtime = get_all_job_runtime_metadata().get(job.id, {})
+    scheduler_running = bool(scheduler.running)
+    next_run_time = getattr(job, 'next_run_time', None)
+    paused = scheduler_running and next_run_time is None
+    display_name = TASK_JOB_LABELS.get(job.id, job.name)
+    return {
+        'id': job.id,
+        'name': job.name,
+        'display_name': display_name,
+        'trigger': str(job.trigger),
+        'executor': getattr(job, 'executor', None),
+        'max_instances': getattr(job, 'max_instances', None),
+        'coalesce': getattr(job, 'coalesce', None),
+        'misfire_grace_time': getattr(job, 'misfire_grace_time', None),
+        'next_run_time_ms': int(next_run_time.timestamp() * 1000) if next_run_time else None,
+        'registered': True,
+        'paused': paused,
+        'scheduler_running': scheduler_running,
+        'runtime': runtime,
+    }
+
+
+def _list_scheduler_jobs():
+    runtime_by_id = get_all_job_runtime_metadata()
+    jobs = [_format_scheduler_job(job) for job in scheduler.get_jobs()]
+    return jobs
 
 
 def _log_market_structure_refresh_component(component_name, summary):
@@ -633,10 +676,12 @@ def get_coins():
             except Exception as e:
                 logger.error(f'加载评分修补所需币种失败: {e}')
                 score_symbols = []
-            if score_symbols:
+            active_symbol_set = set(active_coins or [])
+            remaining_score_symbols = [symbol for symbol in score_symbols if symbol not in active_symbol_set]
+            if remaining_score_symbols:
                 logger.info('首页历史序列不完整，开始后台补全评分所需多交易所最新点')
                 _start_market_structure_refresh_async(
-                    score_symbols,
+                    remaining_score_symbols,
                     series_types=list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
                     exchanges=list(ENABLED_EXCHANGES),
                 )
@@ -809,6 +854,66 @@ def refresh_market_rank():
         logger.error(f'触发行情榜快照刷新失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to refresh market rank: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/task-jobs')
+def list_task_jobs():
+    try:
+        jobs = _list_scheduler_jobs()
+        return jsonify(
+            {
+                'status': 'success',
+                'message': 'scheduler jobs loaded',
+                'data': {
+                    'scheduler_running': bool(scheduler.running),
+                    'jobs': jobs,
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f'加载任务列表失败: {e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load task jobs: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/task-jobs/<job_id>/action', methods=['POST'])
+def control_task_job(job_id):
+    payload = request.get_json(silent=True) or {}
+    action = (payload.get('action') or '').strip().lower()
+    if action not in TASK_JOB_ACTIONS:
+        return jsonify({'status': 'error', 'message': f'unsupported action: {action}'}), 400
+
+    job = scheduler.get_job(job_id)
+    if job is None:
+        return jsonify({'status': 'error', 'message': f'job not found: {job_id}'}), 404
+
+    try:
+        if action == 'run':
+            scheduler.modify_job(job_id, next_run_time=datetime.now())
+            scheduler.wakeup()
+            message = f'任务已触发执行: {job_id}'
+        elif action == 'pause':
+            job.pause()
+            message = f'任务已暂停: {job_id}'
+        elif action == 'resume':
+            job.resume()
+            message = f'任务已恢复: {job_id}'
+
+        return jsonify(
+            {
+                'status': 'success',
+                'message': message,
+                'data': {
+                    'job_id': job_id,
+                    'action': action,
+                    'jobs': _list_scheduler_jobs(),
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f'执行任务操作失败: job_id={job_id} action={action} error={e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to {action} job: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/binance-series/collect', methods=['POST'])

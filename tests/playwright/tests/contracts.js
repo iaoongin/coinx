@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { name: '历史序列', href: '/binance-series' },
   { name: '对冲计算器', href: '/hedge-calculator' },
   { name: '币种配置', href: '/coins-config' },
+  { name: '任务管理', href: '/task-jobs' },
 ];
 
 function escapeRegExp(text) {
@@ -26,10 +27,7 @@ function button(page, name) {
 }
 
 function link(page, name) {
-  if (name === '首页') {
-    return page.locator('a[href="/"]');
-  }
-  return page.getByRole('link', { name: new RegExp(`^${escapeRegExp(name)}$`) });
+  return page.locator('.nav-container .nav a').filter({ hasText: new RegExp(`^${escapeRegExp(name)}$`) });
 }
 
 function testId(page, id) {
@@ -39,7 +37,7 @@ function testId(page, id) {
 function navLinks(page) {
   return NAV_ITEMS.map((item) => ({
     ...item,
-    locator: page.locator(`a[href="${item.href}"]`),
+    locator: page.locator(`.nav-container .nav a[href="${item.href}"]`),
   }));
 }
 

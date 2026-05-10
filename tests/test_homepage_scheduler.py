@@ -1,5 +1,5 @@
 from coinx.repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
-from coinx.scheduler import scheduled_repair_market_rolling
+from coinx.scheduler import scheduled_repair_market_history, scheduled_repair_market_rolling
 
 
 def test_scheduled_repair_market_rolling_repairs_score_symbols(monkeypatch):
@@ -43,3 +43,32 @@ def test_scheduled_repair_market_rolling_skips_when_no_market_symbols(monkeypatc
     scheduled_repair_market_rolling()
 
     assert calls['repair'] == 0
+
+
+def test_scheduled_repair_market_history_repairs_active_symbols(monkeypatch):
+    calls = {'history': None}
+
+    def fake_history(symbols=None, series_types=None, **kwargs):
+        calls['history'] = {
+            'symbols': symbols,
+            'series_types': series_types,
+        }
+        return {
+            'status': 'success',
+            'results': [],
+            'success_count': 2,
+            'failure_count': 0,
+            'skipped_count': 0,
+            'duration_ms': 25.0,
+        }
+
+    monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT', 'QUSDT'])
+    monkeypatch.setattr('coinx.scheduler.FETCH_COINS_ENABLED', False)
+    monkeypatch.setattr('coinx.scheduler.run_history_repair_job', fake_history)
+
+    scheduled_repair_market_history()
+
+    assert calls['history'] == {
+        'symbols': ['BTCUSDT', 'QUSDT'],
+        'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+    }
