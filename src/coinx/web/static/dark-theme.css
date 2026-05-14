@@ -42,7 +42,7 @@
   --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 
   /* ==================== 布局 ==================== */
-  --page-max-width: 1200px;
+  --page-max-width: 1536px;
   --page-padding: 20px;
   --card-radius: 12px;
   --card-radius-lg: 16px;
