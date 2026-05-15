@@ -10,6 +10,7 @@ from coinx.collector.binance.market import get_all_funding_rates as get_all_bina
 from coinx.collector.bybit.series import get_all_funding_rates as get_all_bybit_funding_rates
 from coinx.collector.binance.repair import latest_closed_5m_open_time
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
+from coinx.collector.gate.series import get_all_funding_rates as get_all_gate_funding_rates
 from coinx.collector.okx.series import get_all_funding_rates as get_all_okx_funding_rates
 from coinx.config import ENABLED_EXCHANGES, FETCH_COINS_TOP_VOLUME_COUNT
 from coinx.database import get_session
@@ -41,6 +42,7 @@ EXCHANGE_FUNDING_LOADERS = {
     'binance': get_all_binance_funding_rates,
     'okx': get_all_okx_funding_rates,
     'bybit': get_all_bybit_funding_rates,
+    'gate': get_all_gate_funding_rates,
 }
 BINANCE_CONTEXT_SERIES_LABELS = {
     'top_long_short_position_ratio': '大户持仓比',

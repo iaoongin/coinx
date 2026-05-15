@@ -399,3 +399,21 @@ def test_load_exchange_funding_rate_maps_filters_to_target_symbols(monkeypatch):
         'binance': {'BTCUSDT': 0.001},
         'okx': {'BTCUSDT': 0.0008},
     }
+
+
+def test_load_exchange_funding_rate_maps_supports_gate(monkeypatch):
+    monkeypatch.setattr(
+        'coinx.repositories.market_structure_score.EXCHANGE_FUNDING_LOADERS',
+        {
+            'gate': lambda: {
+                'BTCUSDT': {'fundingRate': '0.0006'},
+                'ETHUSDT': {'fundingRate': '0.0003'},
+            },
+        },
+    )
+
+    result = _load_exchange_funding_rate_maps(['gate'], ['BTCUSDT'])
+
+    assert result == {
+        'gate': {'BTCUSDT': 0.0006},
+    }

@@ -577,6 +577,81 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['net_inflow']['5m'] == 10580.0
 
 
+def test_get_homepage_series_data_includes_gate_without_taker_and_keeps_net_inflow_from_supported_subset(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'gate'])
+
+    class FakeAdapter:
+        def __init__(self, exchange):
+            self.exchange = exchange
+
+        def taker_period_for_interval(self, interval):
+            if self.exchange == 'gate':
+                return None
+            return '5m'
+
+    monkeypatch.setattr('coinx.repositories.homepage_series.get_exchange_adapter', lambda exchange: FakeAdapter(exchange))
+
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        2017,
+        oi_base=1000.0,
+        oi_step=10.0,
+        taker_vol_base=1000.0,
+        taker_vol_step=10.0,
+        include_taker_vol=True,
+    )
+
+    for index in range(2017):
+        event_time = start_time + index * FIVE_MINUTES_MS
+        gate_oi = 2000.0 + index * 20.0
+        gate_close_price = 100.0 + index
+        db_session.add(
+            MarketOpenInterestHist(
+                exchange='gate',
+                symbol='BTCUSDT',
+                period='5m',
+                event_time=event_time,
+                sum_open_interest=gate_oi,
+                sum_open_interest_value=gate_oi * gate_close_price,
+            )
+        )
+        db_session.add(
+            MarketKline(
+                exchange='gate',
+                symbol='BTCUSDT',
+                period='5m',
+                open_time=event_time,
+                close_time=event_time + FIVE_MINUTES_MS - 1,
+                open_price=gate_close_price - 0.5,
+                high_price=gate_close_price + 1,
+                low_price=gate_close_price - 1.5,
+                close_price=gate_close_price,
+                volume=1000 + index,
+                quote_volume=2000 + index,
+                trade_count=10 + index,
+                taker_buy_base_volume=None,
+                taker_buy_quote_volume=None,
+            )
+        )
+    db_session.commit()
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    coin = coins[0]
+    assert coin['included_exchanges'] == ['binance', 'gate']
+    assert coin['missing_exchanges'] == []
+    assert coin['status'] == 'complete'
+    assert [item['exchange'] for item in coin['exchange_open_interest']] == ['gate', 'binance']
+    assert coin['net_inflow']['5m'] == 4232.0
+
+    statuses = {item['exchange']: item for item in coin['exchange_statuses']}
+    assert statuses['gate']['status'] == 'included'
+    assert statuses['gate']['taker_status'] == 'missing'
+
+
 def test_get_homepage_series_data_excludes_exchange_when_any_required_series_is_missing(db_session, monkeypatch):
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
     start_time = 1_700_000_000_000

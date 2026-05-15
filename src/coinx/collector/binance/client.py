@@ -30,12 +30,28 @@ def get_session():
     
     return _global_session
 
-def request_with_retry(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5):
+def _merge_request_headers(session, headers):
+    if not headers:
+        return None
+    merged_headers = dict(session.headers)
+    for key, value in headers.items():
+        if value is None:
+            merged_headers.pop(key, None)
+        else:
+            merged_headers[key] = value
+    return merged_headers
+
+
+def request_with_retry(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5, headers=None):
     """带指数退避的请求封装，处理 403/429/超时等情况"""
     attempt = 0
+    request_headers = _merge_request_headers(session, headers)
     while True:
         try:
-            response = session.get(url, params=params, timeout=timeout)
+            request_kwargs = {'params': params, 'timeout': timeout}
+            if request_headers is not None:
+                request_kwargs['headers'] = request_headers
+            response = session.get(url, **request_kwargs)
             if response.status_code in RETRYABLE_HTTP_STATUS_CODES:
                 error = requests.exceptions.HTTPError(f"{response.status_code} {response.reason}")
                 error.response = response

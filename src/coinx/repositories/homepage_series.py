@@ -360,6 +360,46 @@ def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_
     return reasons
 
 
+def _collect_exchange_homepage_taker_reasons(exchange, taker_maps_by_period, anchor_time):
+    reasons = []
+    if anchor_time is None:
+        return reasons
+
+    has_any_taker_history = any(bool(period_map) for period_map in (taker_maps_by_period or {}).values())
+    if not has_any_taker_history:
+        reasons.append(
+            {
+                'reason': 'missing_taker_history',
+                'details': {'missing': 'taker_buy_sell_vol'},
+            }
+        )
+        return reasons
+
+    for interval in TIME_INTERVALS:
+        period = None
+        try:
+            adapter = get_exchange_adapter(exchange)
+            period = adapter.taker_period_for_interval(interval) if adapter is not None else None
+        except Exception:
+            period = None
+        if not period:
+            continue
+
+        taker_by_time = (taker_maps_by_period or {}).get(period, {})
+        inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
+        if inflow is None:
+            reasons.append(
+                {
+                    'reason': 'missing_taker_target',
+                    'details': {
+                        'interval': interval,
+                        'period': period,
+                    },
+                }
+            )
+    return reasons
+
+
 def _period_to_ms(period):
     if period.endswith('m'):
         return int(period[:-1]) * 60 * 1000
@@ -610,6 +650,12 @@ def _build_exchange_status_rows(
             row = dict(included_row)
             row['exchange'] = exchange
             row['status'] = 'included'
+            taker_rejection = snapshot.get('taker_rejection') or {}
+            if taker_rejection.get('reasons'):
+                row['taker_status'] = 'missing'
+                row['taker_reason'] = taker_rejection.get('reasons')
+            else:
+                row['taker_status'] = 'available'
             rows.append(row)
             continue
 
@@ -640,6 +686,12 @@ def _build_exchange_status_rows(
         if rejection:
             row['reason'] = rejection.get('reasons') or []
             row['stage'] = rejection.get('stage')
+        taker_rejection = snapshot.get('taker_rejection') or {}
+        if taker_rejection.get('reasons'):
+            row['taker_status'] = 'missing'
+            row['taker_reason'] = taker_rejection.get('reasons')
+        else:
+            row['taker_status'] = 'available'
         if support_state.get('state') == 'unknown':
             row['support_state'] = 'unknown'
         rows.append(row)
@@ -710,6 +762,7 @@ def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, taker
         'complete': complete,
         'current_time': current_time,
         'reasons': reasons,
+        'taker_reasons': _collect_exchange_homepage_taker_reasons(exchange, taker_maps_by_period, current_time),
     }
 
 
@@ -1305,6 +1358,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'complete': False,
                     'unsupported': True,
                     'support_state': {'state': 'unsupported'},
+                    'taker_rejection': {
+                        'stage': 'taker_validation',
+                        'anchor_time': None,
+                        'reasons': [],
+                    },
                     'reasons': [
                         {
                             'reason': 'unsupported_exchange',
@@ -1334,6 +1392,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'complete': False,
                     'unsupported': True,
                     'support_state': support_state,
+                    'taker_rejection': {
+                        'stage': 'taker_validation',
+                        'anchor_time': None,
+                        'reasons': [],
+                    },
                     'reasons': [
                         {
                             'reason': 'unsupported_symbol',
@@ -1373,6 +1436,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'complete': snapshot['complete'],
                     'unsupported': False,
                     'support_state': support_state,
+                    'taker_rejection': {
+                        'stage': 'taker_validation',
+                        'anchor_time': snapshot.get('current_time'),
+                        'reasons': snapshot.get('taker_reasons') or [],
+                    },
                     'reasons': snapshot.get('reasons') or _collect_exchange_homepage_rejection_reasons(
                         exchange,
                         symbol_oi,
@@ -1399,6 +1467,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'complete': False,
                     'unsupported': False,
                     'support_state': support_state,
+                    'taker_rejection': {
+                        'stage': 'taker_validation',
+                        'anchor_time': None,
+                        'reasons': _collect_exchange_homepage_taker_reasons(exchange, symbol_taker, None),
+                    },
                     'reasons': _collect_exchange_homepage_rejection_reasons(
                         exchange,
                         symbol_oi,
@@ -1498,6 +1571,15 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                             exchange,
                             snapshot['oi_by_time'],
                             snapshot['kline_by_time'],
+                            snapshot['taker_maps_by_period'],
+                            anchor_time,
+                        ),
+                    }
+                    snapshot['taker_rejection'] = {
+                        'stage': 'taker_validation',
+                        'anchor_time': anchor_time,
+                        'reasons': _collect_exchange_homepage_taker_reasons(
+                            exchange,
                             snapshot['taker_maps_by_period'],
                             anchor_time,
                         ),

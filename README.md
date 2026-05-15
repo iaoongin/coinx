@@ -78,6 +78,12 @@ mysql -u root -p coinx < sql/schema.sql
 | --- | --- | --- |
 | `COINX_ENV` | 选择环境配置文件，例如 `dev` 会加载 `application-dev.yml` | `application.yml` 中的 `profiles.active`，默认是 `dev` |
 | `BINANCE_BASE_URL` | Binance API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/fapi.binance.com` |
+| `OKX_BASE_URL` | OKX API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/www.okx.com` |
+| `BYBIT_BASE_URL` | Bybit API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/api.bybit.com` |
+| `GATE_BASE_URL` | Gate API 基础地址，首期 futures 链路默认走 `fx-api` 的代理口径 | `https://proxy.yffjglcms.com/fx-api.gateio.ws` |
+| `GATE_SETTLE` | Gate 合约结算币种，首期默认只接 `usdt` 永续 | `usdt` |
+| `GATE_MIN_INTERVAL_MS` | Gate 公共接口最小请求间隔，避免连续 futures 请求触发代理/WAF 拦截 | `1200` |
+| `GATE_403_RETRY_FALLBACK_SECONDS` | Gate 遇到 `403` 时的冷却秒数 | `8` |
 | `UPDATE_INTERVAL` | 定时刷新间隔，单位为秒，当前会同时用于市场数据与行情榜快照刷新 | `300` |
 | `TIME_INTERVALS` | 需要计算的时间周期列表，当前更建议放在 YAML 中配置，不建议直接用环境变量字符串覆盖 | `5m,15m,30m,1h,4h,12h,24h,48h,72h,168h` |
 | `USE_PROXY` | 是否启用 HTTP/HTTPS 代理，支持 `true/false/1/0/yes/no` | `false` |

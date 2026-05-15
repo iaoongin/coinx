@@ -532,16 +532,58 @@
           return exchanges.map((exchange) => formatExchangeName(exchange)).join('、');
         };
 
+        const exchangeRejectReasonLabel = (reason) => {
+          const reasonKey = typeof reason === 'string' ? reason : reason?.reason;
+          const interval = typeof reason === 'object' ? reason?.details?.interval : null;
+          const labels = {
+            missing_open_interest_history: '缺持仓',
+            missing_open_interest_target: '持仓未对齐',
+            missing_kline_history: '缺K线',
+            missing_kline_target: 'K线未对齐',
+            missing_exchange_anchor: '无可用时间点',
+            unsupported_symbol: '不支持币种',
+            unsupported_exchange: '未启用',
+          };
+          const label = labels[reasonKey] || reasonKey || '';
+          return interval && label ? `${label}(${interval})` : label;
+        };
+
+        const formatExchangeRejectReason = (item) => {
+          const reasons = Array.isArray(item?.reason) ? item.reason : [];
+          const grouped = {};
+          reasons.forEach((reason) => {
+            const reasonKey = typeof reason === 'string' ? reason : reason?.reason;
+            const interval = typeof reason === 'object' ? reason?.details?.interval : null;
+            if (!reasonKey || !interval) return;
+            if (!grouped[reasonKey]) grouped[reasonKey] = [];
+            grouped[reasonKey].push(interval);
+          });
+          const groupedLabels = Object.entries(grouped).map(([reasonKey, intervals]) => {
+            const label = exchangeRejectReasonLabel(reasonKey);
+            const uniqueIntervals = [...new Set(intervals)];
+            return `${label}(${uniqueIntervals.slice(0, 4).join('/')}${uniqueIntervals.length > 4 ? '...' : ''})`;
+          });
+          const labels = groupedLabels.length ? groupedLabels : reasons.map(exchangeRejectReasonLabel).filter(Boolean);
+          const uniqueLabels = [...new Set(labels)];
+          if (uniqueLabels.length) return uniqueLabels.slice(0, 2).join('/');
+          if (item?.stage === 'anchor_validation') return '时间未对齐';
+          if (item?.stage === 'initial_snapshot') return '数据不完整';
+          if (item?.stage === 'unsupported_symbol') return '不支持币种';
+          return '';
+        };
+
         const formatExchangeEntry = (item) => {
           const exchangeName = formatExchangeName(item?.exchange);
           if (item?.status === 'included') {
             return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(${formatPercent(item.quantity_share_percent)})`;
           }
           if (item?.status === 'excluded') {
-            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(剔除)`;
+            const reason = formatExchangeRejectReason(item);
+            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(剔除${reason ? `: ${reason}` : ''})`;
           }
           if (item?.status === 'unknown') {
-            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(待确认)`;
+            const reason = formatExchangeRejectReason(item);
+            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(未纳入${reason ? `: ${reason}` : ''})`;
           }
           return `${exchangeName} 不支持`;
         };

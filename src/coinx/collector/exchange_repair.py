@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapters
+from coinx.collector.gate.series import GateRateLimitUnavailable, GateUnsupportedContract, is_gate_budget_unavailable
 from coinx.config import (
     ENABLED_EXCHANGES,
     HOMEPAGE_SERIES_REPAIR_PERIOD,
@@ -116,6 +117,34 @@ def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precis
     return result
 
 
+def _supported_symbol_lookup_failed_result(
+    adapter,
+    symbol,
+    series_type,
+    mode,
+    window_precise,
+    error,
+    extra=None,
+):
+    result = {
+        'exchange': adapter.exchange_id,
+        'symbol': symbol,
+        'series_type': series_type,
+        'period': HOMEPAGE_SERIES_REPAIR_PERIOD,
+        'status': 'skipped',
+        'mode': mode,
+        'reason': 'supported_symbol_lookup_failed',
+        'window_precise': window_precise,
+        'affected': 0,
+        'records': 0,
+        'pages': 0,
+        'error': str(error),
+    }
+    if extra:
+        result.update(extra)
+    return result
+
+
 def _sample_values(values, limit=8):
     values = sorted(set(values))
     if len(values) <= limit:
@@ -182,6 +211,42 @@ def _run_tasks(tasks, worker_func, max_workers, db_session=None):
         for future in as_completed(future_to_task):
             results.append(future.result())
     return results
+
+
+def _filter_gate_unavailable_rolling_tasks(tasks):
+    if not tasks or not is_gate_budget_unavailable():
+        return tasks, []
+
+    runnable = []
+    skipped = []
+    for task in tasks:
+        if task.get('exchange') != 'gate':
+            runnable.append(task)
+            continue
+        skipped.append(
+            {
+                'exchange': task['exchange'],
+                'symbol': task['symbol'],
+                'series_type': task['series_type'],
+                'period': task['period'],
+                'status': 'skipped',
+                'mode': 'rolling',
+                'reason': 'gate_budget_unavailable',
+                'window_precise': task['adapter'].supports_time_window(task['series_type']),
+                'affected': 0,
+                'records': 0,
+                'pages': 0,
+                'target_times': sorted(task.get('target_times') or []),
+            }
+        )
+
+    if skipped:
+        logger.warning(
+            'Gate host/api budget unavailable, skip remaining rolling tasks: count=%d symbols=%s',
+            len(skipped),
+            _sample_values([item['symbol'] for item in skipped]),
+        )
+    return runnable, skipped
 
 
 def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_session=None, group_runner=None):
@@ -342,7 +407,23 @@ def repair_rolling_symbols(
             periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             supported_symbols = []
             for symbol in target_symbols:
-                if adapter.supports_symbol(symbol, series_type=series_type, session=http_session):
+                try:
+                    is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
+                except Exception as exc:
+                    exchange_stats['unsupported'] += 1
+                    results.append(
+                        _supported_symbol_lookup_failed_result(
+                            adapter,
+                            symbol,
+                            series_type,
+                            mode='rolling',
+                            window_precise=adapter.supports_time_window(series_type),
+                            error=exc,
+                            extra={'target_times': []},
+                        )
+                    )
+                    continue
+                if is_supported:
                     supported_symbols.append(symbol)
                 else:
                     exchange_stats['unsupported'] += 1
@@ -430,6 +511,38 @@ def repair_rolling_symbols(
                 http_session=http_session if db_session is not None else None,
                 db_session=session,
             )
+        except GateRateLimitUnavailable as exc:
+            logger.warning(
+                f"Gate rolling补齐跳过: exchange={task['exchange']}, "
+                f"symbol={task['symbol']}, type={task['series_type']}, reason={exc}"
+            )
+            return {
+                'exchange': task['exchange'],
+                'symbol': task['symbol'],
+                'series_type': task['series_type'],
+                'period': task['period'],
+                'status': 'skipped',
+                'mode': 'rolling',
+                'reason': 'gate_budget_unavailable',
+                'error': str(exc),
+            }
+        except GateUnsupportedContract as exc:
+            logger.warning(
+                f"Gate rolling补齐跳过不支持合约: exchange={task['exchange']}, "
+                f"symbol={task['symbol']}, type={task['series_type']}, reason={exc}"
+            )
+            return _unsupported_symbol_result(
+                task['adapter'],
+                task['symbol'],
+                task['series_type'],
+                mode='rolling',
+                window_precise=task['adapter'].supports_time_window(task['series_type']),
+                extra={
+                    'period': task['period'],
+                    'target_times': sorted(task.get('target_times') or []),
+                    'error': str(exc),
+                },
+            )
         except Exception as exc:
             logger.error(
                 f"交易所滚动补齐失败: exchange={task['exchange']}, "
@@ -460,7 +573,8 @@ def repair_rolling_symbols(
             f"symbols={len(symbol_counts)} tasks={len(group_tasks)} "
             f"series={','.join(f'{series_type}:{count}' for series_type, count in sorted(series_counts.items()))}"
         )
-        group_results = _run_tasks(group_tasks, group_worker, 1, db_session=db_session)
+        runnable_tasks, skipped_results = _filter_gate_unavailable_rolling_tasks(group_tasks)
+        group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
             f"交易所rolling补齐完成: exchange={exchange} "
@@ -550,7 +664,26 @@ def repair_history_symbols(
                 target_end_time = latest_closed_period_open_time(current_time_ms, period)
                 target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
                 for symbol in target_symbols:
-                    if not adapter.supports_symbol(symbol, series_type=series_type, session=http_session):
+                    try:
+                        is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
+                    except Exception as exc:
+                        skipped_results.append(
+                            _supported_symbol_lookup_failed_result(
+                                adapter,
+                                symbol,
+                                series_type,
+                                mode='history',
+                                window_precise=adapter.supports_time_window(series_type),
+                                error=exc,
+                                extra={
+                                    'period': period,
+                                    'start_time': target_start_time,
+                                    'end_time': target_end_time,
+                                },
+                            )
+                        )
+                        continue
+                    if not is_supported:
                         skipped_results.append(
                             _unsupported_symbol_result(
                                 adapter,
@@ -646,6 +779,24 @@ def repair_history_symbols(
                 'records': record_count,
                 'pages': pages,
             }
+        except GateUnsupportedContract as exc:
+            logger.warning(
+                f"Gate history补齐跳过不支持合约: exchange={task['exchange']}, "
+                f"symbol={task['symbol']}, type={task['series_type']}, reason={exc}"
+            )
+            return _unsupported_symbol_result(
+                task['adapter'],
+                task['symbol'],
+                task['series_type'],
+                mode='history',
+                window_precise=window_precise,
+                extra={
+                    'period': task['period'],
+                    'start_time': task['start_time'],
+                    'end_time': task['end_time'],
+                    'error': str(exc),
+                },
+            )
         except Exception as exc:
             logger.error(
                 f"交易所历史补齐失败: exchange={task['exchange']}, "

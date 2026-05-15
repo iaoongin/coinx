@@ -1,6 +1,8 @@
 ﻿from dataclasses import dataclass
 import threading
 
+from coinx.collector.gate import series as gate_series
+from coinx.collector.gate.series import GateUnsupportedContract
 from coinx.collector.exchange_repair import repair_history_symbols, repair_rolling_symbols
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.repositories.series import upsert_series_records
@@ -170,6 +172,145 @@ def test_exchange_rolling_repair_skips_unsupported_symbols(db_session, monkeypat
     assert calls == [('okx', 'klines', 'BTCUSDT', 2, 1200000, 1200000)]
     assert any('rolling' in message for message in info_logs)
     assert any('PROMUSDT' in message for message in info_logs)
+
+
+def test_gate_contract_not_found_is_skipped_as_unsupported(db_session, monkeypatch):
+    gate_series.clear_gate_rate_limit_state()
+    calls = []
+
+    @dataclass(frozen=True)
+    class GateNotFoundAdapter:
+        exchange_id: str = 'gate'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((symbol, start_time, end_time))
+            raise GateUnsupportedContract(f'gate contract not found: {symbol}')
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [GateNotFoundAdapter()])
+
+    summary = repair_rolling_symbols(
+        symbols=['MSTRUSDT'],
+        series_types=['klines'],
+        exchanges=['gate'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    assert summary['failure_count'] == 0
+    assert summary['success_count'] == 0
+    assert summary['skipped_count'] == 1
+    assert summary['results'][0]['reason'] == 'unsupported_symbol'
+    assert summary['results'][0]['symbol'] == 'MSTRUSDT'
+    assert calls == [('MSTRUSDT', 1200000, 1200000)]
+
+
+def test_gate_rolling_repair_skips_when_supported_symbol_lookup_fails(db_session, monkeypatch):
+    calls = []
+
+    @dataclass(frozen=True)
+    class GateLookupFailAdapter:
+        exchange_id: str = 'gate'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            raise RuntimeError('contracts unavailable')
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((symbol, start_time, end_time))
+            return []
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [GateLookupFailAdapter()])
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['gate'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    assert summary['failure_count'] == 0
+    assert summary['success_count'] == 0
+    assert summary['skipped_count'] == 1
+    assert summary['results'][0]['reason'] == 'supported_symbol_lookup_failed'
+    assert summary['results'][0]['symbol'] == 'BTCUSDT'
+    assert summary['results'][0]['error'] == 'contracts unavailable'
+    assert calls == []
+
+
+def test_gate_history_repair_skips_when_supported_symbol_lookup_fails(db_session, monkeypatch):
+    calls = []
+
+    @dataclass(frozen=True)
+    class GateLookupFailAdapter:
+        exchange_id: str = 'gate'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            raise RuntimeError('contracts unavailable')
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((symbol, start_time, end_time))
+            return []
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [GateLookupFailAdapter()])
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['gate'],
+        now_ms=1500000,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=db_session,
+    )
+
+    assert summary['failure_count'] == 0
+    assert summary['success_count'] == 0
+    assert summary['skipped_count'] == 1
+    assert summary['results'][0]['reason'] == 'supported_symbol_lookup_failed'
+    assert summary['results'][0]['symbol'] == 'BTCUSDT'
+    assert summary['results'][0]['error'] == 'contracts unavailable'
+    assert calls == []
 
 
 def test_exchange_rolling_repair_falls_back_to_latest_page_when_precise_window_misses(db_session, monkeypatch):

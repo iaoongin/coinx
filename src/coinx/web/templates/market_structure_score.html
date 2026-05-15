@@ -774,6 +774,15 @@
       color: rgba(255, 214, 143, 0.9);
     }
 
+    .exchange-tag.exchange-gate {
+      border-color: rgba(14, 165, 233, 0.24);
+      color: rgba(186, 230, 253, 0.9);
+    }
+
+    .exchange-inline.exchange-gate {
+      color: rgba(186, 230, 253, 0.95);
+    }
+
     .exchange-inline {
       display: inline-flex;
       align-items: center;
@@ -1593,6 +1602,7 @@
           const normalized = normalizeExchange(exchange);
           if (normalized === 'binance') return 'Binance';
           if (normalized === 'bybit') return 'Bybit';
+          if (normalized === 'gate') return 'Gate';
           if (normalized === 'okx') return 'OKX';
           return exchange || '--';
         };
@@ -1601,6 +1611,7 @@
           const normalized = normalizeExchange(exchange);
           if (normalized === 'binance') return 'exchange-binance';
           if (normalized === 'bybit') return 'exchange-bybit';
+          if (normalized === 'gate') return 'exchange-gate';
           if (normalized === 'okx') return 'exchange-okx';
           return '';
         };

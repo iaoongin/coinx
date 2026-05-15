@@ -88,15 +88,19 @@ DB_CHARSET = get_env('DB_CHARSET', 'utf8mb4')
 
 DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset={DB_CHARSET}"
 
-BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://api.binance.com')
+BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://proxy.yffjglcms.com/fapi.binance.com')
 
-ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx', list)
+ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx,gate', list)
 PRIMARY_PRICE_EXCHANGE = get_env('PRIMARY_PRICE_EXCHANGE', 'binance')
-OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://www.okx.com')
+OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://proxy.yffjglcms.com/www.okx.com')
 OKX_RUBIK_MIN_INTERVAL_MS = get_env('OKX_RUBIK_MIN_INTERVAL_MS', 10, int)
 OKX_429_RETRY_FALLBACK_SECONDS = get_env('OKX_429_RETRY_FALLBACK_SECONDS', 5, int)
-BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://api.bybit.com')
+BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://proxy.yffjglcms.com/api.bybit.com')
 BYBIT_CATEGORY = get_env('BYBIT_CATEGORY', 'linear')
+GATE_BASE_URL = get_env('GATE_BASE_URL', 'https://proxy.yffjglcms.com/api.gateio.ws')
+GATE_SETTLE = get_env('GATE_SETTLE', 'usdt')
+GATE_MIN_INTERVAL_MS = get_env('GATE_MIN_INTERVAL_MS', 1200, int)
+GATE_403_RETRY_FALLBACK_SECONDS = get_env('GATE_403_RETRY_FALLBACK_SECONDS', 8, int)
 
 # 币种拉取任务配置
 FETCH_COINS_ENABLED = get_env('FETCH_COINS_ENABLED', True, bool)
@@ -110,5 +114,5 @@ REPAIR_ROLLING_MAX_WORKERS = get_env('REPAIR_ROLLING_MAX_WORKERS', 6, int)
 REPAIR_HISTORY_ENABLED = get_env('REPAIR_HISTORY_ENABLED', True, bool)
 REPAIR_HISTORY_INTERVAL = get_env('REPAIR_HISTORY_INTERVAL', 3600, int)
 REPAIR_HISTORY_MAX_WORKERS = get_env('REPAIR_HISTORY_MAX_WORKERS', 2, int)
-REPAIR_HISTORY_SYMBOL_BATCH_SIZE = get_env('REPAIR_HISTORY_SYMBOL_BATCH_SIZE', 20, int)
+REPAIR_HISTORY_SYMBOL_BATCH_SIZE = get_env('REPAIR_HISTORY_SYMBOL_BATCH_SIZE', 0, int)
 REPAIR_HISTORY_COVERAGE_HOURS = get_env('REPAIR_HISTORY_COVERAGE_HOURS', 168, int)

@@ -45,6 +45,22 @@ class ExchangeSeriesAdapter:
 
     def symbol_support_state(self, symbol, series_type=None, session=None):
         if self.supported_symbols_fetcher is None:
+            if self.is_symbol_supported is not None:
+                try:
+                    is_supported = self.is_symbol_supported(symbol, series_type=series_type, session=session)
+                except Exception as exc:
+                    return {
+                        'state': 'unknown',
+                        'supported': None,
+                        'known': False,
+                        'reason': 'supported_symbol_lookup_failed',
+                        'details': {'error': str(exc)},
+                    }
+                return {
+                    'state': 'supported' if is_supported else 'unsupported',
+                    'supported': is_supported,
+                    'known': True,
+                }
             return {
                 'state': 'supported',
                 'supported': True,
@@ -134,11 +150,30 @@ def _build_bybit_adapter():
     )
 
 
+def _build_gate_adapter():
+    from coinx.collector.gate import series as gate_series
+
+    return ExchangeSeriesAdapter(
+        exchange_id='gate',
+        supported_series_types=tuple(gate_series.SUPPORTED_SERIES_TYPES),
+        fetch_series_payload=gate_series.fetch_series_payload,
+        parse_series_payload=gate_series.parse_series_payload,
+        precise_window_series_types=tuple(gate_series.SUPPORTED_SERIES_TYPES),
+        is_symbol_supported=gate_series.is_symbol_supported,
+        supported_symbols_fetcher=gate_series.get_supported_symbols,
+        page_limits={
+            'klines': 1000,
+            'open_interest_hist': 1000,
+        },
+    )
+
+
 def get_exchange_adapter(exchange_id):
     registry = {
         'binance': _build_binance_adapter,
         'okx': _build_okx_adapter,
         'bybit': _build_bybit_adapter,
+        'gate': _build_gate_adapter,
     }
     key = (exchange_id or '').strip().lower()
     try:
@@ -156,4 +191,4 @@ def get_exchange_adapters(exchange_ids):
 
 
 def get_supported_exchange_ids():
-    return list({'binance': None, 'okx': None, 'bybit': None}.keys())
+    return list({'binance': None, 'okx': None, 'bybit': None, 'gate': None}.keys())
