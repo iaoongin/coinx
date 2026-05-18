@@ -1,9 +1,8 @@
 import time
-from threading import Lock
-
 import requests
 
 from coinx.collector.binance.client import get_session, request_with_retry
+from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable
 from coinx.config import (
     GATE_403_RETRY_FALLBACK_SECONDS,
     GATE_BASE_URL,
@@ -24,16 +23,7 @@ _supported_symbols_cache = {
     'symbols': None,
     'unsupported_symbols': set(),
 }
-_gate_rate_limit_lock = Lock()
-_gate_rate_limit_state = {
-    'next_allowed_at': 0.0,
-    'last_headers': {},
-    'remain': None,
-    'reset_at': None,
-    'limit': None,
-    'budget_initialized': False,
-    'budget_unavailable_until': 0.0,
-}
+_gate_rate_limits = RateLimitRegistry()
 _GATE_REQUEST_HEADERS = {
     'User-Agent': 'curl/8.5.0',
     'Accept': '*/*',
@@ -41,8 +31,11 @@ _GATE_REQUEST_HEADERS = {
 }
 
 
-class GateRateLimitUnavailable(RuntimeError):
+class GateRateLimitUnavailable(RateLimitUnavailable):
     """Raised when Gate does not expose usable rate-limit headers for this host/api window."""
+
+    def __init__(self, wait_seconds, reason='budget_unavailable'):
+        super().__init__('gate', 'default', wait_seconds, reason=reason)
 
 
 class GateUnsupportedContract(RuntimeError):
@@ -152,12 +145,7 @@ def is_gate_symbol_unsupported(symbol):
 
 
 def _gate_budget_unavailable_remaining_seconds():
-    with _gate_rate_limit_lock:
-        now = time.time()
-        budget_unavailable_until = float(_gate_rate_limit_state.get('budget_unavailable_until') or 0.0)
-        if budget_unavailable_until <= now:
-            return 0.0
-        return budget_unavailable_until - now
+    return _gate_rate_limits.unavailable_remaining_seconds('gate', 'default')
 
 
 def is_gate_budget_unavailable():
@@ -165,36 +153,7 @@ def is_gate_budget_unavailable():
 
 
 def _wait_for_gate_slot():
-    while True:
-        with _gate_rate_limit_lock:
-            now = time.time()
-            budget_unavailable_until = float(_gate_rate_limit_state.get('budget_unavailable_until') or 0.0)
-            reset_at = _gate_rate_limit_state.get('reset_at')
-            remain = _gate_rate_limit_state.get('remain')
-
-            if reset_at is not None and now >= reset_at:
-                _gate_rate_limit_state['remain'] = None
-                _gate_rate_limit_state['reset_at'] = None
-                _gate_rate_limit_state['limit'] = None
-                _gate_rate_limit_state['budget_initialized'] = False
-                remain = None
-                reset_at = None
-
-            if budget_unavailable_until > now:
-                wait_seconds = budget_unavailable_until - now
-                should_reserve = False
-            elif remain is not None and remain <= 0 and reset_at is not None and reset_at > now:
-                wait_seconds = reset_at - now
-                should_reserve = False
-            else:
-                wait_seconds = _gate_rate_limit_state['next_allowed_at'] - now
-                should_reserve = True
-
-            if wait_seconds <= 0:
-                if should_reserve and remain is not None and remain > 0:
-                    _gate_rate_limit_state['remain'] = remain - 1
-                return
-        time.sleep(wait_seconds)
+    _gate_rate_limits.wait_for_slot('gate', 'default', min_interval_ms=GATE_MIN_INTERVAL_MS, consume_budget=True)
 
 
 def _update_gate_rate_limit_state(response):
@@ -216,23 +175,19 @@ def _update_gate_rate_limit_state(response):
     elif GATE_MIN_INTERVAL_MS and int(GATE_MIN_INTERVAL_MS) > 0:
         next_allowed_at = now + (int(GATE_MIN_INTERVAL_MS) / 1000.0)
 
-    with _gate_rate_limit_lock:
-        _gate_rate_limit_state['last_headers'] = {
+    _gate_rate_limits.update_budget(
+        'gate',
+        'default',
+        limit=limit,
+        remain=remain,
+        reset_at=reset_at,
+        next_allowed_at=next_allowed_at,
+        headers={
             'limit': limit,
             'remain': remain,
             'reset_at': reset_at,
-        }
-        if limit is not None:
-            _gate_rate_limit_state['limit'] = limit
-        if reset_at is not None:
-            _gate_rate_limit_state['reset_at'] = float(reset_at)
-        if remain is not None:
-            _gate_rate_limit_state['remain'] = remain
-        if limit is not None or remain is not None or reset_at is not None:
-            _gate_rate_limit_state['budget_initialized'] = True
-            _gate_rate_limit_state['budget_unavailable_until'] = 0.0
-        if next_allowed_at is not None:
-            _gate_rate_limit_state['next_allowed_at'] = max(_gate_rate_limit_state['next_allowed_at'], next_allowed_at)
+        },
+    )
 
 
 def _has_gate_rate_limit_headers(response):
@@ -248,17 +203,12 @@ def _has_gate_rate_limit_headers(response):
 
 
 def _mark_gate_budget_unavailable():
-    now = time.time()
-    with _gate_rate_limit_lock:
-        _gate_rate_limit_state['budget_initialized'] = False
-        _gate_rate_limit_state['remain'] = None
-        _gate_rate_limit_state['reset_at'] = None
-        _gate_rate_limit_state['limit'] = None
-        _gate_rate_limit_state['next_allowed_at'] = max(
-            _gate_rate_limit_state['next_allowed_at'],
-            now + float(GATE_403_RETRY_FALLBACK_SECONDS),
-        )
-        _gate_rate_limit_state['budget_unavailable_until'] = now + float(GATE_403_RETRY_FALLBACK_SECONDS)
+    _gate_rate_limits.mark_cooldown(
+        'gate',
+        'default',
+        float(GATE_403_RETRY_FALLBACK_SECONDS),
+        budget_unavailable=True,
+    )
 
 
 def _request_gate(path, params, session=None, timeout=10):
@@ -272,7 +222,7 @@ def _request_gate(path, params, session=None, timeout=10):
             params,
             unavailable_seconds,
         )
-        raise GateRateLimitUnavailable(f'gate budget unavailable for {unavailable_seconds:.2f}s')
+        raise GateRateLimitUnavailable(unavailable_seconds)
 
     _wait_for_gate_slot()
     try:
@@ -301,7 +251,7 @@ def _request_gate(path, params, session=None, timeout=10):
         if response is None or response.status_code != 403:
             raise
 
-        headers_snapshot = dict(_gate_rate_limit_state.get('last_headers') or {})
+        headers_snapshot = _gate_rate_limits.get_state_snapshot('gate', 'default').last_headers or {}
         reset_at = headers_snapshot.get('reset_at')
         remain = headers_snapshot.get('remain')
         now = time.time()
@@ -309,11 +259,7 @@ def _request_gate(path, params, session=None, timeout=10):
 
         if reset_at is not None and remain is not None and remain <= 0:
             backoff_seconds = max(backoff_seconds, max(0.0, float(reset_at) - now))
-            with _gate_rate_limit_lock:
-                _gate_rate_limit_state['next_allowed_at'] = max(
-                    _gate_rate_limit_state['next_allowed_at'],
-                    float(reset_at),
-                )
+            _gate_rate_limits.update_budget('gate', 'default', next_allowed_at=float(reset_at))
 
         logger.warning(
             'Gate 403 response details: path=%s params=%s headers=%s body=%s',
@@ -338,7 +284,7 @@ def _request_gate(path, params, session=None, timeout=10):
                 params,
             )
             _mark_gate_budget_unavailable()
-            raise GateRateLimitUnavailable('gate response missing remain/reset headers') from exc
+            raise GateRateLimitUnavailable(float(GATE_403_RETRY_FALLBACK_SECONDS)) from exc
 
         time.sleep(backoff_seconds)
         _wait_for_gate_slot()
@@ -366,18 +312,7 @@ def clear_supported_symbols_cache():
 
 
 def clear_gate_rate_limit_state():
-    with _gate_rate_limit_lock:
-        _gate_rate_limit_state.update(
-            {
-                'next_allowed_at': 0.0,
-                'last_headers': {},
-                'remain': None,
-                'reset_at': None,
-                'limit': None,
-                'budget_initialized': False,
-                'budget_unavailable_until': 0.0,
-            }
-        )
+    _gate_rate_limits.clear()
 
 
 def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):

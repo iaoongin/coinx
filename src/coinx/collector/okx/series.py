@@ -1,11 +1,10 @@
-﻿import time
-from email.utils import parsedate_to_datetime
-from threading import Lock
+import time
 
 import requests
 
-from coinx.config import OKX_BASE_URL, OKX_RUBIK_MIN_INTERVAL_MS, OKX_429_RETRY_FALLBACK_SECONDS
 from coinx.collector.binance.client import get_session, request_with_retry
+from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable, parse_retry_after_seconds
+from coinx.config import OKX_BASE_URL, OKX_429_RETRY_FALLBACK_SECONDS, OKX_RUBIK_MIN_INTERVAL_MS
 from coinx.repositories.series import upsert_series_records
 from coinx.utils import logger
 
@@ -25,8 +24,14 @@ _supported_symbols_cache = {
     'failed_at': 0,
     'symbols': None,
 }
-_okx_rate_limit_lock = Lock()
-_okx_rate_limit_state = {}
+_okx_rate_limits = RateLimitRegistry()
+
+
+class OKXRateLimitUnavailable(RateLimitUnavailable):
+    """Raised when an OKX request group is cooling down."""
+
+    def __init__(self, group, wait_seconds, reason='budget_unavailable'):
+        super().__init__('okx', group, wait_seconds, reason=reason)
 
 
 def _to_float(value):
@@ -68,6 +73,14 @@ def clear_supported_symbols_cache():
     _supported_symbols_cache['loaded_at'] = 0
     _supported_symbols_cache['failed_at'] = 0
     _supported_symbols_cache['symbols'] = None
+
+
+def clear_okx_rate_limit_state():
+    _okx_rate_limits.clear()
+
+
+def is_okx_budget_unavailable(group='rubik'):
+    return _okx_rate_limits.unavailable_remaining_seconds('okx', group) > 0
 
 
 def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):
@@ -112,34 +125,10 @@ def _okx_rate_limit_group(path):
     return 'default'
 
 
-def _wait_for_okx_slot(rate_limit_group):
-    min_interval_ms = OKX_RUBIK_MIN_INTERVAL_MS if rate_limit_group == 'rubik' else 0
-    if min_interval_ms <= 0:
-        return
-
-    while True:
-        with _okx_rate_limit_lock:
-            state = _okx_rate_limit_state.setdefault(rate_limit_group, {'next_allowed_at': 0.0})
-            now = time.time()
-            wait_seconds = state['next_allowed_at'] - now
-            if wait_seconds <= 0:
-                state['next_allowed_at'] = now + (min_interval_ms / 1000.0)
-                return
-        time.sleep(wait_seconds)
-
-
-def _parse_retry_after_seconds(value):
-    if value in (None, ''):
-        return None
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        pass
-    try:
-        retry_at = parsedate_to_datetime(value)
-        return max(0.0, retry_at.timestamp() - time.time())
-    except (TypeError, ValueError, OverflowError):
-        return None
+def _okx_min_interval_ms(group):
+    if group == 'rubik':
+        return max(int(OKX_RUBIK_MIN_INTERVAL_MS or 0), 400)
+    return 0
 
 
 def _parse_okx_reset_seconds(headers):
@@ -167,7 +156,7 @@ def _parse_okx_reset_seconds(headers):
 
 def _compute_okx_backoff_seconds(response):
     headers = response.headers if response is not None else {}
-    retry_after_seconds = _parse_retry_after_seconds(headers.get('Retry-After'))
+    retry_after_seconds = parse_retry_after_seconds(headers.get('Retry-After'))
     if retry_after_seconds is not None:
         return retry_after_seconds
     reset_seconds = _parse_okx_reset_seconds(headers)
@@ -191,7 +180,10 @@ def _request_okx(path, params, session=None, timeout=10):
     http_session = session or get_session()
     url = f"{OKX_BASE_URL}{path}"
     rate_limit_group = _okx_rate_limit_group(path)
-    _wait_for_okx_slot(rate_limit_group)
+    wait_seconds = _okx_rate_limits.unavailable_remaining_seconds('okx', rate_limit_group)
+    if wait_seconds > 0:
+        raise OKXRateLimitUnavailable(rate_limit_group, wait_seconds)
+    _okx_rate_limits.wait_for_slot('okx', rate_limit_group, min_interval_ms=_okx_min_interval_ms(rate_limit_group))
     try:
         response = request_with_retry(http_session, url, params=params, timeout=timeout)
     except requests.exceptions.HTTPError as exc:
@@ -206,12 +198,12 @@ def _request_okx(path, params, session=None, timeout=10):
                 backoff_seconds,
                 _format_okx_rate_limit_headers(response),
             )
-            time.sleep(backoff_seconds)
+            _okx_rate_limits.mark_cooldown('okx', rate_limit_group, backoff_seconds, headers=_format_okx_rate_limit_headers(response))
         raise
     response.raise_for_status()
     payload = response.json()
     if isinstance(payload, dict) and payload.get('code') not in (None, '0', 0):
-        raise ValueError(f"OKX 鎺ュ彛杩斿洖閿欒 {payload.get('code')}: {payload.get('msg')}")
+        raise ValueError(f"OKX 接口返回错误 {payload.get('code')}: {payload.get('msg')}")
     return payload.get('data', payload)
 
 
@@ -337,7 +329,6 @@ def get_all_funding_rates(session=None):
 def parse_klines(payload, symbol, period):
     parsed = []
     for item in payload:
-        # OKX K绾挎暟缁? [鏃堕棿鎴? 寮€鐩樹环, 鏈€楂樹环, 鏈€浣庝环, 鏀剁洏浠? 鎴愪氦閲? 甯佺鎴愪氦閲? 璁′环鎴愪氦棰? 鏄惁纭]
         open_time = int(item[0])
         parsed.append(
             {
@@ -430,7 +421,7 @@ def fetch_series_payload(series_type, symbol, period, limit, session=None, start
     try:
         fetcher = fetchers[series_type]
     except KeyError as exc:
-        raise ValueError(f"涓嶆敮鎸佺殑 OKX 搴忓垪绫诲瀷: {series_type}") from exc
+        raise ValueError(f"不支持的 OKX 序列类型: {series_type}") from exc
     return fetcher(symbol, period, limit, session=session, start_time=start_time, end_time=end_time)
 
 
@@ -443,16 +434,16 @@ def parse_series_payload(series_type, payload, symbol, period):
     try:
         parser = parsers[series_type]
     except KeyError as exc:
-        raise ValueError(f"涓嶆敮鎸佺殑 OKX 搴忓垪绫诲瀷: {series_type}") from exc
+        raise ValueError(f"不支持的 OKX 序列类型: {series_type}") from exc
     return parser(payload, symbol, period)
 
 
 def collect_and_store_series(series_type, symbol, period, limit, http_session=None, db_session=None):
-    logger.info(f"寮€濮嬮噰闆?OKX 搴忓垪鏁版嵁: 绫诲瀷={series_type}, 甯佺={symbol}, 鍛ㄦ湡={period}, 鏉℃暟={limit}")
+    logger.info(f"开始采集 OKX 序列数据: 类型={series_type}, 币种={symbol}, 周期={period}, 条数={limit}")
     payload = fetch_series_payload(series_type, symbol, period, limit, session=http_session)
     records = parse_series_payload(series_type, payload, symbol, period)
     affected = upsert_series_records(OKX_EXCHANGE_ID, series_type, records, session=db_session)
-    logger.info(f"OKX 搴忓垪鏁版嵁閲囬泦瀹屾垚: 绫诲瀷={series_type}, 甯佺={symbol}, 褰卞搷琛屾暟={affected}")
+    logger.info(f"OKX 序列数据采集完成: 类型={series_type}, 币种={symbol}, 影响行数={affected}")
     return {
         'exchange': OKX_EXCHANGE_ID,
         'series_type': series_type,
@@ -513,4 +504,4 @@ def _period_to_ms(period):
         return int(period[:-1]) * 60 * 60 * 1000
     if period.endswith('d'):
         return int(period[:-1]) * 24 * 60 * 60 * 1000
-    raise ValueError(f'涓嶆敮鎸佺殑鍛ㄦ湡: {period}')
+    raise ValueError(f'不支持的周期: {period}')

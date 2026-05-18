@@ -70,6 +70,21 @@
 - 如果需要主动买卖压力，应该优先依赖 `taker_buy_sell_vol`（主动买卖成交量）接口
 - 不应把 Binance K 线里的 `taker_buy_*` 能力直接类比到 OKX
 
+#### OKX 当前实际使用接口与限流
+
+下表只统计项目当前实际使用到的 OKX REST 接口，便于评估采集可行性、排查 `429` 和设计节流策略。
+
+| 接口 | 本地用途 | 关键参数 | 官方限流 | 限流规则 | 当前建议节流值 |
+|---|---|---|---|---|---|
+| `GET /api/v5/public/instruments` | 拉 OKX 可用 USDT 永续合约列表，做 `supports_symbol` 缓存 | `instType=SWAP` | `20次/2s` | `IP + Instrument Type` | 走缓存，避免高频刷新 |
+| `GET /api/v5/market/history-candles` | 拉 K 线历史 | `instId`, `bar`, `before`, `after`, `limit` | `20次/2s` | `IP` | 可保守按 `100ms+` 间隔控制 |
+| `GET /api/v5/rubik/stat/contracts/open-interest-volume` | 拉持仓历史 `open_interest_hist` | `ccy`, `period`, `begin`, `end` | `5次/2s` | `IP` | 建议与 `rubik` 其他接口共用节流组，按 `400-500ms` 间隔串行 |
+| `GET /api/v5/rubik/stat/taker-volume` | 拉主动买卖量 `taker_buy_sell_vol` | `ccy`, `instType=CONTRACTS`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前最容易触发 `429`，建议按 `400-500ms` 间隔串行 |
+| `GET /api/v5/public/funding-rate` | 拉单币/全量资金费率 | `instId` | `10次/2s` | `IP + Instrument ID` | 建议按 `200ms+` 间隔控制，全量加载避免频繁触发 |
+
+项目中的 OKX 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/okx/series.py)。
+其中 `/api/v5/rubik/` 路径已在代码里归为单独的节流组，建议把这组接口视为高敏接口处理。
+
 ### Bybit
 
 - `klines`（历史 K 线）：已实现，但只包含基础字段
@@ -151,3 +166,86 @@
 - `sell_vol`：主动卖量
 
 这样可以避免把“主动买入字段”和“完整主动买卖拆分”混为一谈。
+## Gate / Bybit 限流补充
+
+### Bybit 当前实际使用接口与限流
+
+下表只统计项目当前实际使用到的 Bybit REST 接口。Bybit 官方当前最明确的公开限制是 `600 requests / 5 seconds / IP`，同时还会返回 UID 级 API limit 响应头。
+
+| 接口 | 本地用途 | 关键参数 | 官方限流 | 限流规则 | 当前建议节流值 |
+|---|---|---|---|---|---|
+| `GET /v5/market/instruments-info` | 拉 Bybit 可用 USDT 合约列表，做 `supports_symbol` 缓存 | `category`, `status`, `cursor` | `600次/5s` | `IP` | 走缓存，避免高频刷新 |
+| `GET /v5/market/kline` | 拉 K 线历史 | `category`, `symbol`, `interval`, `start`, `end`, `limit` | `600次/5s` | `IP` | 正常节奏即可，批量任务避免无意义重试 |
+| `GET /v5/market/open-interest` | 拉持仓历史 `open_interest_hist` | `category`, `symbol`, `intervalTime`, `startTime`, `endTime`, `limit` | `600次/5s` | `IP` | 正常节奏即可，批量任务避免无意义重试 |
+| `GET /v5/market/tickers` | 拉单币/全量资金费率 | `category`, `symbol` | `600次/5s` | `IP` | 单币查询和全量查询避免并发叠加 |
+
+补充说明：
+
+- Bybit 官方还说明 API 会返回 `X-Bapi-Limit-Status`、`X-Bapi-Limit`、`X-Bapi-Limit-Reset-Timestamp`，用于反映 UID 级限流窗口状态。
+- 项目中的 Bybit 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/bybit/series.py)。
+
+### Gate 当前实际使用接口与限流
+
+下表只统计项目当前实际使用到的 Gate REST 接口。Gate 官方明确说明所有 public endpoints 均为 `200 requests / 10 seconds / endpoint / IP`，并返回 `x-gate-ratelimit-*` 响应头。
+
+| 接口 | 本地用途 | 关键参数 | 官方限流 | 限流规则 | 当前建议节流值 |
+|---|---|---|---|---|---|
+| `GET /api/v4/futures/{settle}/contracts` | 拉 Gate 可用合约列表，做 `supports_symbol` 缓存 | 无 | `200次/10s/endpoint` | `IP` | 走缓存，避免高频刷新 |
+| `GET /api/v4/futures/{settle}/candlesticks` | 拉 K 线历史 | `contract`, `interval`, `from`, `to`, `limit` | `200次/10s/endpoint` | `IP` | 建议结合 `x-gate-ratelimit-*` 头按预算串行控制 |
+| `GET /api/v4/futures/{settle}/contract_stats` | 拉持仓历史 `open_interest_hist` | `contract`, `interval`, `from`, `to`, `limit` | `200次/10s/endpoint` | `IP` | 建议结合 `x-gate-ratelimit-*` 头按预算串行控制 |
+| `GET /api/v4/futures/{settle}/funding_rate` | 拉单币资金费率 | `contract` | `200次/10s/endpoint` | `IP` | 正常节奏即可，避免和历史补齐高峰叠加 |
+| `GET /api/v4/futures/{settle}/tickers` | 拉全量 ticker/资金费率 | 无 | `200次/10s/endpoint` | `IP` | 建议优先使用全量接口，减少单币请求数 |
+
+补充说明：
+
+- Gate 返回头会带 `x-gate-ratelimit-limit`、`x-gate-ratelimit-requests-remain`、`x-gate-ratelimit-reset-timestamp`，适合直接做预算式流控。
+- 项目中的 Gate 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/gate/series.py)。
+
+### Binance 当前实际使用接口与限流
+
+下表只统计项目当前实际使用到的 Binance Futures REST 接口。Binance 官方的公开 REST 更偏向 `REQUEST_WEIGHT` 模型，不同 endpoint 的权重不同，最终共同消耗 IP 级请求权重预算。
+
+| 接口 | 本地用途 | 关键参数 | 官方限流 | 限流规则 | 当前建议节流值 |
+|---|---|---|---|---|---|
+| `GET /fapi/v1/exchangeInfo` | 拉 Binance Futures 交易对和系统限流信息 | 无 | 按返回 `rateLimits` / `REQUEST_WEIGHT` 计算 | `IP` | 走缓存，避免频繁刷新 |
+| `GET /fapi/v1/klines` | 拉 K 线 / 聚合 K 线 | `symbol`, `interval`, `startTime`, `endTime`, `limit` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 正常节奏即可，批量补齐按分页控制 |
+| `GET /fapi/v2/ticker/price` | 拉最新价格 | `symbol` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 高频使用时优先聚合或复用已有价格结果 |
+| `GET /fapi/v1/ticker/24hr` | 拉单币/全量 24h 行情 | `symbol` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 全量查询避免过于频繁触发 |
+| `GET /fapi/v1/openInterest` | 拉当前持仓量 | `symbol` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 单币按需查询即可 |
+| `GET /fapi/v1/premiumIndex` | 拉单币/全量资金费率相关信息 | `symbol` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 单币与全量查询避免并发叠加 |
+| `GET /futures/data/openInterestHist` | 拉持仓历史 `open_interest_hist` | `symbol`, `period`, `startTime`, `endTime`, `limit` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 正常节奏即可，分页补齐时避免无意义重试 |
+| `GET /futures/data/takerlongshortRatio` | 拉主动买卖量 `taker_buy_sell_vol` | `symbol`, `period`, `startTime`, `endTime`, `limit` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 正常节奏即可，适合首页补齐链路 |
+| `GET /futures/data/topLongShortPositionRatio` | 拉大户持仓人数比 | `symbol`, `period`, `startTime`, `endTime`, `limit` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 正常节奏即可，适合评分/情绪链路 |
+| `GET /futures/data/topLongShortAccountRatio` | 拉大户账户数多空比 | `symbol`, `period`, `startTime`, `endTime`, `limit` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 正常节奏即可，适合评分/情绪链路 |
+| `GET /futures/data/globalLongShortAccountRatio` | 拉全市场账户数多空比 | `symbol`, `period`, `startTime`, `endTime`, `limit` | 按 `REQUEST_WEIGHT` 计算 | `IP` | 正常节奏即可，适合评分/情绪链路 |
+
+补充说明：
+
+- Binance 的 `exchangeInfo` 会返回 `rateLimits`，请求响应头也会带 `X-MBX-USED-WEIGHT-*`，适合做全局权重观测。
+- 与 OKX `rubik`、Gate WAF 相比，Binance 当前这组公开接口通常更适合批量修补和全量采集。
+- 项目中的 Binance 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/binance/series.py) 和 [market.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/binance/market.py)。
+## 工程限流策略补充
+
+当前工程已经在 `repair` 相关请求层落地统一的轻量限流框架，核心目标是“稳优先”，优先减少批量修补时的 `429/403` 和无效重试，而不是追求极限吞吐。
+
+### 当前实现摘要
+
+| 交易所 | 当前工程策略 | 说明 |
+|---|---|---|
+| OKX | 分组冷却 + 最小间隔 | `/api/v5/rubik/` 归为高敏 `rubik` 组，优先按 `Retry-After` / `RateLimit-Reset` 进入整组冷却；无头时走 fallback。 |
+| Gate | 预算头驱动 + budget unavailable | 以 `x-gate-ratelimit-limit` / `remain` / `reset-timestamp` 推进预算；若 `403` 且拿不到 `remain/reset`，直接标记 host/api budget unavailable，停止盲重试。 |
+| Bybit | 头部预算感知 + fallback 冷却 | 使用 `X-Bapi-Limit-*` 响应头感知预算；`403/429` 时按 reset 或 fallback 冷却。 |
+| Binance | 最小冷却适配 | 这轮不做复杂 `REQUEST_WEIGHT` 建模，只在 `403/429` 后进入短 cooldown，避免 repair 连续硬打。 |
+
+### Repair 链路行为
+
+- `rolling` 和 `history` 都已接入统一的 `budget_unavailable` 语义。
+- 某交易所某组一旦进入 cooldown / budget unavailable，当前批次该交易所后续任务会直接返回 `skipped`。
+- `skipped reason` 统一为 `okx_budget_unavailable`、`gate_budget_unavailable`、`bybit_budget_unavailable`、`binance_budget_unavailable`。
+- 一个交易所进入冷却，不会阻塞其它交易所继续执行。
+
+### 配置原则
+
+- 本轮实现不要求新增任何必填环境变量。
+- 仍兼容已有的 `OKX_RUBIK_MIN_INTERVAL_MS`、`OKX_429_RETRY_FALLBACK_SECONDS`、`GATE_MIN_INTERVAL_MS`、`GATE_403_RETRY_FALLBACK_SECONDS`。
+- 如果没有配置，代码会直接使用内置保守默认值。

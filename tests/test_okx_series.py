@@ -2,7 +2,9 @@ import requests
 
 from coinx.collector.okx import series as okx_series
 from coinx.collector.okx.series import (
+    OKXRateLimitUnavailable,
     clear_supported_symbols_cache,
+    clear_okx_rate_limit_state,
     fetch_open_interest_hist,
     fetch_taker_buy_sell_vol,
     get_supported_symbols,
@@ -185,7 +187,7 @@ def test_okx_is_symbol_supported_false_for_missing_swap(monkeypatch):
 
 
 def test_okx_request_uses_retry_after_header_on_429(monkeypatch):
-    sleeps = []
+    clear_okx_rate_limit_state()
 
     class FakeResponse:
         status_code = 429
@@ -198,7 +200,6 @@ def test_okx_request_uses_retry_after_header_on_429(monkeypatch):
         raise error
 
     monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
-    monkeypatch.setattr(okx_series.time, 'sleep', lambda seconds: sleeps.append(seconds))
     monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
 
     try:
@@ -206,11 +207,16 @@ def test_okx_request_uses_retry_after_header_on_429(monkeypatch):
     except requests.exceptions.HTTPError:
         pass
 
-    assert sleeps == [7.0]
+    try:
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+        assert False, 'expected OKXRateLimitUnavailable'
+    except OKXRateLimitUnavailable as exc:
+        assert round(exc.wait_seconds, 1) <= 7.0
+        assert round(exc.wait_seconds, 1) > 0
 
 
 def test_okx_request_uses_fallback_backoff_without_retry_header(monkeypatch):
-    sleeps = []
+    clear_okx_rate_limit_state()
 
     class FakeResponse:
         status_code = 429
@@ -223,7 +229,6 @@ def test_okx_request_uses_fallback_backoff_without_retry_header(monkeypatch):
         raise error
 
     monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
-    monkeypatch.setattr(okx_series.time, 'sleep', lambda seconds: sleeps.append(seconds))
     monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
     monkeypatch.setattr(okx_series, 'OKX_429_RETRY_FALLBACK_SECONDS', 9)
 
@@ -232,13 +237,18 @@ def test_okx_request_uses_fallback_backoff_without_retry_header(monkeypatch):
     except requests.exceptions.HTTPError:
         pass
 
-    assert sleeps == [9.0]
+    try:
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+        assert False, 'expected OKXRateLimitUnavailable'
+    except OKXRateLimitUnavailable as exc:
+        assert round(exc.wait_seconds, 1) <= 9.0
+        assert round(exc.wait_seconds, 1) > 0
 
 
 def test_okx_rubik_requests_respect_min_interval(monkeypatch):
-    okx_series._okx_rate_limit_state.clear()
+    clear_okx_rate_limit_state()
     sleep_calls = []
-    time_values = iter([10.0, 10.3, 11.3])
+    time_values = iter([10.0, 10.0, 10.3, 10.3, 11.3, 11.3])
 
     monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 1000)
     monkeypatch.setattr(okx_series.time, 'time', lambda: next(time_values))

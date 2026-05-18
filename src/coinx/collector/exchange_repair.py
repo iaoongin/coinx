@@ -3,7 +3,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapters
+from coinx.collector.binance.client import BinanceRateLimitUnavailable, is_binance_budget_unavailable
+from coinx.collector.bybit.series import BybitRateLimitUnavailable, is_bybit_budget_unavailable
 from coinx.collector.gate.series import GateRateLimitUnavailable, GateUnsupportedContract, is_gate_budget_unavailable
+from coinx.collector.okx.series import OKXRateLimitUnavailable, is_okx_budget_unavailable
+from coinx.collector.rate_limit import RateLimitUnavailable
 from coinx.config import (
     ENABLED_EXCHANGES,
     HOMEPAGE_SERIES_REPAIR_PERIOD,
@@ -21,6 +25,29 @@ from coinx.utils import logger
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
 _history_symbol_cursor = 0
+_RATE_LIMIT_EXCEPTIONS = (
+    GateRateLimitUnavailable,
+    OKXRateLimitUnavailable,
+    BybitRateLimitUnavailable,
+    BinanceRateLimitUnavailable,
+    RateLimitUnavailable,
+)
+
+
+def _is_exchange_budget_unavailable(exchange):
+    if exchange == 'gate':
+        return is_gate_budget_unavailable()
+    if exchange == 'okx':
+        return is_okx_budget_unavailable('rubik') or is_okx_budget_unavailable('default')
+    if exchange == 'bybit':
+        return is_bybit_budget_unavailable()
+    if exchange == 'binance':
+        return is_binance_budget_unavailable()
+    return False
+
+
+def _budget_unavailable_reason(exchange):
+    return f'{exchange}_budget_unavailable'
 
 
 def _period_to_ms(period):
@@ -117,15 +144,7 @@ def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precis
     return result
 
 
-def _supported_symbol_lookup_failed_result(
-    adapter,
-    symbol,
-    series_type,
-    mode,
-    window_precise,
-    error,
-    extra=None,
-):
+def _supported_symbol_lookup_failed_result(adapter, symbol, series_type, mode, window_precise, error, extra=None):
     result = {
         'exchange': adapter.exchange_id,
         'symbol': symbol,
@@ -160,6 +179,47 @@ def _summarize_results(results):
     }
 
 
+def _reason_label(reason):
+    mapping = {
+        'unsupported_symbol': '不支持币种',
+        'supported_symbol_lookup_failed': '币种支持检查失败',
+        'no_data': '无可用数据',
+    }
+    if reason and str(reason).endswith('_budget_unavailable'):
+        return '限流冷却中'
+    return mapping.get(reason, reason or '未知')
+
+
+def _format_series_counts(series_counts):
+    if not series_counts:
+        return '无'
+    return ','.join(f'{series_type}:{count}' for series_type, count in sorted(series_counts.items()))
+
+
+def _format_reason_counts(results):
+    counts = {}
+    for item in results:
+        if item.get('status') != 'skipped':
+            continue
+        label = _reason_label(item.get('reason'))
+        counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return '无'
+    return ','.join(f'{label}={count}' for label, count in sorted(counts.items()))
+
+
+def _format_exchange_result_summary(results, exchanges):
+    parts = []
+    for exchange in exchanges:
+        exchange_results = [item for item in results if item.get('exchange') == exchange]
+        parts.append(
+            f"{exchange}(成功={sum(1 for item in exchange_results if item.get('status') == 'success')},"
+            f"失败={sum(1 for item in exchange_results if item.get('status') == 'error')},"
+            f"跳过={sum(1 for item in exchange_results if item.get('status') == 'skipped')})"
+        )
+    return '; '.join(parts) if parts else '无'
+
+
 def _format_exchange_progress(stats_by_exchange):
     parts = []
     for exchange in sorted(stats_by_exchange):
@@ -167,34 +227,73 @@ def _format_exchange_progress(stats_by_exchange):
         parts.append(
             f"{exchange}(支持={stats.get('supported_symbols', 0)},"
             f"已完整={stats.get('complete', 0)},"
-            f"待补={stats.get('pending', 0)},"
+            f"待修补={stats.get('pending', 0)},"
             f"不支持={stats.get('unsupported', 0)})"
         )
     return '; '.join(parts)
 
 
 def _log_repair_summary(summary):
-    logger.info(
-        f"交易所{summary['mode']}补齐完成: exchanges={','.join(summary['exchanges'])}, "
-        f"symbols={len(summary['symbols'])}, series_types={','.join(summary['series_types'])}, "
-        f"成功={summary['success_count']}, 失败={summary['failure_count']}, "
-        f"跳过={summary['skipped_count']}, 耗时={summary['duration_ms']:.2f}ms"
-    )
+    extra_parts = []
+    if summary.get('mode') == 'rolling':
+        extra_parts.extend(
+            [
+                f"预检已完整={summary.get('precheck_skipped_count', 0)}",
+                f"待修补任务={summary.get('pending_task_count', 0)}",
+                f"不支持数量={summary.get('unsupported_count', 0)}",
+            ]
+        )
+    if summary.get('mode') == 'history':
+        extra_parts.extend(
+            [
+                f"覆盖时长={summary.get('coverage_hours')}",
+                f"是否全量扫描={'是' if summary.get('full_scan') else '否'}",
+                f"修补窗口={summary.get('start_time')}~{summary.get('end_time')}",
+            ]
+        )
 
-    precheck_skipped_count = summary.get('precheck_skipped_count')
-    if precheck_skipped_count:
-        logger.info(f"交易所滚动补齐预检查跳过: 已完整={precheck_skipped_count}")
+    message = (
+        f"修补完成: 模式={summary['mode']} "
+        f"交易所={','.join(summary['exchanges'])} "
+        f"币种数={len(summary['symbols'])} "
+        f"序列类型={','.join(summary['series_types'])} "
+        f"成功={summary['success_count']} "
+        f"失败={summary['failure_count']} "
+        f"跳过={summary['skipped_count']} "
+        f"跳过原因={_format_reason_counts(summary.get('results') or [])} "
+        f"各交易所={_format_exchange_result_summary(summary.get('results') or [], summary.get('exchanges') or [])} "
+        f"耗时={summary['duration_ms']:.2f}ms"
+    )
+    if extra_parts:
+        message = f"{message} {' '.join(extra_parts)}"
+    logger.info(message)
 
     unsupported_groups = {}
+    supported_lookup_failed_groups = {}
     for item in summary.get('results', []):
-        if item.get('status') == 'skipped' and item.get('reason') == 'unsupported_symbol':
-            key = (item.get('exchange'), item.get('series_type'))
+        if item.get('status') != 'skipped':
+            continue
+        key = (item.get('exchange'), item.get('series_type'))
+        if item.get('reason') == 'unsupported_symbol':
             unsupported_groups.setdefault(key, []).append(item.get('symbol'))
+        if item.get('reason') == 'supported_symbol_lookup_failed':
+            supported_lookup_failed_groups.setdefault(key, []).append(item.get('symbol'))
 
     for (exchange, series_type), symbols in sorted(unsupported_groups.items()):
         logger.info(
-            f"交易所补齐跳过不支持币种: exchange={exchange}, type={series_type}, "
-            f"count={len(symbols)}, symbols={_sample_values(symbols)}"
+            '修补跳过汇总: 原因=不支持币种 交易所=%s 序列类型=%s 数量=%d 币种摘要=%s',
+            exchange,
+            series_type,
+            len(symbols),
+            _sample_values(symbols),
+        )
+    for (exchange, series_type), symbols in sorted(supported_lookup_failed_groups.items()):
+        logger.warning(
+            '修补跳过汇总: 原因=币种支持检查失败 交易所=%s 序列类型=%s 数量=%d 币种摘要=%s',
+            exchange,
+            series_type,
+            len(symbols),
+            _sample_values(symbols),
         )
 
 
@@ -213,25 +312,26 @@ def _run_tasks(tasks, worker_func, max_workers, db_session=None):
     return results
 
 
-def _filter_gate_unavailable_rolling_tasks(tasks):
-    if not tasks or not is_gate_budget_unavailable():
+def _filter_budget_unavailable_rolling_tasks(tasks):
+    if not tasks:
         return tasks, []
 
     runnable = []
     skipped = []
     for task in tasks:
-        if task.get('exchange') != 'gate':
+        exchange = task.get('exchange')
+        if not _is_exchange_budget_unavailable(exchange):
             runnable.append(task)
             continue
         skipped.append(
             {
-                'exchange': task['exchange'],
+                'exchange': exchange,
                 'symbol': task['symbol'],
                 'series_type': task['series_type'],
                 'period': task['period'],
                 'status': 'skipped',
                 'mode': 'rolling',
-                'reason': 'gate_budget_unavailable',
+                'reason': _budget_unavailable_reason(exchange),
                 'window_precise': task['adapter'].supports_time_window(task['series_type']),
                 'affected': 0,
                 'records': 0,
@@ -241,11 +341,63 @@ def _filter_gate_unavailable_rolling_tasks(tasks):
         )
 
     if skipped:
-        logger.warning(
-            'Gate host/api budget unavailable, skip remaining rolling tasks: count=%d symbols=%s',
-            len(skipped),
-            _sample_values([item['symbol'] for item in skipped]),
+        grouped = {}
+        for item in skipped:
+            grouped.setdefault(item['exchange'], []).append(item['symbol'])
+        for exchange, symbols in sorted(grouped.items()):
+            logger.warning(
+                '交易所限流冷却中，跳过剩余任务: 模式=rolling 交易所=%s 原因=限流冷却中 跳过数量=%d 币种摘要=%s',
+                exchange,
+                len(symbols),
+                _sample_values(symbols),
+            )
+    return runnable, skipped
+
+
+def _filter_budget_unavailable_tasks(tasks, mode):
+    if mode == 'rolling':
+        return _filter_budget_unavailable_rolling_tasks(tasks)
+
+    if not tasks:
+        return tasks, []
+
+    runnable = []
+    skipped = []
+    for task in tasks:
+        exchange = task.get('exchange')
+        if not _is_exchange_budget_unavailable(exchange):
+            runnable.append(task)
+            continue
+        skipped.append(
+            {
+                'exchange': exchange,
+                'symbol': task['symbol'],
+                'series_type': task['series_type'],
+                'period': task['period'],
+                'status': 'skipped',
+                'mode': mode,
+                'reason': _budget_unavailable_reason(exchange),
+                'window_precise': task['adapter'].supports_time_window(task['series_type']),
+                'affected': 0,
+                'records': 0,
+                'pages': 0,
+                'start_time': task.get('start_time'),
+                'end_time': task.get('end_time'),
+            }
         )
+
+    if skipped:
+        grouped = {}
+        for item in skipped:
+            grouped.setdefault(item['exchange'], []).append(item['symbol'])
+        for exchange, symbols in sorted(grouped.items()):
+            logger.warning(
+                '交易所限流冷却中，跳过剩余任务: 模式=%s 交易所=%s 原因=限流冷却中 跳过数量=%d 币种摘要=%s',
+                mode,
+                exchange,
+                len(symbols),
+                _sample_values(symbols),
+            )
     return runnable, skipped
 
 
@@ -298,12 +450,7 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
         end_time = group[-1] if window_precise else None
         limit = max(len(group), 2)
         expected_times = set(group)
-        fetch_attempts = [
-            {
-                'start_time': start_time,
-                'end_time': end_time,
-            }
-        ]
+        fetch_attempts = [{'start_time': start_time, 'end_time': end_time}]
         if window_precise:
             fetch_attempts.append({'start_time': None, 'end_time': None})
 
@@ -368,16 +515,7 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
     }
 
 
-def repair_rolling_symbols(
-    symbols=None,
-    series_types=None,
-    exchanges=None,
-    now_ms=None,
-    points=None,
-    max_workers=None,
-    http_session=None,
-    db_session=None,
-):
+def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_ms=None, points=None, max_workers=None, http_session=None, db_session=None):
     target_symbols = symbols if symbols is not None else get_active_coins()
     target_exchanges = exchanges or ENABLED_EXCHANGES
     adapters = get_exchange_adapters(target_exchanges)
@@ -392,10 +530,12 @@ def repair_rolling_symbols(
     exchange_progress = {}
 
     logger.info(
-        f"开始交易所rolling预检查: symbols={len(target_symbols)} "
-        f"exchanges={','.join(target_exchanges)} "
-        f"series_types={','.join(series_types or HOMEPAGE_SERIES_TYPES)} "
-        f"points={points or REPAIR_ROLLING_POINTS} max_workers={worker_count}"
+        '开始修补: 模式=rolling 交易所=%s 币种数=%d 序列类型=%s 点数=%s 并发=%s',
+        ','.join(target_exchanges),
+        len(target_symbols),
+        ','.join(series_types or HOMEPAGE_SERIES_TYPES),
+        points or REPAIR_ROLLING_POINTS,
+        worker_count,
     )
 
     for adapter in adapters:
@@ -452,11 +592,7 @@ def repair_rolling_symbols(
                     session=db_session,
                 )
                 for symbol in supported_symbols:
-                    missing_times = [
-                        timestamp
-                        for timestamp in target_times
-                        if timestamp not in existing_by_symbol.get(symbol, set())
-                    ]
+                    missing_times = [timestamp for timestamp in target_times if timestamp not in existing_by_symbol.get(symbol, set())]
                     if not missing_times:
                         precheck_skipped_count += 1
                         exchange_stats['complete'] += 1
@@ -492,9 +628,12 @@ def repair_rolling_symbols(
     precheck_duration_ms = (time.perf_counter() - precheck_started_at) * 1000
     unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
     logger.info(
-        f"交易所rolling预检查完成: 耗时={precheck_duration_ms:.2f}ms "
-        f"已完整={precheck_skipped_count} 待补={len(tasks)} 不支持={unsupported_count} "
-        f"明细={_format_exchange_progress(exchange_progress) if exchange_progress else '无'}"
+        '预检完成: 模式=rolling 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 耗时=%.2fms',
+        _format_exchange_progress(exchange_progress) if exchange_progress else '无',
+        precheck_skipped_count,
+        len(tasks),
+        unsupported_count,
+        precheck_duration_ms,
     )
 
     def worker(task, db_session=None):
@@ -511,10 +650,13 @@ def repair_rolling_symbols(
                 http_session=http_session if db_session is not None else None,
                 db_session=session,
             )
-        except GateRateLimitUnavailable as exc:
+        except _RATE_LIMIT_EXCEPTIONS as exc:
             logger.warning(
-                f"Gate rolling补齐跳过: exchange={task['exchange']}, "
-                f"symbol={task['symbol']}, type={task['series_type']}, reason={exc}"
+                '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=%s',
+                task['exchange'],
+                task['symbol'],
+                task['series_type'],
+                _reason_label(_budget_unavailable_reason(task['exchange'])),
             )
             return {
                 'exchange': task['exchange'],
@@ -523,13 +665,15 @@ def repair_rolling_symbols(
                 'period': task['period'],
                 'status': 'skipped',
                 'mode': 'rolling',
-                'reason': 'gate_budget_unavailable',
+                'reason': _budget_unavailable_reason(task['exchange']),
                 'error': str(exc),
             }
         except GateUnsupportedContract as exc:
             logger.warning(
-                f"Gate rolling补齐跳过不支持合约: exchange={task['exchange']}, "
-                f"symbol={task['symbol']}, type={task['series_type']}, reason={exc}"
+                '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
+                task['exchange'],
+                task['symbol'],
+                task['series_type'],
             )
             return _unsupported_symbol_result(
                 task['adapter'],
@@ -545,8 +689,12 @@ def repair_rolling_symbols(
             )
         except Exception as exc:
             logger.error(
-                f"交易所滚动补齐失败: exchange={task['exchange']}, "
-                f"symbol={task['symbol']}, type={task['series_type']}, error={exc}"
+                '修补失败: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 周期=%s 错误=%s',
+                task['exchange'],
+                task['symbol'],
+                task['series_type'],
+                task['period'],
+                exc,
             )
             return {
                 'exchange': task['exchange'],
@@ -569,19 +717,23 @@ def repair_rolling_symbols(
             series_counts[task['series_type']] = series_counts.get(task['series_type'], 0) + 1
             symbol_counts.add(task['symbol'])
         logger.info(
-            f"开始执行交易所rolling补齐: exchange={exchange} "
-            f"symbols={len(symbol_counts)} tasks={len(group_tasks)} "
-            f"series={','.join(f'{series_type}:{count}' for series_type, count in sorted(series_counts.items()))}"
+            '交易所执行开始: 模式=rolling 交易所=%s 币种数=%d 任务数=%d 序列摘要=%s',
+            exchange,
+            len(symbol_counts),
+            len(group_tasks),
+            _format_series_counts(series_counts),
         )
-        runnable_tasks, skipped_results = _filter_gate_unavailable_rolling_tasks(group_tasks)
+        runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
-            f"交易所rolling补齐完成: exchange={exchange} "
-            f"success={result_stats['success_count']} "
-            f"failure={result_stats['failure_count']} "
-            f"skipped={result_stats['skipped_count']} "
-            f"duration_ms={(time.perf_counter() - started) * 1000:.2f}"
+            '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%.2fms',
+            exchange,
+            result_stats['success_count'],
+            result_stats['failure_count'],
+            result_stats['skipped_count'],
+            _format_reason_counts(group_results),
+            (time.perf_counter() - started) * 1000,
         )
         return group_results
 
@@ -633,17 +785,7 @@ def _history_target_symbols(symbols, full_scan):
     return batch
 
 
-def repair_history_symbols(
-    symbols=None,
-    series_types=None,
-    exchanges=None,
-    now_ms=None,
-    full_scan=False,
-    max_workers=None,
-    coverage_hours=None,
-    http_session=None,
-    db_session=None,
-):
+def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_ms=None, full_scan=False, max_workers=None, coverage_hours=None, http_session=None, db_session=None):
     target_symbols = _history_target_symbols(symbols, full_scan)
     target_exchanges = exchanges or ENABLED_EXCHANGES
     adapters = get_exchange_adapters(target_exchanges)
@@ -738,12 +880,7 @@ def repair_history_symbols(
                     start_time=cursor_time if window_precise else None,
                     end_time=page_end_time if window_precise else None,
                 )
-                records = task['adapter'].parse_series_payload(
-                    task['series_type'],
-                    payload,
-                    task['symbol'],
-                    period,
-                )
+                records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
                 records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
                 current_end_time = page_end_time if window_precise else target_end_time
                 filtered_records = [
@@ -751,12 +888,7 @@ def repair_history_symbols(
                     for record in records
                     if target_start_time <= record.get(time_field, -1) <= current_end_time
                 ]
-                affected += upsert_series_records(
-                    task['exchange'],
-                    task['series_type'],
-                    filtered_records,
-                    session=session,
-                )
+                affected += upsert_series_records(task['exchange'], task['series_type'], filtered_records, session=session)
                 record_count += len(filtered_records)
                 if filtered_records:
                     pages += 1
@@ -781,8 +913,10 @@ def repair_history_symbols(
             }
         except GateUnsupportedContract as exc:
             logger.warning(
-                f"Gate history补齐跳过不支持合约: exchange={task['exchange']}, "
-                f"symbol={task['symbol']}, type={task['series_type']}, reason={exc}"
+                '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
+                task['exchange'],
+                task['symbol'],
+                task['series_type'],
             )
             return _unsupported_symbol_result(
                 task['adapter'],
@@ -797,10 +931,33 @@ def repair_history_symbols(
                     'error': str(exc),
                 },
             )
+        except _RATE_LIMIT_EXCEPTIONS as exc:
+            logger.warning(
+                '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=%s',
+                task['exchange'],
+                task['symbol'],
+                task['series_type'],
+                _reason_label(_budget_unavailable_reason(task['exchange'])),
+            )
+            return {
+                'exchange': task['exchange'],
+                'symbol': task['symbol'],
+                'series_type': task['series_type'],
+                'period': task['period'],
+                'status': 'skipped',
+                'mode': 'history',
+                'window_precise': window_precise,
+                'reason': _budget_unavailable_reason(task['exchange']),
+                'error': str(exc),
+            }
         except Exception as exc:
             logger.error(
-                f"交易所历史补齐失败: exchange={task['exchange']}, "
-                f"symbol={task['symbol']}, type={task['series_type']}, error={exc}"
+                '修补失败: 模式=history 交易所=%s 币种=%s 序列类型=%s 周期=%s 错误=%s',
+                task['exchange'],
+                task['symbol'],
+                task['series_type'],
+                task['period'],
+                exc,
             )
             return {
                 'exchange': task['exchange'],
@@ -819,25 +976,34 @@ def repair_history_symbols(
     def run_exchange_group(exchange, group_tasks, group_worker, db_session):
         started = time.perf_counter()
         logger.info(
-            f"开始执行交易所history补齐: exchange={exchange} "
-            f"tasks={len(group_tasks)} symbols={len({task['symbol'] for task in group_tasks})}"
+            '交易所执行开始: 模式=history 交易所=%s 币种数=%d 任务数=%d',
+            exchange,
+            len({task['symbol'] for task in group_tasks}),
+            len(group_tasks),
         )
-        group_results = _run_tasks(group_tasks, group_worker, 1, db_session=db_session)
+        runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='history')
+        group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
-            f"交易所history补齐完成: exchange={exchange} "
-            f"success={result_stats['success_count']} "
-            f"failure={result_stats['failure_count']} "
-            f"skipped={result_stats['skipped_count']} "
-            f"duration_ms={(time.perf_counter() - started) * 1000:.2f}"
+            '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%.2fms',
+            exchange,
+            result_stats['success_count'],
+            result_stats['failure_count'],
+            result_stats['skipped_count'],
+            _format_reason_counts(group_results),
+            (time.perf_counter() - started) * 1000,
         )
         return group_results
 
     if tasks:
         logger.info(
-            f"开始交易所history执行: exchanges={','.join(sorted(exchange_task_counts))} "
-            f"pending={len(tasks)} "
-            f"明细={'; '.join(f'{exchange}(待补={count})' for exchange, count in sorted(exchange_task_counts.items()))}"
+            '开始修补: 模式=history 交易所=%s 待修补任务=%d 覆盖时长=%s 并发=%s 全量扫描=%s 任务摘要=%s',
+            ','.join(sorted(exchange_task_counts)),
+            len(tasks),
+            effective_coverage_hours,
+            worker_count,
+            '是' if full_scan else '否',
+            '; '.join(f'{exchange}(待补={count})' for exchange, count in sorted(exchange_task_counts.items())),
         )
 
     results = skipped_results + _run_grouped_tasks(

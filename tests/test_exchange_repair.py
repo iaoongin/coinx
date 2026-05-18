@@ -1,11 +1,24 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 import threading
 
+from coinx.collector.binance.client import (
+    BinanceRateLimitUnavailable,
+    clear_binance_rate_limit_state,
+)
+from coinx.collector.bybit.series import BybitRateLimitUnavailable, clear_bybit_rate_limit_state
 from coinx.collector.gate import series as gate_series
 from coinx.collector.gate.series import GateUnsupportedContract
 from coinx.collector.exchange_repair import repair_history_symbols, repair_rolling_symbols
+from coinx.collector.okx.series import OKXRateLimitUnavailable, clear_okx_rate_limit_state
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.repositories.series import upsert_series_records
+
+
+def _clear_rate_limit_states():
+    clear_binance_rate_limit_state()
+    clear_bybit_rate_limit_state()
+    clear_okx_rate_limit_state()
+    gate_series.clear_gate_rate_limit_state()
 
 
 @dataclass(frozen=True)
@@ -71,6 +84,7 @@ class FakeAdapter:
 
 
 def test_exchange_rolling_repair_uses_adapter_and_skips_existing_points(db_session, monkeypatch):
+    _clear_rate_limit_states()
     upsert_series_records(
         'binance',
         'klines',
@@ -121,6 +135,7 @@ def test_exchange_rolling_repair_uses_adapter_and_skips_existing_points(db_sessi
 
 
 def test_exchange_history_repair_marks_non_precise_windows(db_session, monkeypatch):
+    _clear_rate_limit_states()
     calls = []
     adapter = FakeAdapter('okx', ('open_interest_hist',), (), calls)
     monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
@@ -146,11 +161,15 @@ def test_exchange_history_repair_marks_non_precise_windows(db_session, monkeypat
 
 
 def test_exchange_rolling_repair_skips_unsupported_symbols(db_session, monkeypatch):
+    _clear_rate_limit_states()
     calls = []
     info_logs = []
     adapter = FakeAdapter('okx', ('klines',), ('klines',), calls, supported_symbols=('BTCUSDT',))
     monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
-    monkeypatch.setattr('coinx.collector.exchange_repair.logger.info', info_logs.append)
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append(' '.join(str(arg) for arg in args)),
+    )
 
     summary = repair_rolling_symbols(
         symbols=['BTCUSDT', 'PROMUSDT'],
@@ -170,12 +189,13 @@ def test_exchange_rolling_repair_skips_unsupported_symbols(db_session, monkeypat
     assert skipped[0]['symbol'] == 'PROMUSDT'
     assert skipped[0]['reason'] == 'unsupported_symbol'
     assert calls == [('okx', 'klines', 'BTCUSDT', 2, 1200000, 1200000)]
-    assert any('rolling' in message for message in info_logs)
-    assert any('PROMUSDT' in message for message in info_logs)
+    assert any('开始修补: 模式=rolling' in message for message in info_logs)
+    assert any('预检完成: 模式=rolling' in message for message in info_logs)
+    assert any('原因=不支持币种' in message and 'PROMUSDT' in message for message in info_logs)
 
 
 def test_gate_contract_not_found_is_skipped_as_unsupported(db_session, monkeypatch):
-    gate_series.clear_gate_rate_limit_state()
+    _clear_rate_limit_states()
     calls = []
 
     @dataclass(frozen=True)
@@ -221,6 +241,7 @@ def test_gate_contract_not_found_is_skipped_as_unsupported(db_session, monkeypat
 
 
 def test_gate_rolling_repair_skips_when_supported_symbol_lookup_fails(db_session, monkeypatch):
+    _clear_rate_limit_states()
     calls = []
 
     @dataclass(frozen=True)
@@ -267,6 +288,7 @@ def test_gate_rolling_repair_skips_when_supported_symbol_lookup_fails(db_session
 
 
 def test_gate_history_repair_skips_when_supported_symbol_lookup_fails(db_session, monkeypatch):
+    _clear_rate_limit_states()
     calls = []
 
     @dataclass(frozen=True)
@@ -314,6 +336,7 @@ def test_gate_history_repair_skips_when_supported_symbol_lookup_fails(db_session
 
 
 def test_exchange_rolling_repair_falls_back_to_latest_page_when_precise_window_misses(db_session, monkeypatch):
+    _clear_rate_limit_states()
     calls = []
 
     @dataclass(frozen=True)
@@ -383,6 +406,7 @@ def test_exchange_rolling_repair_falls_back_to_latest_page_when_precise_window_m
 
 
 def test_exchange_history_repair_collects_adapter_series_periods(db_session, monkeypatch):
+    _clear_rate_limit_states()
     calls = []
     adapter = FakeAdapter(
         'okx',
@@ -415,6 +439,7 @@ def test_exchange_history_repair_collects_adapter_series_periods(db_session, mon
 
 
 def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monkeypatch):
+    _clear_rate_limit_states()
     starts = []
     releases = {}
     overlaps = {'seen': False}
@@ -467,14 +492,12 @@ def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monk
         'coinx.collector.exchange_repair.get_exchange_adapters',
         lambda exchanges: [ParallelAdapter('binance'), ParallelAdapter('okx')],
     )
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_existing_series_timestamps', lambda **kwargs: {})
     monkeypatch.setattr(
-        'coinx.collector.exchange_repair.get_existing_series_timestamps',
-        lambda **kwargs: {},
+        'coinx.collector.exchange_repair.get_session',
+        lambda: type('Session', (), {'close': lambda self: None})(),
     )
-    monkeypatch.setattr(
-        'coinx.collector.exchange_repair.upsert_series_records',
-        lambda exchange, series_type, records, session=None: len(records),
-    )
+    monkeypatch.setattr('coinx.collector.exchange_repair.upsert_series_records', lambda exchange, series_type, records, session=None: len(records))
 
     result_holder = {}
 
@@ -503,3 +526,199 @@ def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monk
     assert not worker_thread.is_alive()
     assert overlaps['seen'] is True
     assert result_holder['summary']['success_count'] == 2
+
+
+def test_exchange_rolling_repair_skips_okx_when_budget_unavailable(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    @dataclass(frozen=True)
+    class LimitedAdapter:
+        exchange_id: str = 'okx'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            raise OKXRateLimitUnavailable('rubik', 5)
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [LimitedAdapter()])
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['okx'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    assert summary['failure_count'] == 0
+    assert summary['skipped_count'] == 1
+    assert summary['results'][0]['reason'] == 'okx_budget_unavailable'
+
+
+def test_exchange_history_repair_skips_bybit_when_budget_unavailable(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    @dataclass(frozen=True)
+    class LimitedAdapter:
+        exchange_id: str = 'bybit'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            raise BybitRateLimitUnavailable('market', 5)
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [LimitedAdapter()])
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['bybit'],
+        now_ms=1500000,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=db_session,
+    )
+
+    assert summary['failure_count'] == 0
+    assert summary['skipped_count'] == 1
+    assert summary['results'][0]['reason'] == 'bybit_budget_unavailable'
+
+
+def test_exchange_history_repair_skips_binance_when_budget_unavailable(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    @dataclass(frozen=True)
+    class LimitedAdapter:
+        exchange_id: str = 'binance'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            raise BinanceRateLimitUnavailable('default', 2)
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [LimitedAdapter()])
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=1500000,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=db_session,
+    )
+
+    assert summary['failure_count'] == 0
+    assert summary['skipped_count'] == 1
+    assert summary['results'][0]['reason'] == 'binance_budget_unavailable'
+
+
+def test_exchange_rolling_repair_logs_budget_unavailable_in_chinese(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+
+    @dataclass(frozen=True)
+    class LimitedAdapter:
+        exchange_id: str = 'gate'
+        supported_series_types: tuple = ('klines',)
+        precise_series_types: tuple = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            raise gate_series.GateRateLimitUnavailable(8)
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [LimitedAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append(' '.join(str(arg) for arg in args)),
+    )
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['gate'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    assert summary['skipped_count'] == 1
+    assert any('修补完成: 模式=rolling' in message and '跳过原因=限流冷却中=1' in message for message in info_logs)
+
+
+def test_exchange_history_repair_logs_fixed_chinese_stage_messages(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+    calls = []
+    adapter = FakeAdapter('okx', ('open_interest_hist',), (), calls)
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append(' '.join(str(arg) for arg in args)),
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['open_interest_hist'],
+        exchanges=['okx'],
+        now_ms=1500000,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 1
+    assert any('开始修补: 模式=history' in message for message in info_logs)
+    assert any('交易所执行开始: 模式=history' in message for message in info_logs)
+    assert any('交易所执行完成: 模式=history' in message for message in info_logs)
+    assert any('修补完成: 模式=history' in message for message in info_logs)

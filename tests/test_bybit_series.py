@@ -1,7 +1,10 @@
+import pytest
+
 from coinx.collector.bybit import series as bybit_series
 from coinx.collector.exchange_adapters import get_exchange_adapter
 from coinx.collector.exchange_repair import repair_history_symbols
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
+import requests
 
 
 def test_parse_bybit_klines_maps_kline_array():
@@ -148,3 +151,27 @@ def test_exchange_repair_bybit_skips_taker_buy_sell_vol(db_session, monkeypatch)
     assert db_session.query(MarketKline).filter_by(exchange='bybit').count() == 1
     assert db_session.query(MarketOpenInterestHist).filter_by(exchange='bybit').count() == 1
     assert db_session.query(MarketTakerBuySellVol).filter_by(exchange='bybit').count() == 0
+
+
+def test_bybit_request_429_marks_cooldown(monkeypatch):
+    bybit_series.clear_bybit_rate_limit_state()
+
+    response = requests.Response()
+    response.status_code = 429
+    response.reason = 'Too Many Requests'
+    response.url = 'https://example.com'
+    response._content = b'{"retCode":0,"result":{}}'
+    response.headers['X-Bapi-Limit-Reset-Timestamp'] = str(int((bybit_series.time.time() + 3) * 1000))
+
+    def fake_request(*args, **kwargs):
+        error = requests.exceptions.HTTPError('429 Too Many Requests')
+        error.response = response
+        raise error
+
+    monkeypatch.setattr(bybit_series, 'request_with_retry', fake_request)
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        bybit_series._request_bybit('/v5/market/kline', {'symbol': 'BTCUSDT'})
+
+    with pytest.raises(bybit_series.BybitRateLimitUnavailable):
+        bybit_series._request_bybit('/v5/market/kline', {'symbol': 'BTCUSDT'})

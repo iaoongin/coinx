@@ -1,6 +1,9 @@
 import time
 
+import requests
+
 from coinx.collector.binance.client import get_session, request_with_retry
+from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable, parse_retry_after_seconds
 from coinx.config import BYBIT_BASE_URL, BYBIT_CATEGORY
 from coinx.repositories.series import upsert_series_records
 from coinx.utils import logger
@@ -14,6 +17,16 @@ _supported_symbols_cache = {
     'failed_at': 0,
     'symbols': None,
 }
+BYBIT_MIN_INTERVAL_MS = 20
+BYBIT_RATE_LIMIT_FALLBACK_SECONDS = 5.0
+_bybit_rate_limits = RateLimitRegistry()
+
+
+class BybitRateLimitUnavailable(RateLimitUnavailable):
+    """Raised when Bybit market requests are cooling down."""
+
+    def __init__(self, group, wait_seconds, reason='budget_unavailable'):
+        super().__init__('bybit', group, wait_seconds, reason=reason)
 
 
 def _to_float(value):
@@ -57,22 +70,75 @@ def _bybit_open_interest_interval(period):
         raise ValueError(f'unsupported Bybit open interest period: {period}') from exc
 
 
+def clear_supported_symbols_cache():
+    _supported_symbols_cache['loaded_at'] = 0
+    _supported_symbols_cache['failed_at'] = 0
+    _supported_symbols_cache['symbols'] = None
+
+
+def clear_bybit_rate_limit_state():
+    _bybit_rate_limits.clear()
+
+
+def is_bybit_budget_unavailable(group='market'):
+    return _bybit_rate_limits.unavailable_remaining_seconds('bybit', group) > 0
+
+
+def _extract_bybit_headers(response):
+    if response is None:
+        return {}
+    return {
+        key: value
+        for key, value in response.headers.items()
+        if key.lower().startswith('x-bapi-') or key.lower() == 'retry-after'
+    }
+
+
+def _compute_bybit_backoff_seconds(response):
+    headers = response.headers if response is not None else {}
+    retry_after_seconds = parse_retry_after_seconds(headers.get('Retry-After'))
+    if retry_after_seconds is not None:
+        return retry_after_seconds
+    reset_raw = headers.get('X-Bapi-Limit-Reset-Timestamp') or headers.get('x-bapi-limit-reset-timestamp')
+    if reset_raw not in (None, ''):
+        try:
+            reset_at = float(reset_raw)
+            return max(0.0, (reset_at - (time.time() * 1000)) / 1000.0)
+        except (TypeError, ValueError):
+            pass
+    return BYBIT_RATE_LIMIT_FALLBACK_SECONDS
+
+
 def _request_bybit(path, params, session=None, timeout=10):
     http_session = session or get_session()
     url = f"{BYBIT_BASE_URL}{path}"
-    response = request_with_retry(http_session, url, params=params, timeout=timeout)
+    group = 'market'
+    wait_seconds = _bybit_rate_limits.unavailable_remaining_seconds('bybit', group)
+    if wait_seconds > 0:
+        raise BybitRateLimitUnavailable(group, wait_seconds)
+    _bybit_rate_limits.wait_for_slot('bybit', group, min_interval_ms=BYBIT_MIN_INTERVAL_MS)
+    try:
+        response = request_with_retry(http_session, url, params=params, timeout=timeout)
+    except requests.exceptions.HTTPError as exc:
+        response = getattr(exc, 'response', None)
+        if response is not None and response.status_code in (403, 429):
+            backoff_seconds = _compute_bybit_backoff_seconds(response)
+            _bybit_rate_limits.mark_cooldown('bybit', group, backoff_seconds, headers=_extract_bybit_headers(response))
+            logger.warning(
+                'Bybit 触发限频: path=%s params=%s status=%s wait=%.2fs headers=%s',
+                path,
+                params,
+                response.status_code,
+                backoff_seconds,
+                _extract_bybit_headers(response),
+            )
+        raise
     response.raise_for_status()
     payload = response.json()
     ret_code = payload.get('retCode') if isinstance(payload, dict) else None
     if ret_code not in (None, 0, '0'):
         raise ValueError(f"Bybit API error {payload.get('retCode')}: {payload.get('retMsg')}")
     return payload.get('result', payload)
-
-
-def clear_supported_symbols_cache():
-    _supported_symbols_cache['loaded_at'] = 0
-    _supported_symbols_cache['failed_at'] = 0
-    _supported_symbols_cache['symbols'] = None
 
 
 def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):
