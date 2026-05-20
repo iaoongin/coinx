@@ -66,16 +66,11 @@ def _merge_request_headers(session, headers):
 
 
 def request_with_retry(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5, headers=None):
-    """Perform GET requests with bounded retry and a lightweight Binance cooldown."""
+    """Perform GET requests with bounded retry only."""
     attempt = 0
     request_headers = _merge_request_headers(session, headers)
-    rate_limit_group = 'default'
 
     while True:
-        wait_seconds = _binance_rate_limits.unavailable_remaining_seconds('binance', rate_limit_group)
-        if wait_seconds > 0:
-            raise BinanceRateLimitUnavailable(rate_limit_group, wait_seconds)
-
         try:
             request_kwargs = {'params': params, 'timeout': timeout}
             if request_headers is not None:
@@ -87,6 +82,50 @@ def request_with_retry(session, url, params=None, timeout=10, max_retries=3, bas
                 raise error
             response.raise_for_status()
             return response
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as exc:
+            response = getattr(exc, 'response', None)
+            if response is not None and response.status_code not in RETRYABLE_HTTP_STATUS_CODES:
+                raise exc
+
+            attempt += 1
+            if attempt > max_retries:
+                raise exc
+
+            delay = base_delay * (2 ** (attempt - 1))
+            if delay > 1.5:
+                delay = 1.5
+            logger.warning(
+                "请求失败，将在 %.2fs 后重试（第%d/%d次）: %s, 错误: %s",
+                delay,
+                attempt,
+                max_retries,
+                url,
+                exc,
+            )
+            time.sleep(delay)
+
+
+def request_with_binance_retry(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5, headers=None):
+    """Perform GET requests with bounded retry and a lightweight Binance cooldown."""
+    attempt = 0
+    request_headers = _merge_request_headers(session, headers)
+    rate_limit_group = 'default'
+
+    while True:
+        wait_seconds = _binance_rate_limits.unavailable_remaining_seconds('binance', rate_limit_group)
+        if wait_seconds > 0:
+            raise BinanceRateLimitUnavailable(rate_limit_group, wait_seconds)
+
+        try:
+            return request_with_retry(
+                session,
+                url,
+                params=params,
+                timeout=timeout,
+                max_retries=max_retries,
+                base_delay=base_delay,
+                headers=headers,
+            )
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as exc:
             response = getattr(exc, 'response', None)
             if response is not None and response.status_code not in RETRYABLE_HTTP_STATUS_CODES:
@@ -107,20 +146,6 @@ def request_with_retry(session, url, params=None, timeout=10, max_retries=3, bas
                         if 'retry' in key.lower() or 'weight' in key.lower()
                     },
                 )
-
             attempt += 1
-            if attempt > max_retries:
+            if attempt > 1:
                 raise exc
-
-            delay = base_delay * (2 ** (attempt - 1))
-            if delay > 1.5:
-                delay = 1.5
-            logger.warning(
-                "请求失败，将在 %.2fs 后重试（第%d/%d次）: %s, 错误: %s",
-                delay,
-                attempt,
-                max_retries,
-                url,
-                exc,
-            )
-            time.sleep(delay)

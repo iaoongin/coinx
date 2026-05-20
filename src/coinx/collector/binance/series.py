@@ -2,7 +2,7 @@
 
 from coinx.config import BINANCE_BASE_URL
 from coinx.utils import logger
-from coinx.collector.binance.client import get_session, request_with_retry
+from coinx.collector.binance.client import get_session, request_with_binance_retry
 from coinx.repositories.binance_series import upsert_series_records
 
 
@@ -27,7 +27,7 @@ def _to_float(value):
 def _request_series(path, params, session=None, timeout=10):
     http_session = session or get_session()
     url = f"{BINANCE_BASE_URL}{path}"
-    response = request_with_retry(http_session, url, params=params, timeout=timeout)
+    response = request_with_binance_retry(http_session, url, params=params, timeout=timeout)
     response.raise_for_status()
     return response.json()
 

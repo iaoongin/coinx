@@ -10,18 +10,18 @@ from .collector import (
     run_history_repair_job,
     run_series_repair_job,
 )
+from .collector.exchange_repair import resolve_repair_worker_count
 from .coin_manager import get_active_coins, update_coins_config
 from .config import (
     BINANCE_SERIES_REPAIR_INTERVAL,
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
     FETCH_COINS_TOP_VOLUME_COUNT,
+    ENABLED_EXCHANGES,
     REPAIR_HISTORY_COVERAGE_HOURS,
-    REPAIR_HISTORY_MAX_WORKERS,
     UPDATE_INTERVAL,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
-    REPAIR_ROLLING_MAX_WORKERS,
     REPAIR_ROLLING_POINTS,
     REPAIR_TRACKED_INTERVAL,
 )
@@ -125,6 +125,7 @@ def scheduled_repair_market_rolling():
     _mark_job_started('repair_market_rolling_job')
     try:
         score_symbols = get_market_structure_score_symbols()
+        worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
         if not score_symbols:
             _mark_job_finished(
                 'repair_market_rolling_job',
@@ -139,13 +140,13 @@ def scheduled_repair_market_rolling():
             len(score_symbols),
             ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
             REPAIR_ROLLING_POINTS,
-            REPAIR_ROLLING_MAX_WORKERS,
+            worker_count,
         )
         summary = repair_rolling_tracked_symbols(
             symbols=score_symbols,
             series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
             points=REPAIR_ROLLING_POINTS,
-            max_workers=REPAIR_ROLLING_MAX_WORKERS,
+            max_workers=worker_count,
         )
         _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
         precheck_complete = summary.get('precheck_skipped_count', 0)
@@ -186,6 +187,7 @@ if REPAIR_HISTORY_ENABLED:
         try:
             logger.info('开始执行低频历史补齐任务')
             symbols = get_active_coins()
+            worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
             if FETCH_COINS_ENABLED:
                 all_tickers = get_all_24hr_tickers()
                 if all_tickers:
@@ -204,11 +206,12 @@ if REPAIR_HISTORY_ENABLED:
                 len(symbols),
                 ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
                 REPAIR_HISTORY_COVERAGE_HOURS,
-                REPAIR_HISTORY_MAX_WORKERS,
+                worker_count,
             )
             summary = run_history_repair_job(
                 symbols=symbols,
                 series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                max_workers=worker_count,
             )
             _mark_job_finished('repair_market_history_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
             logger.info(

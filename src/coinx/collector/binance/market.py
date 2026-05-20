@@ -2,7 +2,7 @@ import time
 import requests
 from coinx.config import BINANCE_BASE_URL
 from coinx.utils import logger
-from .client import get_session, request_with_retry
+from .client import get_session, request_with_binance_retry
 
 def get_futures_kline_latest(symbol, interval):
     """获取期货K线的最新一根，返回字典包含 quoteVolume 与 takerBuyQuoteVolume 等"""
@@ -14,7 +14,7 @@ def get_futures_kline_latest(symbol, interval):
             'limit': 1
         }
         session = get_session()
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         if not data:
@@ -43,7 +43,7 @@ def aggregate_futures_kline(symbol, base_interval, count):
             'limit': max(1, min(1000, count))
         }
         session = get_session()
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         if not data:
@@ -78,7 +78,7 @@ def get_latest_price(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求最新价格数据: {url}?symbol={symbol}")
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -107,7 +107,7 @@ def get_24hr_ticker(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求24小时价格变化数据: {url}?symbol={symbol}")
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -138,7 +138,7 @@ def get_all_24hr_tickers():
         
         session = get_session()
         logger.info(f"请求所有币种24小时价格变化数据: {url}")
-        response = request_with_retry(session, url, timeout=20)
+        response = request_with_binance_retry(session, url, timeout=20)
         response.raise_for_status()
         data = response.json()
         
@@ -190,7 +190,7 @@ def get_open_interest(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求持仓量数据: {url}?symbol={symbol}")
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -235,7 +235,7 @@ def get_open_interest_history(symbol, interval, limit=2):
         # 使用会话
         session = get_session()
         logger.info(f"请求历史持仓量数据: {url}?symbol={symbol}&period={interval}&limit={limit}")
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -295,7 +295,7 @@ def get_funding_rate(symbol):
         # 使用会话
         session = get_session()
         logger.info(f"请求资金费率数据: {url}?symbol={symbol}")
-        response = request_with_retry(session, url, params=params, timeout=10)
+        response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -328,7 +328,7 @@ def get_all_funding_rates():
         url = f"{BINANCE_BASE_URL}/fapi/v1/premiumIndex"
         session = get_session()
         logger.info("开始加载全量资金费率: exchange=binance url=%s", url)
-        response = request_with_retry(session, url, timeout=10)
+        response = request_with_binance_retry(session, url, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -398,7 +398,7 @@ def get_exchange_info():
         # 使用会话
         session = get_session()
         logger.info(f"请求交易所信息: {url}")
-        response = request_with_retry(session, url, timeout=10)
+        response = request_with_binance_retry(session, url, timeout=10)
         response.raise_for_status()
         data = response.json()
         

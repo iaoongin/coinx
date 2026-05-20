@@ -11,12 +11,16 @@ from homepage_contracts import (
 
 
 def test_homepage_series_returns_full_interval_contract(db_session):
+    from pytest import MonkeyPatch
+    monkeypatch = MonkeyPatch()
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     seed_complete_homepage_series(db_session)
 
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
     assert len(coins) == 1
     assert_complete_interval_contract(coins[0])
+    monkeypatch.undo()
 
 
 def test_homepage_series_contract_fails_when_168h_source_window_is_broken(db_session):

@@ -19,6 +19,7 @@ from coinx.collector import (
     repair_latest_tracked_symbols,
     repair_tracked_symbols,
 )
+from coinx.collector.exchange_repair import resolve_repair_worker_count
 from coinx.collector.binance.repair import (
     repair_rolling_tracked_symbols as repair_binance_rolling_tracked_symbols,
 )
@@ -38,9 +39,7 @@ from coinx.config import (
     REPAIR_HISTORY_COVERAGE_HOURS,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
-    REPAIR_HISTORY_MAX_WORKERS,
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
-    REPAIR_ROLLING_MAX_WORKERS,
     REPAIR_ROLLING_POINTS,
     TIME_INTERVALS,
 )
@@ -98,6 +97,10 @@ TASK_JOB_LABELS = {
     'binance_series_repair_job': 'Binance 历史修补',
     'update_coins_config_job': '币种配置刷新',
 }
+
+
+def _default_exchange_repair_workers(exchanges=None):
+    return resolve_repair_worker_count(exchanges or ENABLED_EXCHANGES)
 
 
 def _format_scheduler_job(job):
@@ -197,7 +200,7 @@ def _run_homepage_refresh(symbols, series_types, latest_only=False):
             symbols=symbols,
             series_types=series_types,
             points=points,
-            max_workers=REPAIR_ROLLING_MAX_WORKERS,
+            max_workers=_default_exchange_repair_workers(),
         )
         HOME_PAGE_LAST_REFRESH_SUMMARY = summary
         return summary
@@ -557,10 +560,10 @@ def get_binance_series_config():
                     'futures_page_limit': BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
                     'sleep_ms': BINANCE_SERIES_REPAIR_SLEEP_MS,
                     'rolling_points': REPAIR_ROLLING_POINTS,
-                    'rolling_max_workers': REPAIR_ROLLING_MAX_WORKERS,
+                    'rolling_max_workers': _default_exchange_repair_workers(),
                     'history_enabled': REPAIR_HISTORY_ENABLED,
                     'history_interval': REPAIR_HISTORY_INTERVAL,
-                    'history_max_workers': REPAIR_HISTORY_MAX_WORKERS,
+                    'history_max_workers': _default_exchange_repair_workers(),
                     'history_symbol_batch_size': REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
                     'history_coverage_hours': REPAIR_HISTORY_COVERAGE_HOURS,
                 },

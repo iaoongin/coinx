@@ -120,6 +120,13 @@ def _page_end_time(start_time, end_time, page_limit, period='5m'):
     return min(end_time, start_time + max(page_limit - 1, 0) * _period_to_ms(period))
 
 
+def resolve_repair_worker_count(exchanges=None, max_workers=None):
+    resolved_exchanges = list(exchanges or ENABLED_EXCHANGES)
+    if max_workers is not None:
+        return max(1, int(max_workers))
+    return max(1, len(resolved_exchanges))
+
+
 def _active_series_types(adapter, series_types):
     requested_types = tuple(series_types or HOMEPAGE_SERIES_TYPES)
     return [series_type for series_type in requested_types if series_type in adapter.supported_series_types]

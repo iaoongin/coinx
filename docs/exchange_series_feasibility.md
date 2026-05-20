@@ -2,14 +2,20 @@
 
 ## 目的
 
-这份文档记录当前代码里三家交易所在以下几类数据上的实际支持情况，避免后续讨论时把“官方接口可能支持什么”和“项目当前已经实现什么”混在一起：
+这份文档记录当前代码里四家交易所在以下几类数据上的支持情况，避免后续讨论时把“官方接口可能支持什么”“项目当前已经实现什么”和“业务当前实际在消费什么”混在一起：
 
 - `klines`：历史 K 线
 - `open_interest_hist`：历史持仓量
 - `taker_buy_sell_vol`：主动买卖成交量
 - `funding_rate`：资金费率
 
-本文档只描述当前代码实现，不代表交易所官方接口的全部能力。
+本文档统一区分三层口径：
+
+- `官方支持`：只写官方文档已核实的能力或周期
+- `项目当前实现`：只写当前仓库已经接入的能力
+- `业务当前实际使用`：只写调度、修补、页面当前实际在消费的能力
+
+除非明确写成“官方支持”，否则下文不代表交易所官方接口的全部能力。
 
 ## 术语说明
 
@@ -23,6 +29,17 @@
 - `buy_vol`：主动买量
 - `sell_vol`：主动卖量
 - `buy_sell_ratio`：主动买卖比
+
+## 官方周期支持（已核实）
+
+下表只汇总本轮已经从官方文档直接核到的周期支持，不包含推断项。若某类接口官方已确认存在但当前未拿到周期枚举原文，会明确标注“待核实”。
+
+| 交易所 | K 线官方周期 | OI / 多空比 / taker 统计官方周期 |
+|---|---|---|
+| Binance | `1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M` | `5m 15m 30m 1h 2h 4h 6h 12h 1d` |
+| OKX | `1m 3m 5m 15m 30m 1H 2H 4H 6H 12H 1D 1W 1M 3M 6M 1Y`，另有 UTC 版本 | `5m 1H 1D` |
+| Bybit | `1 3 5 15 30 60 120 240 360 720 D W M` | `5min 15min 30min 1h 4h 1d` |
+| Gate | `10s 1m 5m 15m 30m 1h 4h 8h 1d 7d 30d` | `10s 1m 5m 15m 30m 1h 4h 8h 1d 7d` |
 
 ## 当前实现结论
 
@@ -45,7 +62,7 @@
 
 结论：
 
-- Binance 目前是三家里数据最完整的
+- Binance 目前是四家里数据最完整的
 - 既能从 K 线拿到主动买字段，也有独立主动买卖接口
 
 ### OKX
@@ -69,6 +86,22 @@
 - OKX 的 K 线当前只适合做价格、成交量、成交额类分析
 - 如果需要主动买卖压力，应该优先依赖 `taker_buy_sell_vol`（主动买卖成交量）接口
 - 不应把 Binance K 线里的 `taker_buy_*` 能力直接类比到 OKX
+
+#### OKX Rubik 官方已确认接口
+
+以下接口已从 OKX 官方文档、changelog 或官方接口实际返回确认存在；其中 `open-interest-volume` 的 `period` 已确认支持 `5m 1H 1D`，并且需要使用大写 `1H` / `1D`：
+
+- `Get contract open interest history`
+- `Get contract taker volume`
+- `Get top traders contract long/short ratio`
+- `Get top traders contract long/short ratio (by position)`
+- `Get contract long/short ratio`
+
+补充说明：
+
+- `GET /api/v5/rubik/stat/contracts/open-interest-volume` 传 `period=1h` 会返回 `51000`
+- 官方返回的错误提示明确为 `support [5m,1H,1D]`
+- 因此项目里 OKX OI 的逻辑长周期虽然仍按 `1h` 处理，但请求与存储口径必须映射为 `1H`
 
 #### OKX 当前实际使用接口与限流
 
@@ -103,13 +136,14 @@
 - Bybit 当前只支持基础 K 线和持仓量能力
 - 目前没有独立主动买卖成交量数据接入
 
-## 三家交易所对照表
+## 四家交易所对照表
 
 | 交易所 | K 线成交量 | K 线成交额 | K 线主动买入量 | K 线主动买入额 | 独立主动买卖接口 | 历史持仓量 | 持仓价值 | 资金费率 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Binance | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | OKX | 支持 | 支持 | 不支持 | 不支持 | 支持 | 支持 | 支持 | 支持 |
 | Bybit | 支持 | 支持 | 不支持 | 不支持 | 不支持 | 支持 | 不支持 | 支持 |
+| Gate | 支持 | 支持 | 不支持 | 不支持 | 不支持 | 支持 | 不支持 | 支持 |
 
 ## 对首页的影响
 
@@ -166,6 +200,7 @@
 - `sell_vol`：主动卖量
 
 这样可以避免把“主动买入字段”和“完整主动买卖拆分”混为一谈。
+
 ## Gate / Bybit 限流补充
 
 ### Bybit 当前实际使用接口与限流
@@ -249,3 +284,12 @@
 - 本轮实现不要求新增任何必填环境变量。
 - 仍兼容已有的 `OKX_RUBIK_MIN_INTERVAL_MS`、`OKX_429_RETRY_FALLBACK_SECONDS`、`GATE_MIN_INTERVAL_MS`、`GATE_403_RETRY_FALLBACK_SECONDS`。
 - 如果没有配置，代码会直接使用内置保守默认值。
+
+## 官方来源
+
+- Binance Skills Hub / USDⓈ-M Futures: [USDS Futures](https://www.binance.com/hu/skills/detail/binance/derivatives-trading-usds-futures)
+- Bybit V5 `Get Kline`: [docs](https://bybit-exchange.github.io/docs/v5/market/kline)
+- Bybit V5 `Get Open Interest`: [docs](https://bybit-exchange.github.io/docs/v5/market/open-interest)
+- Gate API v4 Futures: [docs](https://www.gate.com/docs/developers/apiv4/en/futures/)
+- OKX API docs v5: [docs-v5](https://www.okx.com/docs-v5/en)
+- OKX API changelog: [log_en](https://www.okx.com/docs-v5/log_en/)

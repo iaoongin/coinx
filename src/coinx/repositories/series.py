@@ -1,8 +1,11 @@
+import time
+
 from sqlalchemy import tuple_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from coinx.database import get_session
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
+from coinx.utils import logger
 
 
 SERIES_MODEL_MAP = {
@@ -17,12 +20,29 @@ SERIES_KEY_FIELDS = {
     'taker_buy_sell_vol': ('exchange', 'symbol', 'period', 'event_time'),
 }
 
+MYSQL_DEADLOCK_ERROR_CODE = 1213
+MYSQL_DEADLOCK_MAX_RETRIES = 3
+MYSQL_DEADLOCK_RETRY_DELAY_SECONDS = 0.2
+
 
 def get_series_model(series_type):
     try:
         return SERIES_MODEL_MAP[series_type]
     except KeyError as exc:
         raise ValueError(f"不支持的市场序列类型: {series_type}") from exc
+
+
+def _is_mysql_deadlock_error(exc):
+    original = getattr(exc, 'orig', None)
+    if original is None:
+        return False
+    args = getattr(original, 'args', ()) or ()
+    if not args:
+        return False
+    try:
+        return int(args[0]) == MYSQL_DEADLOCK_ERROR_CODE
+    except (TypeError, ValueError):
+        return False
 
 
 def upsert_series_records(exchange, series_type, records, session=None):
@@ -51,9 +71,24 @@ def upsert_series_records(exchange, series_type, records, session=None):
                 for column in model.__table__.columns
                 if column.name not in ('id', 'created_at')
             }
-            db.execute(statement.on_duplicate_key_update(**update_columns))
-            db.commit()
-            return len(values_list)
+            for attempt in range(1, MYSQL_DEADLOCK_MAX_RETRIES + 1):
+                try:
+                    db.execute(statement.on_duplicate_key_update(**update_columns))
+                    db.commit()
+                    return len(values_list)
+                except Exception as exc:
+                    db.rollback()
+                    if not _is_mysql_deadlock_error(exc) or attempt >= MYSQL_DEADLOCK_MAX_RETRIES:
+                        raise
+                    logger.warning(
+                        'MySQL deadlock，准备重试市场序列写入: exchange=%s series_type=%s records=%d attempt=%d/%d',
+                        exchange,
+                        series_type,
+                        len(values_list),
+                        attempt,
+                        MYSQL_DEADLOCK_MAX_RETRIES,
+                    )
+                    time.sleep(MYSQL_DEADLOCK_RETRY_DELAY_SECONDS * attempt)
 
         key_values = [tuple(values[field] for field in key_fields) for values in values_list]
         key_columns = [getattr(model, field) for field in key_fields]

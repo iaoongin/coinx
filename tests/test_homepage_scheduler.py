@@ -9,6 +9,7 @@ def test_scheduled_repair_market_rolling_repairs_score_symbols(monkeypatch):
         calls['repair'] = {
             'symbols': symbols,
             'series_types': series_types,
+            'max_workers': kwargs.get('max_workers'),
         }
         return {
             'status': 'success',
@@ -21,6 +22,7 @@ def test_scheduled_repair_market_rolling_repairs_score_symbols(monkeypatch):
         }
 
     monkeypatch.setattr('coinx.scheduler.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT'])
+    monkeypatch.setattr('coinx.scheduler.ENABLED_EXCHANGES', ['binance', 'okx', 'bybit'])
     monkeypatch.setattr('coinx.scheduler.repair_rolling_tracked_symbols', fake_repair)
 
     scheduled_repair_market_rolling()
@@ -28,6 +30,7 @@ def test_scheduled_repair_market_rolling_repairs_score_symbols(monkeypatch):
     assert calls['repair'] == {
         'symbols': ['BTCUSDT', 'ETHUSDT'],
         'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+        'max_workers': 3,
     }
 
 
@@ -52,6 +55,7 @@ def test_scheduled_repair_market_history_repairs_active_symbols(monkeypatch):
         calls['history'] = {
             'symbols': symbols,
             'series_types': series_types,
+            'max_workers': kwargs.get('max_workers'),
         }
         return {
             'status': 'success',
@@ -64,6 +68,7 @@ def test_scheduled_repair_market_history_repairs_active_symbols(monkeypatch):
 
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT', 'QUSDT'])
     monkeypatch.setattr('coinx.scheduler.FETCH_COINS_ENABLED', False)
+    monkeypatch.setattr('coinx.scheduler.ENABLED_EXCHANGES', ['binance', 'okx'])
     monkeypatch.setattr('coinx.scheduler.run_history_repair_job', fake_history)
 
     scheduled_repair_market_history()
@@ -71,4 +76,5 @@ def test_scheduled_repair_market_history_repairs_active_symbols(monkeypatch):
     assert calls['history'] == {
         'symbols': ['BTCUSDT', 'QUSDT'],
         'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+        'max_workers': 2,
     }

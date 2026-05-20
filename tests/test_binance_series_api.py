@@ -105,6 +105,18 @@ def test_get_binance_series_config_api_returns_defaults():
     assert 'limit' in payload['data']['collect']
 
 
+def test_get_binance_series_config_api_returns_dynamic_worker_counts(monkeypatch):
+    monkeypatch.setattr('coinx.web.routes.api_data.ENABLED_EXCHANGES', ['binance', 'okx', 'bybit', 'gate'])
+    client = create_test_client()
+
+    response = client.get('/api/binance-series/config')
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['data']['repair']['rolling_max_workers'] == 4
+    assert payload['data']['repair']['history_max_workers'] == 4
+
+
 def test_collect_binance_series_batch_api_returns_summary(monkeypatch):
     def fake_collect_batch(symbols, periods, series_types=None, limit=30):
         assert symbols == ['BTCUSDT', 'ETHUSDT']

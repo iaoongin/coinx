@@ -112,12 +112,13 @@ def repair_rolling_tracked_symbols(
     )
 
 
-def run_history_repair_job(symbols=None, series_types=None, full_scan=False, exchanges=None):
+def run_history_repair_job(symbols=None, series_types=None, full_scan=False, exchanges=None, max_workers=None):
     return repair_history_symbols(
         symbols=symbols,
         series_types=series_types,
         exchanges=exchanges,
         full_scan=full_scan,
+        max_workers=max_workers,
     )
 
 
