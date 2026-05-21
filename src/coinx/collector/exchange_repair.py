@@ -804,13 +804,16 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
-            '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s',
+            '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
             exchange,
             result_stats['success_count'],
             result_stats['failure_count'],
             result_stats['skipped_count'],
             _format_reason_counts(group_results),
             format_duration_ms((time.perf_counter() - started) * 1000),
+            format_duration_breakdown(
+                sum_duration_breakdowns(item.get('duration_breakdown_ms') for item in group_results)
+            ),
         )
         return group_results
 
@@ -1089,13 +1092,16 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
-            '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s',
+            '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
             exchange,
             result_stats['success_count'],
             result_stats['failure_count'],
             result_stats['skipped_count'],
             _format_reason_counts(group_results),
             format_duration_ms((time.perf_counter() - started) * 1000),
+            format_duration_breakdown(
+                sum_duration_breakdowns(item.get('duration_breakdown_ms') for item in group_results)
+            ),
         )
         return group_results
 

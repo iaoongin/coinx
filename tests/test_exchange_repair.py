@@ -759,3 +759,33 @@ def test_exchange_history_repair_logs_fixed_chinese_stage_messages(db_session, m
     assert any('交易所执行开始: 模式=history' in message for message in info_logs)
     assert any('交易所执行完成: 模式=history' in message for message in info_logs)
     assert any('修补完成: 模式=history' in message for message in info_logs)
+
+
+def test_exchange_group_logs_duration_breakdown(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+    calls = []
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append((args[0] % args[1:]) if len(args) > 1 else args[0]),
+    )
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 1
+    assert any(
+        '交易所执行完成: 模式=rolling' in message
+        and '累计耗时分类=' in message
+        and 'API=' in message
+        for message in info_logs
+    )
