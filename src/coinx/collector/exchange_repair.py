@@ -27,6 +27,7 @@ from coinx.config import (
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
     REPAIR_ROLLING_MAX_WORKERS,
     REPAIR_ROLLING_POINTS,
+    REPAIR_ROLLING_WRITE_BATCH_SIZE,
 )
 from coinx.database import get_session
 from coinx.repositories.series import get_existing_series_timestamps, upsert_series_records
@@ -122,6 +123,12 @@ def _build_grouped_duration_breakdowns(results, field):
         grouped.setdefault(group_key, empty_duration_breakdown())
         add_duration_breakdown(grouped[group_key], item.get('duration_breakdown_ms'))
     return {key: round_duration_breakdown(value) for key, value in grouped.items()}
+
+
+def _chunks(items, size):
+    size = max(1, int(size or 1))
+    for index in range(0, len(items), size):
+        yield items[index:index + size]
 
 
 def _group_contiguous_times(times, period='5m'):
@@ -456,6 +463,47 @@ def _filter_budget_unavailable_tasks(tasks, mode):
     return runnable, skipped
 
 
+def _flush_rolling_group_records(exchange, group_results, db_session=None):
+    pending_by_series = {}
+    result_refs_by_series = {}
+    for result in group_results:
+        pending_records = result.pop('pending_records', None) or []
+        if not pending_records:
+            continue
+        series_type = result.get('series_type')
+        pending_by_series.setdefault(series_type, []).extend(pending_records)
+        result_refs_by_series.setdefault(series_type, []).append((result, len(pending_records)))
+
+    for series_type, records in pending_by_series.items():
+        write_breakdown = empty_duration_breakdown()
+        affected = 0
+        with timed_category(write_breakdown, 'db_write_ms'):
+            for batch in _chunks(records, REPAIR_ROLLING_WRITE_BATCH_SIZE):
+                affected += upsert_series_records(exchange, series_type, batch, session=db_session)
+
+        refs = result_refs_by_series.get(series_type) or []
+        total_records = sum(record_count for _, record_count in refs)
+        allocated_affected = 0
+        allocated_write_ms = 0.0
+        db_write_ms = write_breakdown.get('db_write_ms', 0.0)
+        for index, (result, record_count) in enumerate(refs):
+            if index == len(refs) - 1:
+                result_affected = max(0, affected - allocated_affected)
+                result_write_ms = max(0.0, db_write_ms - allocated_write_ms)
+            else:
+                ratio = record_count / total_records if total_records else 0
+                result_affected = int(round(affected * ratio))
+                result_write_ms = db_write_ms * ratio
+                allocated_affected += result_affected
+                allocated_write_ms += result_write_ms
+            result['affected'] = result_affected
+            breakdown = result.get('duration_breakdown_ms') or empty_duration_breakdown()
+            add_duration_breakdown(breakdown, {'db_write_ms': result_write_ms})
+            result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
+
+    return group_results
+
+
 def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_session=None, group_runner=None):
     grouped_tasks = {}
     for task in tasks:
@@ -494,11 +542,11 @@ def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_sessi
 def _repair_rolling_series(adapter, symbol, series_type, period, target_times, now_ms, http_session=None, db_session=None):
     breakdown = empty_duration_breakdown()
     time_field = _get_time_field(series_type)
-    affected = 0
     repaired_records = 0
     pages = 0
     window_precise = adapter.supports_time_window(series_type)
     latest_event_time = None
+    pending_records = []
 
     groups = _group_contiguous_times(target_times, period=period) if window_precise else [sorted(set(target_times))]
     for group in groups:
@@ -536,8 +584,7 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
         if not filtered_records:
             continue
 
-        with timed_category(breakdown, 'db_write_ms'):
-            affected += upsert_series_records(adapter.exchange_id, series_type, filtered_records, session=db_session)
+        pending_records.extend(filtered_records)
         repaired_records += len(filtered_records)
         pages += 1
 
@@ -571,10 +618,11 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
             'mode': 'rolling',
             'window_precise': window_precise,
             'target_times': sorted(target_times),
-            'affected': affected,
+            'affected': 0,
             'records': repaired_records,
             'pages': pages,
             'latest_event_time': latest_event_time,
+            'pending_records': pending_records,
         },
         breakdown,
     )
@@ -802,6 +850,7 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
+        group_results = _flush_rolling_group_records(exchange, group_results, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',

@@ -789,3 +789,34 @@ def test_exchange_group_logs_duration_breakdown(db_session, monkeypatch):
         and 'API=' in message
         for message in info_logs
     )
+
+
+def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    upsert_calls = []
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_existing_series_timestamps', lambda **kwargs: {})
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records',
+        lambda exchange, series_type, records, session=None: upsert_calls.append(
+            (exchange, series_type, [record['open_time'] for record in records])
+        ) or len(records),
+    )
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT', 'ETHUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=None,
+    )
+
+    assert summary['success_count'] == 2
+    assert len(calls) == 2
+    assert upsert_calls == [('binance', 'klines', [1200000, 1200000])]
+    assert [item['affected'] for item in summary['results']] == [1, 1]
