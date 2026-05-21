@@ -122,12 +122,18 @@ def is_symbol_supported(symbol, series_type=None, session=None):
 def _okx_rate_limit_group(path):
     if path.startswith('/api/v5/rubik/'):
         return 'rubik'
+    if path == '/api/v5/public/funding-rate':
+        return 'funding'
     return 'default'
 
 
 def _okx_min_interval_ms(group):
     if group == 'rubik':
         return max(int(OKX_RUBIK_MIN_INTERVAL_MS or 0), 400)
+    if group == 'funding':
+        return 200
+    if group == 'default':
+        return 100
     return 0
 
 

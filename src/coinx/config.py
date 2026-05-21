@@ -93,13 +93,13 @@ BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://proxy.yffjglcms.com/fapi
 ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx,gate', list)
 PRIMARY_PRICE_EXCHANGE = get_env('PRIMARY_PRICE_EXCHANGE', 'binance')
 OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://proxy.yffjglcms.com/www.okx.com')
-OKX_RUBIK_MIN_INTERVAL_MS = get_env('OKX_RUBIK_MIN_INTERVAL_MS', 10, int)
+OKX_RUBIK_MIN_INTERVAL_MS = get_env('OKX_RUBIK_MIN_INTERVAL_MS', 500, int)
 OKX_429_RETRY_FALLBACK_SECONDS = get_env('OKX_429_RETRY_FALLBACK_SECONDS', 5, int)
 BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://proxy.yffjglcms.com/api.bybit.com')
 BYBIT_CATEGORY = get_env('BYBIT_CATEGORY', 'linear')
 GATE_BASE_URL = get_env('GATE_BASE_URL', 'https://proxy.yffjglcms.com/api.gateio.ws')
 GATE_SETTLE = get_env('GATE_SETTLE', 'usdt')
-GATE_MIN_INTERVAL_MS = get_env('GATE_MIN_INTERVAL_MS', 1200, int)
+GATE_MIN_INTERVAL_MS = get_env('GATE_MIN_INTERVAL_MS', 60, int)
 GATE_403_RETRY_FALLBACK_SECONDS = get_env('GATE_403_RETRY_FALLBACK_SECONDS', 8, int)
 
 # 币种拉取任务配置

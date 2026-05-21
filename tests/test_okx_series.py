@@ -272,3 +272,14 @@ def test_okx_rubik_requests_respect_min_interval(monkeypatch):
     okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
 
     assert sleep_calls == [0.7]
+
+
+def test_okx_min_intervals_are_grouped_by_endpoint(monkeypatch):
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 500)
+
+    assert okx_series._okx_rate_limit_group('/api/v5/rubik/stat/taker-volume') == 'rubik'
+    assert okx_series._okx_min_interval_ms('rubik') == 500
+    assert okx_series._okx_rate_limit_group('/api/v5/public/funding-rate') == 'funding'
+    assert okx_series._okx_min_interval_ms('funding') == 200
+    assert okx_series._okx_rate_limit_group('/api/v5/market/history-candles') == 'default'
+    assert okx_series._okx_min_interval_ms('default') == 100
