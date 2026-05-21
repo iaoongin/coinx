@@ -1,2 +1,2 @@
 git pull
-docker compose restart
+docker compose up -d --force-recreate
