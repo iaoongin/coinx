@@ -21,6 +21,13 @@ def _clear_rate_limit_states():
     gate_series.clear_gate_rate_limit_state()
 
 
+def _assert_duration_breakdown(summary):
+    breakdown = summary['duration_breakdown_ms']
+    for key in ('api_ms', 'rate_limit_wait_ms', 'db_read_ms', 'db_write_ms', 'parse_ms', 'other_ms'):
+        assert key in breakdown
+        assert breakdown[key] >= 0
+
+
 @dataclass(frozen=True)
 class FakeAdapter:
     exchange_id: str
@@ -130,6 +137,9 @@ def test_exchange_rolling_repair_uses_adapter_and_skips_existing_points(db_sessi
 
     assert summary['mode'] == 'rolling'
     assert summary['success_count'] == 1
+    _assert_duration_breakdown(summary)
+    assert 'binance' in summary['duration_breakdown_by_exchange']
+    assert 'klines' in summary['duration_breakdown_by_series_type']
     assert calls == [('binance', 'klines', 'BTCUSDT', 2, 900000, 900000)]
     assert [row.open_time for row in rows] == [600000, 900000, 1200000]
 
@@ -154,6 +164,9 @@ def test_exchange_history_repair_marks_non_precise_windows(db_session, monkeypat
     row = db_session.query(MarketOpenInterestHist).one()
 
     assert summary['mode'] == 'history'
+    _assert_duration_breakdown(summary)
+    assert 'okx' in summary['duration_breakdown_by_exchange']
+    assert 'open_interest_hist' in summary['duration_breakdown_by_series_type']
     assert summary['exchange_summaries']['okx']['results'][0]['window_precise'] is False
     assert calls == [('okx', 'open_interest_hist', 'BTCUSDT', 500, None, None)]
     assert row.exchange == 'okx'
@@ -566,6 +579,8 @@ def test_exchange_rolling_repair_skips_okx_when_budget_unavailable(db_session, m
     assert summary['failure_count'] == 0
     assert summary['skipped_count'] == 1
     assert summary['results'][0]['reason'] == 'okx_budget_unavailable'
+    assert summary['results'][0]['duration_breakdown_ms']['cooldown_skip_ms'] == 5000
+    assert summary['duration_breakdown_ms']['cooldown_skip_ms'] == 5000
 
 
 def test_exchange_history_repair_skips_bybit_when_budget_unavailable(db_session, monkeypatch):
@@ -607,6 +622,8 @@ def test_exchange_history_repair_skips_bybit_when_budget_unavailable(db_session,
     assert summary['failure_count'] == 0
     assert summary['skipped_count'] == 1
     assert summary['results'][0]['reason'] == 'bybit_budget_unavailable'
+    assert summary['results'][0]['duration_breakdown_ms']['cooldown_skip_ms'] == 5000
+    assert summary['duration_breakdown_ms']['cooldown_skip_ms'] == 5000
 
 
 def test_exchange_history_repair_skips_binance_when_budget_unavailable(db_session, monkeypatch):

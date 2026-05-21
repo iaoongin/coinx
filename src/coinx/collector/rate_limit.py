@@ -1,7 +1,25 @@
+from __future__ import annotations
+
 import time
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
-from threading import Lock
+from threading import Lock, local
+
+
+_rate_limit_wait_state = local()
+
+
+def record_rate_limit_wait_seconds(seconds):
+    seconds = max(0.0, float(seconds or 0.0))
+    if seconds <= 0:
+        return
+    _rate_limit_wait_state.seconds = getattr(_rate_limit_wait_state, 'seconds', 0.0) + seconds
+
+
+def consume_rate_limit_wait_seconds():
+    seconds = getattr(_rate_limit_wait_state, 'seconds', 0.0)
+    _rate_limit_wait_state.seconds = 0.0
+    return seconds
 
 
 class RateLimitUnavailable(RuntimeError):
@@ -68,6 +86,7 @@ class RateLimitRegistry:
 
     def wait_for_slot(self, exchange, group, min_interval_ms=0, consume_budget=False):
         min_interval_seconds = max(0.0, float(min_interval_ms) / 1000.0)
+        total_wait_seconds = 0.0
         while True:
             with self._lock:
                 state = self._states.setdefault((exchange, group), RateLimitState(last_headers={}))
@@ -92,7 +111,9 @@ class RateLimitRegistry:
                     state.next_allowed_at = max(state.next_allowed_at, now + min_interval_seconds)
                     if consume_budget and state.remain is not None and state.remain > 0:
                         state.remain -= 1
-                    return
+                    return total_wait_seconds
+            total_wait_seconds += wait_seconds
+            record_rate_limit_wait_seconds(wait_seconds)
             time.sleep(wait_seconds)
 
     def mark_cooldown(self, exchange, group, wait_seconds, headers=None, budget_unavailable=False):

@@ -26,6 +26,13 @@ def _make_kline_payload(open_time):
     ]
 
 
+def _assert_duration_breakdown(summary):
+    breakdown = summary['duration_breakdown_ms']
+    for key in ('api_ms', 'rate_limit_wait_ms', 'db_read_ms', 'db_write_ms', 'parse_ms', 'other_ms'):
+        assert key in breakdown
+        assert breakdown[key] >= 0
+
+
 def test_repair_single_series_pages_and_upserts_records(db_session, monkeypatch):
     monkeypatch.setattr(
         'coinx.collector.binance.repair.build_repair_window',
@@ -65,6 +72,8 @@ def test_repair_single_series_pages_and_upserts_records(db_session, monkeypatch)
     assert summary['status'] == 'success'
     assert summary['pages'] == 1
     assert summary['affected'] == 2
+    assert summary['duration_breakdown_ms']['api_ms'] >= 0
+    assert summary['duration_breakdown_ms']['db_write_ms'] >= 0
     assert len(rows) == 2
     assert rows[-1].open_time == 300000
     assert calls == [
@@ -260,11 +269,41 @@ def test_repair_single_series_pages_futures_history_by_time_windows(db_session, 
     assert summary['status'] == 'success'
     assert summary['affected'] == 3
     assert summary['records'] == 3
+    assert summary['duration_breakdown_ms']['api_ms'] >= 0
     assert [row.event_time for row in rows] == [0, 300000, 600000]
     assert calls == [
         (0, 300000),
         (600000, 900000),
     ]
+
+
+def test_repair_single_series_counts_configured_sleep_as_rate_limit_wait(db_session, monkeypatch):
+    monkeypatch.setattr(
+        'coinx.collector.binance.repair.build_repair_window',
+        lambda *args, **kwargs: {
+            'start_time': 0,
+            'end_time': 900000,
+            'has_gap': True,
+        },
+    )
+    monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT', 2)
+    monkeypatch.setattr('coinx.collector.binance.repair.BINANCE_SERIES_REPAIR_SLEEP_MS', 250)
+    monkeypatch.setattr('coinx.collector.binance.repair.time.sleep', lambda seconds: None)
+
+    def fake_fetch(series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+        return [_make_kline_payload(start_time)]
+
+    monkeypatch.setattr('coinx.collector.binance.repair.fetch_series_payload', fake_fetch)
+
+    summary = repair_single_series(
+        symbol='BTCUSDT',
+        series_type='klines',
+        now_ms=900000,
+        db_session=db_session,
+    )
+
+    assert summary['status'] == 'success'
+    assert summary['duration_breakdown_ms']['rate_limit_wait_ms'] == 250
 
 
 def test_repair_single_series_continues_after_empty_head_page(db_session, monkeypatch):

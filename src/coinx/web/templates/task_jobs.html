@@ -496,7 +496,13 @@
                     <span class="cell-mono">结束：[[ formatTime(job.runtime?.last_finished_at_ms) ]]</span>
                   </div>
                 </td>
-                <td><span class="cell-mono">[[ formatDuration(job.runtime?.last_duration_ms) ]] / [[ job.max_instances ?? '--' ]]</span></td>
+                <td>
+                  <div class="cell-stack">
+                    <span class="cell-mono">[[ formatDuration(job.runtime?.last_duration_ms) ]] / [[ job.max_instances ?? '--' ]]</span>
+                    <span class="cell-mono" v-if="hasDurationBreakdown(job)">[[ formatDurationBreakdown(job.runtime?.last_summary?.duration_breakdown_ms) ]]</span>
+                    <span class="cell-mono" v-if="cooldownSkipMs(job) > 0">冷却剩余：[[ formatDuration(cooldownSkipMs(job)) ]]</span>
+                  </div>
+                </td>
                 <td>
                   <div class="cell-stack">
                     <span class="cell-mono">[[ job.runtime?.last_error || '--' ]]</span>
@@ -567,6 +573,30 @@
           if (durationMs === null || durationMs === undefined) return '--';
           if (durationMs < 1000) return `${durationMs.toFixed(0)}ms`;
           return `${(durationMs / 1000).toFixed(2)}s`;
+        };
+
+        const durationValue = (breakdown, key) => Number(breakdown?.[key] || 0);
+
+        const hasDurationBreakdown = (job) => {
+          const breakdown = job.runtime?.last_summary?.duration_breakdown_ms;
+          return !!breakdown && Object.values(breakdown).some((value) => Number(value || 0) > 0);
+        };
+
+        const cooldownSkipMs = (job) => durationValue(job.runtime?.last_summary?.duration_breakdown_ms, 'cooldown_skip_ms');
+
+        const formatDurationBreakdown = (breakdown) => {
+          if (!breakdown) return '';
+          const parts = [
+            ['API', 'api_ms'],
+            ['限流等待', 'rate_limit_wait_ms'],
+            ['读库', 'db_read_ms'],
+            ['写库', 'db_write_ms'],
+            ['解析', 'parse_ms'],
+            ['其他', 'other_ms'],
+          ];
+          return parts
+            .map(([label, key]) => `${label} ${formatDuration(durationValue(breakdown, key))}`)
+            .join(' / ');
         };
 
         const statusText = (status, registered = true) => {
@@ -673,6 +703,9 @@
           inactiveCount,
           formatTime,
           formatDuration,
+          hasDurationBreakdown,
+          cooldownSkipMs,
+          formatDurationBreakdown,
           statusText,
           statusClass,
           statusLabel,

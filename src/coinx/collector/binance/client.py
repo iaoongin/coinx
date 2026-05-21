@@ -2,7 +2,12 @@ import time
 
 import requests
 
-from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable, parse_retry_after_seconds
+from coinx.collector.rate_limit import (
+    RateLimitRegistry,
+    RateLimitUnavailable,
+    parse_retry_after_seconds,
+    record_rate_limit_wait_seconds,
+)
 from coinx.config import HTTPS_PROXY_URL, PROXY_URL, USE_PROXY
 from coinx.utils import logger
 
@@ -102,6 +107,7 @@ def request_with_retry(session, url, params=None, timeout=10, max_retries=3, bas
                 url,
                 exc,
             )
+            record_rate_limit_wait_seconds(delay)
             time.sleep(delay)
 
 

@@ -51,7 +51,13 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     ))
     monkeypatch.setattr(
         'coinx.web.routes.api_data.get_all_job_runtime_metadata',
-        lambda: {'job-a': {'running': False, 'last_status': 'success'}},
+        lambda: {
+            'job-a': {
+                'running': False,
+                'last_status': 'success',
+                'last_summary': {'duration_breakdown_ms': {'api_ms': 12.0}},
+            }
+        },
     )
 
     client = create_test_client()
@@ -64,6 +70,7 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     assert payload['data']['jobs'][0]['id'] == 'job-a'
     assert payload['data']['jobs'][0]['registered'] is True
     assert payload['data']['jobs'][0]['paused'] is False
+    assert payload['data']['jobs'][0]['runtime']['last_summary']['duration_breakdown_ms']['api_ms'] == 12.0
 
 
 def test_control_task_job_runs_job(monkeypatch):

@@ -17,6 +17,16 @@ from coinx.config import (
     REPAIR_ROLLING_POINTS,
 )
 from coinx.database import get_session
+from coinx.collector.timing import (
+    add_duration_breakdown,
+    attach_other_duration,
+    empty_duration_breakdown,
+    format_duration_breakdown,
+    record_sleep_ms,
+    round_duration_breakdown,
+    sum_duration_breakdowns,
+    timed_category,
+)
 from coinx.repositories.binance_series import (
     get_earliest_series_timestamp as get_earliest_series_timestamp_from_repo,
     get_existing_series_timestamps,
@@ -38,6 +48,44 @@ DEFAULT_REPAIR_SERIES_TYPES = [
     'taker_buy_sell_vol',
 ]
 _history_symbol_cursor = 0
+
+
+def _result_with_breakdown(result, breakdown):
+    result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
+    return result
+
+
+def _build_grouped_duration_breakdowns(results, field):
+    grouped = {}
+    for item in results or []:
+        group_key = item.get(field)
+        if not group_key:
+            continue
+        grouped.setdefault(group_key, empty_duration_breakdown())
+        add_duration_breakdown(grouped[group_key], item.get('duration_breakdown_ms'))
+    return {key: round_duration_breakdown(value) for key, value in grouped.items()}
+
+
+def _finalize_repair_summary_timing(summary, started_at):
+    duration_ms = summary.get('duration_ms')
+    if duration_ms is None:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        summary['duration_ms'] = duration_ms
+    summary['duration_breakdown_ms'] = attach_other_duration(
+        summary.get('duration_breakdown_ms') or sum_duration_breakdowns(
+            item.get('duration_breakdown_ms') for item in summary.get('results') or []
+        ),
+        duration_ms,
+    )
+    summary.setdefault(
+        'duration_breakdown_by_series_type',
+        _build_grouped_duration_breakdowns(summary.get('results') or [], 'series_type'),
+    )
+    return summary
+
+
+def _log_repair_summary_timing(message, summary):
+    logger.info(f"{message} 耗时分类={format_duration_breakdown(summary.get('duration_breakdown_ms'))}")
 
 
 def floor_to_completed_5m(now_ms):
@@ -214,23 +262,27 @@ def _get_page_end_time(cursor_time, end_time, page_limit):
 
 
 def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db_session=None, coverage_hours=None):
+    breakdown = empty_duration_breakdown()
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    window = build_repair_window(symbol, series_type, current_time_ms, session=db_session, coverage_hours=coverage_hours)
+    with timed_category(breakdown, 'db_read_ms'):
+        window = build_repair_window(symbol, series_type, current_time_ms, session=db_session, coverage_hours=coverage_hours)
 
     latest_local_timestamp = window.get('latest_local_timestamp')
     end_time = window.get('end_time')
     if latest_local_timestamp is not None and end_time is not None and latest_local_timestamp > end_time:
-        deleted = _trim_series_after_target_end(
-            symbol=symbol,
-            series_type=series_type,
-            target_end_time=end_time,
-            session=db_session,
-        )
+        with timed_category(breakdown, 'db_write_ms'):
+            deleted = _trim_series_after_target_end(
+                symbol=symbol,
+                series_type=series_type,
+                target_end_time=end_time,
+                session=db_session,
+            )
         logger.info(
             f"修补前清理未收盘序列: 币种={symbol}, 类型={series_type}, "
             f"清理数量={deleted}, 目标结束时间={end_time}"
         )
-        window = build_repair_window(symbol, series_type, current_time_ms, session=db_session, coverage_hours=coverage_hours)
+        with timed_category(breakdown, 'db_read_ms'):
+            window = build_repair_window(symbol, series_type, current_time_ms, session=db_session, coverage_hours=coverage_hours)
 
     logger.info(
         f"开始修补历史序列: 币种={symbol}, 类型={series_type}, 周期={BINANCE_SERIES_REPAIR_PERIOD}, "
@@ -243,19 +295,27 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
             f"跳过历史序列修补: 币种={symbol}, 类型={series_type}, "
             f"原因=无缺口, 本地最新时间={window.get('latest_local_timestamp')}"
         )
-        return {
-            'symbol': symbol,
-            'series_type': series_type,
-            'period': BINANCE_SERIES_REPAIR_PERIOD,
-            'status': 'skipped',
-            'start_time': window['start_time'],
-            'end_time': window['end_time'],
-            'affected': 0,
-            'pages': 0,
-        }
+        return _result_with_breakdown(
+            {
+                'symbol': symbol,
+                'series_type': series_type,
+                'period': BINANCE_SERIES_REPAIR_PERIOD,
+                'status': 'skipped',
+                'start_time': window['start_time'],
+                'end_time': window['end_time'],
+                'affected': 0,
+                'pages': 0,
+            },
+            breakdown,
+        )
 
     if series_type == 'taker_buy_sell_vol':
-        return _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current_time_ms, coverage_hours=coverage_hours)
+        result = _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current_time_ms, coverage_hours=coverage_hours)
+        combined = empty_duration_breakdown()
+        add_duration_breakdown(combined, breakdown)
+        add_duration_breakdown(combined, result.get('duration_breakdown_ms'))
+        result['duration_breakdown_ms'] = round_duration_breakdown(combined)
+        return result
 
     page_limit = _get_page_limit(series_type)
     time_field = _get_time_field(series_type)
@@ -273,32 +333,34 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
             f"修补分页请求: 币种={symbol}, 类型={series_type}, 页码={request_pages}, "
             f"游标时间={cursor_time}, 分页结束时间={page_end_time}, 窗口结束时间={window['end_time']}, 单页上限={page_limit}"
         )
-        payload = fetch_series_payload(
-            series_type=series_type,
-            symbol=symbol,
-            period=BINANCE_SERIES_REPAIR_PERIOD,
-            limit=page_limit,
-            session=http_session,
-            start_time=cursor_time,
-            end_time=page_end_time,
-        )
-        records = parse_series_payload(
-            series_type=series_type,
-            payload=payload,
-            symbol=symbol,
-            period=BINANCE_SERIES_REPAIR_PERIOD,
-        )
-        records = trim_unclosed_series_records(
-            series_type=series_type,
-            records=records,
-            now_ms=current_time_ms,
-            period=BINANCE_SERIES_REPAIR_PERIOD,
-        )
-        filtered_records = [
-            record
-            for record in records
-            if cursor_time <= record[time_field] <= page_end_time
-        ]
+        with timed_category(breakdown, 'api_ms'):
+            payload = fetch_series_payload(
+                series_type=series_type,
+                symbol=symbol,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+                limit=page_limit,
+                session=http_session,
+                start_time=cursor_time,
+                end_time=page_end_time,
+            )
+        with timed_category(breakdown, 'parse_ms'):
+            records = parse_series_payload(
+                series_type=series_type,
+                payload=payload,
+                symbol=symbol,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+            )
+            records = trim_unclosed_series_records(
+                series_type=series_type,
+                records=records,
+                now_ms=current_time_ms,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+            )
+            filtered_records = [
+                record
+                for record in records
+                if cursor_time <= record[time_field] <= page_end_time
+            ]
         next_cursor_time = page_end_time + FIVE_MINUTES_MS
 
         if not filtered_records:
@@ -309,7 +371,8 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
             cursor_time = next_cursor_time
             continue
 
-        page_affected = upsert_series_records(series_type, filtered_records, session=db_session)
+        with timed_category(breakdown, 'db_write_ms'):
+            page_affected = upsert_series_records(series_type, filtered_records, session=db_session)
         affected += page_affected
         repaired_records += len(filtered_records)
         pages += 1
@@ -330,24 +393,28 @@ def repair_single_series(symbol, series_type, now_ms=None, http_session=None, db
 
         cursor_time = next_cursor_time
         if BINANCE_SERIES_REPAIR_SLEEP_MS > 0 and cursor_time <= window['end_time']:
+            record_sleep_ms(breakdown, BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
             time.sleep(BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
 
     logger.info(
         f"历史序列修补完成: 币种={symbol}, 类型={series_type}, 状态=成功, "
         f"成功分页数={pages}, 记录数={repaired_records}, 影响行数={affected}, 最后修补时间={last_repaired_time}"
     )
-    return {
-        'symbol': symbol,
-        'series_type': series_type,
-        'period': BINANCE_SERIES_REPAIR_PERIOD,
-        'status': 'success',
-        'start_time': window['start_time'],
-        'end_time': window['end_time'],
-        'affected': affected,
-        'records': repaired_records,
-        'pages': pages,
-        'last_repaired_time': last_repaired_time,
-    }
+    return _result_with_breakdown(
+        {
+            'symbol': symbol,
+            'series_type': series_type,
+            'period': BINANCE_SERIES_REPAIR_PERIOD,
+            'status': 'success',
+            'start_time': window['start_time'],
+            'end_time': window['end_time'],
+            'affected': affected,
+            'records': repaired_records,
+            'pages': pages,
+            'last_repaired_time': last_repaired_time,
+        },
+        breakdown,
+    )
 
 
 def repair_latest_series_point(symbol, series_type, now_ms=None, http_session=None, db_session=None):
@@ -405,6 +472,7 @@ def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current
 
     backfill_start = coverage_start if needs_backfill else earliest_local
     end_time = window['end_time']
+    breakdown = empty_duration_breakdown()
     affected = 0
     pages = 0
     request_pages = 0
@@ -414,31 +482,34 @@ def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current
     if needs_backfill:
         while True:
             request_pages += 1
-            payload = fetch_series_payload(
-                series_type='taker_buy_sell_vol',
-                symbol=symbol,
-                period=BINANCE_SERIES_REPAIR_PERIOD,
-                limit=page_limit,
-                session=http_session,
-                end_time=end_time,
-            )
+            with timed_category(breakdown, 'api_ms'):
+                payload = fetch_series_payload(
+                    series_type='taker_buy_sell_vol',
+                    symbol=symbol,
+                    period=BINANCE_SERIES_REPAIR_PERIOD,
+                    limit=page_limit,
+                    session=http_session,
+                    end_time=end_time,
+                )
             if not payload:
                 logger.info(f"taker_buy_sell_vol 修补完成: 无更多数据")
                 break
 
-            records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
-            records = trim_unclosed_series_records(
-                series_type='taker_buy_sell_vol',
-                records=records,
-                now_ms=current_time_ms,
-                period=BINANCE_SERIES_REPAIR_PERIOD,
-            )
-            filtered_records = [r for r in records if r['event_time'] >= backfill_start]
+            with timed_category(breakdown, 'parse_ms'):
+                records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+                records = trim_unclosed_series_records(
+                    series_type='taker_buy_sell_vol',
+                    records=records,
+                    now_ms=current_time_ms,
+                    period=BINANCE_SERIES_REPAIR_PERIOD,
+                )
+                filtered_records = [r for r in records if r['event_time'] >= backfill_start]
 
             if not filtered_records:
                 break
 
-            page_affected = upsert_series_records('taker_buy_sell_vol', filtered_records, session=db_session)
+            with timed_category(breakdown, 'db_write_ms'):
+                page_affected = upsert_series_records('taker_buy_sell_vol', filtered_records, session=db_session)
             affected += page_affected
             repaired_records += len(filtered_records)
             pages += 1
@@ -456,27 +527,32 @@ def _repair_taker_buy_sell_vol(symbol, window, http_session, db_session, current
             end_time = oldest_time - 1
 
             if BINANCE_SERIES_REPAIR_SLEEP_MS > 0:
+                record_sleep_ms(breakdown, BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
                 time.sleep(BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
 
-    gap_affected = _repair_taker_vol_gaps(symbol, coverage_start, target_end, http_session, db_session, current_time_ms)
+    gap_affected, gap_breakdown = _repair_taker_vol_gaps(symbol, coverage_start, target_end, http_session, db_session, current_time_ms)
+    add_duration_breakdown(breakdown, gap_breakdown)
     affected += gap_affected
 
     logger.info(
         f"taker_buy_sell_vol 修补完成: 币种={symbol}, 分页数={pages}, 记录数={repaired_records}, "
         f"影响行数={affected}, 最后时间={last_repaired_time}"
     )
-    return {
-        'symbol': symbol,
-        'series_type': 'taker_buy_sell_vol',
-        'period': BINANCE_SERIES_REPAIR_PERIOD,
-        'status': 'success',
-        'start_time': window['start_time'],
-        'end_time': window['end_time'],
-        'affected': affected,
-        'records': repaired_records,
-        'pages': pages,
-        'last_repaired_time': last_repaired_time,
-    }
+    return _result_with_breakdown(
+        {
+            'symbol': symbol,
+            'series_type': 'taker_buy_sell_vol',
+            'period': BINANCE_SERIES_REPAIR_PERIOD,
+            'status': 'success',
+            'start_time': window['start_time'],
+            'end_time': window['end_time'],
+            'affected': affected,
+            'records': repaired_records,
+            'pages': pages,
+            'last_repaired_time': last_repaired_time,
+        },
+        breakdown,
+    )
 
 
 def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, db_session, current_time_ms):
@@ -485,22 +561,24 @@ def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, d
 
     own_session = db_session is None
     session = db_session or get_session()
+    breakdown = empty_duration_breakdown()
     gap_affected = 0
 
     try:
-        rows = (
-            session.query(BinanceTakerBuySellVol.event_time)
-            .filter(
-                BinanceTakerBuySellVol.symbol == symbol,
-                BinanceTakerBuySellVol.event_time >= coverage_start,
-                BinanceTakerBuySellVol.event_time <= coverage_end,
+        with timed_category(breakdown, 'db_read_ms'):
+            rows = (
+                session.query(BinanceTakerBuySellVol.event_time)
+                .filter(
+                    BinanceTakerBuySellVol.symbol == symbol,
+                    BinanceTakerBuySellVol.event_time >= coverage_start,
+                    BinanceTakerBuySellVol.event_time <= coverage_end,
+                )
+                .order_by(BinanceTakerBuySellVol.event_time)
+                .all()
             )
-            .order_by(BinanceTakerBuySellVol.event_time)
-            .all()
-        )
 
         if not rows:
-            return 0
+            return 0, breakdown
 
         existing_times = set(r[0] for r in rows)
 
@@ -513,7 +591,7 @@ def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, d
 
         if not missing_times:
             logger.info(f"taker_buy_sell_vol 间隙检测: 无缺失点")
-            return 0
+            return 0, breakdown
 
         logger.info(f"taker_buy_sell_vol 间隙检测: 发现 {len(missing_times)} 个缺失点")
 
@@ -527,32 +605,35 @@ def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, d
 
         while True:
             page_count += 1
-            payload = fetch_series_payload(
-                series_type='taker_buy_sell_vol',
-                symbol=symbol,
-                period=BINANCE_SERIES_REPAIR_PERIOD,
-                limit=500,
-                session=http_session,
-                end_time=end_time,
-            )
+            with timed_category(breakdown, 'api_ms'):
+                payload = fetch_series_payload(
+                    series_type='taker_buy_sell_vol',
+                    symbol=symbol,
+                    period=BINANCE_SERIES_REPAIR_PERIOD,
+                    limit=500,
+                    session=http_session,
+                    end_time=end_time,
+                )
 
             if not payload:
                 break
 
-            records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
-            records = trim_unclosed_series_records(
-                series_type='taker_buy_sell_vol',
-                records=records,
-                now_ms=current_time_ms,
-                period=BINANCE_SERIES_REPAIR_PERIOD,
-            )
+            with timed_category(breakdown, 'parse_ms'):
+                records = parse_series_payload('taker_buy_sell_vol', payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+                records = trim_unclosed_series_records(
+                    series_type='taker_buy_sell_vol',
+                    records=records,
+                    now_ms=current_time_ms,
+                    period=BINANCE_SERIES_REPAIR_PERIOD,
+                )
 
-            new_records = [r for r in records if r['event_time'] >= coverage_start and r['event_time'] <= coverage_end]
+                new_records = [r for r in records if r['event_time'] >= coverage_start and r['event_time'] <= coverage_end]
 
             if not new_records:
                 break
 
-            page_affected = upsert_series_records('taker_buy_sell_vol', new_records, session=session)
+            with timed_category(breakdown, 'db_write_ms'):
+                page_affected = upsert_series_records('taker_buy_sell_vol', new_records, session=session)
             gap_affected += page_affected
 
             oldest_time = min(r['event_time'] for r in new_records)
@@ -564,6 +645,7 @@ def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, d
             end_time = oldest_time - 1
 
             if BINANCE_SERIES_REPAIR_SLEEP_MS > 0:
+                record_sleep_ms(breakdown, BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
                 time.sleep(BINANCE_SERIES_REPAIR_SLEEP_MS / 1000)
 
         logger.info(f"taker_buy_sell_vol 间隙修补完成: 新增 {gap_affected} 条记录")
@@ -572,7 +654,7 @@ def _repair_taker_vol_gaps(symbol, coverage_start, coverage_end, http_session, d
         if own_session:
             session.close()
 
-    return gap_affected
+    return gap_affected, breakdown
 
 
 def repair_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_session=None, db_session=None):
@@ -742,6 +824,7 @@ def _run_repair_tasks(tasks, worker_func, max_workers, db_session=None):
 
 def repair_rolling_series(symbol, series_type, target_times, now_ms=None, http_session=None, db_session=None):
     """Repair a small rolling window of closed 5m points without historical gap scanning."""
+    breakdown = empty_duration_breakdown()
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     time_field = _get_time_field(series_type)
     affected = 0
@@ -753,60 +836,69 @@ def repair_rolling_series(symbol, series_type, target_times, now_ms=None, http_s
         start_time = group[0]
         end_time = group[-1]
         limit = max(len(group), 2 if series_type == 'taker_buy_sell_vol' else 1)
-        payload = fetch_series_payload(
-            series_type=series_type,
-            symbol=symbol,
-            period=BINANCE_SERIES_REPAIR_PERIOD,
-            limit=limit,
-            session=http_session,
-            start_time=start_time,
-            end_time=end_time,
-        )
-        records = parse_series_payload(series_type, payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
-        records = trim_unclosed_series_records(
-            series_type=series_type,
-            records=records,
-            now_ms=current_time_ms,
-            period=BINANCE_SERIES_REPAIR_PERIOD,
-        )
-        for record in records:
-            event_time = record.get(time_field)
-            if event_time is not None:
-                latest_event_time = max(latest_event_time or event_time, event_time)
-        expected_times = set(group)
-        filtered_records = [record for record in records if record.get(time_field) in expected_times]
+        with timed_category(breakdown, 'api_ms'):
+            payload = fetch_series_payload(
+                series_type=series_type,
+                symbol=symbol,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+                limit=limit,
+                session=http_session,
+                start_time=start_time,
+                end_time=end_time,
+            )
+        with timed_category(breakdown, 'parse_ms'):
+            records = parse_series_payload(series_type, payload, symbol, BINANCE_SERIES_REPAIR_PERIOD)
+            records = trim_unclosed_series_records(
+                series_type=series_type,
+                records=records,
+                now_ms=current_time_ms,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+            )
+            for record in records:
+                event_time = record.get(time_field)
+                if event_time is not None:
+                    latest_event_time = max(latest_event_time or event_time, event_time)
+            expected_times = set(group)
+            filtered_records = [record for record in records if record.get(time_field) in expected_times]
         if not filtered_records:
             continue
 
-        affected += upsert_series_records(series_type, filtered_records, session=db_session)
+        with timed_category(breakdown, 'db_write_ms'):
+            affected += upsert_series_records(series_type, filtered_records, session=db_session)
         repaired_records += len(filtered_records)
         pages += 1
 
     if repaired_records == 0:
-        return {
+        return _result_with_breakdown(
+            {
+                'symbol': symbol,
+                'series_type': series_type,
+                'period': BINANCE_SERIES_REPAIR_PERIOD,
+                'status': 'skipped',
+                'reason': 'no_data',
+                'target_times': sorted(target_times),
+                'affected': 0,
+                'records': 0,
+                'pages': 0,
+                'latest_event_time': latest_event_time,
+            },
+            breakdown,
+        )
+
+    return _result_with_breakdown(
+        {
             'symbol': symbol,
             'series_type': series_type,
             'period': BINANCE_SERIES_REPAIR_PERIOD,
-            'status': 'skipped',
-            'reason': 'no_data',
+            'status': 'success',
             'target_times': sorted(target_times),
-            'affected': 0,
-            'records': 0,
-            'pages': 0,
+            'affected': affected,
+            'records': repaired_records,
+            'pages': pages,
             'latest_event_time': latest_event_time,
-        }
-
-    return {
-        'symbol': symbol,
-        'series_type': series_type,
-        'period': BINANCE_SERIES_REPAIR_PERIOD,
-        'status': 'success',
-        'target_times': sorted(target_times),
-        'affected': affected,
-        'records': repaired_records,
-        'pages': pages,
-        'latest_event_time': latest_event_time,
-    }
+        },
+        breakdown,
+    )
 
 
 def repair_rolling_tracked_symbols(
@@ -824,6 +916,8 @@ def repair_rolling_tracked_symbols(
     target_times = _build_rolling_target_times(current_time_ms, points or REPAIR_ROLLING_POINTS)
     worker_count = max_workers if max_workers is not None else REPAIR_ROLLING_MAX_WORKERS
     started_at = time.perf_counter()
+    precheck_started_at = time.perf_counter()
+    precheck_breakdown = empty_duration_breakdown()
     results = []
     tasks = []
     precheck_skipped_count = 0
@@ -834,13 +928,14 @@ def repair_rolling_tracked_symbols(
     )
 
     for series_type in active_series_types:
-        existing_by_symbol = get_existing_series_timestamps(
-            series_type=series_type,
-            symbols=tracked_symbols,
-            timestamps=target_times,
-            period=BINANCE_SERIES_REPAIR_PERIOD,
-            session=db_session,
-        )
+        with timed_category(precheck_breakdown, 'db_read_ms'):
+            existing_by_symbol = get_existing_series_timestamps(
+                series_type=series_type,
+                symbols=tracked_symbols,
+                timestamps=target_times,
+                period=BINANCE_SERIES_REPAIR_PERIOD,
+                session=db_session,
+            )
         for symbol in tracked_symbols:
             missing_times = [
                 timestamp
@@ -850,20 +945,24 @@ def repair_rolling_tracked_symbols(
             if not missing_times:
                 precheck_skipped_count += 1
                 results.append(
-                    {
-                        'symbol': symbol,
-                        'series_type': series_type,
-                        'period': BINANCE_SERIES_REPAIR_PERIOD,
-                        'status': 'skipped',
-                        'reason': 'rolling window already complete',
-                        'affected': 0,
-                        'records': 0,
-                        'pages': 0,
-                        'target_times': sorted(target_times),
-                    }
+                    _result_with_breakdown(
+                        {
+                            'symbol': symbol,
+                            'series_type': series_type,
+                            'period': BINANCE_SERIES_REPAIR_PERIOD,
+                            'status': 'skipped',
+                            'reason': 'rolling window already complete',
+                            'affected': 0,
+                            'records': 0,
+                            'pages': 0,
+                            'target_times': sorted(target_times),
+                        },
+                        {},
+                    )
                 )
             else:
                 tasks.append({'symbol': symbol, 'series_type': series_type, 'target_times': missing_times})
+    precheck_breakdown['precheck_ms'] += (time.perf_counter() - precheck_started_at) * 1000
 
     def worker(task, db_session=None):
         own_session = db_session is None
@@ -879,13 +978,16 @@ def repair_rolling_tracked_symbols(
             )
         except Exception as exc:
             logger.error(f"滚动补齐失败: symbol={task['symbol']}, type={task['series_type']}, error={exc}")
-            return {
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': BINANCE_SERIES_REPAIR_PERIOD,
-                'status': 'error',
-                'error': str(exc),
-            }
+            return _result_with_breakdown(
+                {
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': BINANCE_SERIES_REPAIR_PERIOD,
+                    'status': 'error',
+                    'error': str(exc),
+                },
+                {},
+            )
         finally:
             if own_session:
                 session.close()
@@ -896,11 +998,9 @@ def repair_rolling_tracked_symbols(
     skipped_count = sum(1 for item in results if item.get('status') == 'skipped')
     duration_ms = (time.perf_counter() - started_at) * 1000
 
-    logger.info(
-        f"滚动补齐完成: 总任务数={len(results)}, 成功={success_count}, 失败={failure_count}, "
-        f"跳过={skipped_count}, 耗时={duration_ms:.2f}ms"
-    )
-    return {
+    total_breakdown = sum_duration_breakdowns(item.get('duration_breakdown_ms') for item in results)
+    add_duration_breakdown(total_breakdown, precheck_breakdown)
+    summary = _finalize_repair_summary_timing({
         'status': 'success' if failure_count == 0 else 'partial_success',
         'mode': 'rolling',
         'symbols': tracked_symbols,
@@ -912,8 +1012,15 @@ def repair_rolling_tracked_symbols(
         'skipped_count': skipped_count,
         'precheck_skipped_count': precheck_skipped_count,
         'duration_ms': duration_ms,
+        'duration_breakdown_ms': total_breakdown,
         'results': results,
-    }
+    }, started_at)
+    _log_repair_summary_timing(
+        f"滚动补齐完成: 总任务数={len(results)}, 成功={success_count}, 失败={failure_count}, "
+        f"跳过={skipped_count}, 耗时={duration_ms:.2f}ms",
+        summary,
+    )
+    return summary
 
 
 def repair_latest_tracked_symbols(symbols=None, series_types=None, now_ms=None, http_session=None, db_session=None):
@@ -984,13 +1091,16 @@ def repair_tracked_symbols(
             return result
         except Exception as exc:
             logger.error(f"Binance 历史序列修补失败: symbol={task['symbol']}, type={task['series_type']}, error={exc}")
-            return {
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': BINANCE_SERIES_REPAIR_PERIOD,
-                'status': 'error',
-                'error': str(exc),
-            }
+            return _result_with_breakdown(
+                {
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': BINANCE_SERIES_REPAIR_PERIOD,
+                    'status': 'error',
+                    'error': str(exc),
+                },
+                {},
+            )
         finally:
             if own_session:
                 session.close()
@@ -1001,11 +1111,8 @@ def repair_tracked_symbols(
     skipped_count = sum(1 for item in results if item.get('status') == 'skipped')
     duration_ms = (time.perf_counter() - started_at) * 1000
 
-    logger.info(
-        f"历史序列修补完成: 总任务数={len(tasks)}, 成功={success_count}, 失败={failure_count}, "
-        f"跳过={skipped_count}, 耗时={duration_ms:.2f}ms"
-    )
-    return {
+    total_breakdown = sum_duration_breakdowns(item.get('duration_breakdown_ms') for item in results)
+    summary = _finalize_repair_summary_timing({
         'status': 'success' if failure_count == 0 else 'partial_success',
         'mode': 'history',
         'symbols': tracked_symbols,
@@ -1016,8 +1123,15 @@ def repair_tracked_symbols(
         'failure_count': failure_count,
         'skipped_count': skipped_count,
         'duration_ms': duration_ms,
+        'duration_breakdown_ms': total_breakdown,
         'results': results,
-    }
+    }, started_at)
+    _log_repair_summary_timing(
+        f"历史序列修补完成: 总任务数={len(tasks)}, 成功={success_count}, 失败={failure_count}, "
+        f"跳过={skipped_count}, 耗时={duration_ms:.2f}ms",
+        summary,
+    )
+    return summary
 
 
 def run_history_repair_job(symbols=None, series_types=None, full_scan=False):

@@ -8,6 +8,15 @@ from coinx.collector.bybit.series import BybitRateLimitUnavailable, is_bybit_bud
 from coinx.collector.gate.series import GateRateLimitUnavailable, GateUnsupportedContract, is_gate_budget_unavailable
 from coinx.collector.okx.series import OKXRateLimitUnavailable, is_okx_budget_unavailable
 from coinx.collector.rate_limit import RateLimitUnavailable
+from coinx.collector.timing import (
+    add_duration_breakdown,
+    attach_other_duration,
+    empty_duration_breakdown,
+    format_duration_breakdown,
+    round_duration_breakdown,
+    sum_duration_breakdowns,
+    timed_category,
+)
 from coinx.config import (
     ENABLED_EXCHANGES,
     HOMEPAGE_SERIES_REPAIR_PERIOD,
@@ -35,15 +44,26 @@ _RATE_LIMIT_EXCEPTIONS = (
 
 
 def _is_exchange_budget_unavailable(exchange):
+    return _exchange_budget_unavailable_seconds(exchange) > 0
+
+
+def _exchange_budget_unavailable_seconds(exchange):
     if exchange == 'gate':
-        return is_gate_budget_unavailable()
+        from coinx.collector.gate.series import _gate_budget_unavailable_remaining_seconds
+        return _gate_budget_unavailable_remaining_seconds()
     if exchange == 'okx':
-        return is_okx_budget_unavailable('rubik') or is_okx_budget_unavailable('default')
+        from coinx.collector.okx.series import _okx_rate_limits
+        return max(
+            _okx_rate_limits.unavailable_remaining_seconds('okx', 'rubik'),
+            _okx_rate_limits.unavailable_remaining_seconds('okx', 'default'),
+        )
     if exchange == 'bybit':
-        return is_bybit_budget_unavailable()
+        from coinx.collector.bybit.series import _bybit_rate_limits
+        return _bybit_rate_limits.unavailable_remaining_seconds('bybit', 'market')
     if exchange == 'binance':
-        return is_binance_budget_unavailable()
-    return False
+        from coinx.collector.binance.client import _binance_rate_limits
+        return _binance_rate_limits.unavailable_remaining_seconds('binance', 'default')
+    return 0.0
 
 
 def _budget_unavailable_reason(exchange):
@@ -85,6 +105,22 @@ def _build_rolling_target_times(now_ms, points, period='5m'):
         for offset in range(max(1, int(points or 1)))
         if latest_time - offset * period_ms >= 0
     ]
+
+
+def _result_with_breakdown(result, breakdown):
+    result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
+    return result
+
+
+def _build_grouped_duration_breakdowns(results, field):
+    grouped = {}
+    for item in results or []:
+        group_key = item.get(field)
+        if not group_key:
+            continue
+        grouped.setdefault(group_key, empty_duration_breakdown())
+        add_duration_breakdown(grouped[group_key], item.get('duration_breakdown_ms'))
+    return {key: round_duration_breakdown(value) for key, value in grouped.items()}
 
 
 def _group_contiguous_times(times, period='5m'):
@@ -148,7 +184,7 @@ def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precis
     }
     if extra:
         result.update(extra)
-    return result
+    return _result_with_breakdown(result, result.get('duration_breakdown_ms') or {})
 
 
 def _supported_symbol_lookup_failed_result(adapter, symbol, series_type, mode, window_precise, error, extra=None):
@@ -168,7 +204,7 @@ def _supported_symbol_lookup_failed_result(adapter, symbol, series_type, mode, w
     }
     if extra:
         result.update(extra)
-    return result
+    return _result_with_breakdown(result, result.get('duration_breakdown_ms') or {})
 
 
 def _sample_values(values, limit=8):
@@ -269,7 +305,8 @@ def _log_repair_summary(summary):
         f"跳过={summary['skipped_count']} "
         f"跳过原因={_format_reason_counts(summary.get('results') or [])} "
         f"各交易所={_format_exchange_result_summary(summary.get('results') or [], summary.get('exchanges') or [])} "
-        f"耗时={summary['duration_ms']:.2f}ms"
+        f"耗时={summary['duration_ms']:.2f}ms "
+        f"耗时分类={format_duration_breakdown(summary.get('duration_breakdown_ms'))}"
     )
     if extra_parts:
         message = f"{message} {' '.join(extra_parts)}"
@@ -327,24 +364,29 @@ def _filter_budget_unavailable_rolling_tasks(tasks):
     skipped = []
     for task in tasks:
         exchange = task.get('exchange')
-        if not _is_exchange_budget_unavailable(exchange):
+        cooldown_seconds = _exchange_budget_unavailable_seconds(exchange)
+        if cooldown_seconds <= 0:
             runnable.append(task)
             continue
         skipped.append(
-            {
-                'exchange': exchange,
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': task['period'],
-                'status': 'skipped',
-                'mode': 'rolling',
-                'reason': _budget_unavailable_reason(exchange),
-                'window_precise': task['adapter'].supports_time_window(task['series_type']),
-                'affected': 0,
-                'records': 0,
-                'pages': 0,
-                'target_times': sorted(task.get('target_times') or []),
-            }
+            _result_with_breakdown(
+                {
+                    'exchange': exchange,
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': task['period'],
+                    'status': 'skipped',
+                    'mode': 'rolling',
+                    'reason': _budget_unavailable_reason(exchange),
+                    'window_precise': task['adapter'].supports_time_window(task['series_type']),
+                    'affected': 0,
+                    'records': 0,
+                    'pages': 0,
+                    'target_times': sorted(task.get('target_times') or []),
+                    'cooldown_skip_ms': cooldown_seconds * 1000,
+                },
+                {'cooldown_skip_ms': cooldown_seconds * 1000},
+            )
         )
 
     if skipped:
@@ -372,25 +414,30 @@ def _filter_budget_unavailable_tasks(tasks, mode):
     skipped = []
     for task in tasks:
         exchange = task.get('exchange')
-        if not _is_exchange_budget_unavailable(exchange):
+        cooldown_seconds = _exchange_budget_unavailable_seconds(exchange)
+        if cooldown_seconds <= 0:
             runnable.append(task)
             continue
         skipped.append(
-            {
-                'exchange': exchange,
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': task['period'],
-                'status': 'skipped',
-                'mode': mode,
-                'reason': _budget_unavailable_reason(exchange),
-                'window_precise': task['adapter'].supports_time_window(task['series_type']),
-                'affected': 0,
-                'records': 0,
-                'pages': 0,
-                'start_time': task.get('start_time'),
-                'end_time': task.get('end_time'),
-            }
+            _result_with_breakdown(
+                {
+                    'exchange': exchange,
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': task['period'],
+                    'status': 'skipped',
+                    'mode': mode,
+                    'reason': _budget_unavailable_reason(exchange),
+                    'window_precise': task['adapter'].supports_time_window(task['series_type']),
+                    'affected': 0,
+                    'records': 0,
+                    'pages': 0,
+                    'start_time': task.get('start_time'),
+                    'end_time': task.get('end_time'),
+                    'cooldown_skip_ms': cooldown_seconds * 1000,
+                },
+                {'cooldown_skip_ms': cooldown_seconds * 1000},
+            )
         )
 
     if skipped:
@@ -444,6 +491,7 @@ def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_sessi
 
 
 def _repair_rolling_series(adapter, symbol, series_type, period, target_times, now_ms, http_session=None, db_session=None):
+    breakdown = empty_duration_breakdown()
     time_field = _get_time_field(series_type)
     affected = 0
     repaired_records = 0
@@ -463,63 +511,72 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
 
         filtered_records = []
         for attempt in fetch_attempts:
-            payload = adapter.fetch_series_payload(
-                series_type=series_type,
-                symbol=symbol,
-                period=period,
-                limit=limit,
-                session=http_session,
-                start_time=attempt['start_time'],
-                end_time=attempt['end_time'],
-            )
-            records = adapter.parse_series_payload(series_type, payload, symbol, period)
-            records = _trim_unclosed_records(series_type, records, now_ms, period=period)
-            for record in records:
-                record_time = record.get(time_field)
-                if record_time is not None:
-                    latest_event_time = max(latest_event_time or record_time, record_time)
-            filtered_records = [record for record in records if record.get(time_field) in expected_times]
+            with timed_category(breakdown, 'api_ms'):
+                payload = adapter.fetch_series_payload(
+                    series_type=series_type,
+                    symbol=symbol,
+                    period=period,
+                    limit=limit,
+                    session=http_session,
+                    start_time=attempt['start_time'],
+                    end_time=attempt['end_time'],
+                )
+            with timed_category(breakdown, 'parse_ms'):
+                records = adapter.parse_series_payload(series_type, payload, symbol, period)
+                records = _trim_unclosed_records(series_type, records, now_ms, period=period)
+                for record in records:
+                    record_time = record.get(time_field)
+                    if record_time is not None:
+                        latest_event_time = max(latest_event_time or record_time, record_time)
+                filtered_records = [record for record in records if record.get(time_field) in expected_times]
             if filtered_records:
                 break
 
         if not filtered_records:
             continue
 
-        affected += upsert_series_records(adapter.exchange_id, series_type, filtered_records, session=db_session)
+        with timed_category(breakdown, 'db_write_ms'):
+            affected += upsert_series_records(adapter.exchange_id, series_type, filtered_records, session=db_session)
         repaired_records += len(filtered_records)
         pages += 1
 
     if repaired_records == 0:
-        return {
+        return _result_with_breakdown(
+            {
+                'exchange': adapter.exchange_id,
+                'symbol': symbol,
+                'series_type': series_type,
+                'period': period,
+                'status': 'skipped',
+                'mode': 'rolling',
+                'reason': 'no_data',
+                'window_precise': window_precise,
+                'target_times': sorted(target_times),
+                'affected': 0,
+                'records': 0,
+                'pages': 0,
+                'latest_event_time': latest_event_time,
+            },
+            breakdown,
+        )
+
+    return _result_with_breakdown(
+        {
             'exchange': adapter.exchange_id,
             'symbol': symbol,
             'series_type': series_type,
             'period': period,
-            'status': 'skipped',
+            'status': 'success',
             'mode': 'rolling',
-            'reason': 'no_data',
             'window_precise': window_precise,
             'target_times': sorted(target_times),
-            'affected': 0,
-            'records': 0,
-            'pages': 0,
+            'affected': affected,
+            'records': repaired_records,
+            'pages': pages,
             'latest_event_time': latest_event_time,
-        }
-
-    return {
-        'exchange': adapter.exchange_id,
-        'symbol': symbol,
-        'series_type': series_type,
-        'period': period,
-        'status': 'success',
-        'mode': 'rolling',
-        'window_precise': window_precise,
-        'target_times': sorted(target_times),
-        'affected': affected,
-        'records': repaired_records,
-        'pages': pages,
-        'latest_event_time': latest_event_time,
-    }
+        },
+        breakdown,
+    )
 
 
 def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_ms=None, points=None, max_workers=None, http_session=None, db_session=None):
@@ -530,6 +587,7 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
     worker_count = max_workers if max_workers is not None else REPAIR_ROLLING_MAX_WORKERS
     started_at = time.perf_counter()
     precheck_started_at = time.perf_counter()
+    precheck_breakdown = empty_duration_breakdown()
     results = []
     tasks = []
     precheck_skipped_count = 0
@@ -555,7 +613,8 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             supported_symbols = []
             for symbol in target_symbols:
                 try:
-                    is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
+                    with timed_category(precheck_breakdown, 'api_ms'):
+                        is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
                 except Exception as exc:
                     exchange_stats['unsupported'] += 1
                     results.append(
@@ -590,14 +649,15 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             for period in periods:
                 target_times = _build_rolling_target_times(current_time_ms, points or REPAIR_ROLLING_POINTS, period=period)
                 all_target_times.update(target_times)
-                existing_by_symbol = get_existing_series_timestamps(
-                    exchange=adapter.exchange_id,
-                    series_type=series_type,
-                    symbols=supported_symbols,
-                    timestamps=target_times,
-                    period=period,
-                    session=db_session,
-                )
+                with timed_category(precheck_breakdown, 'db_read_ms'):
+                    existing_by_symbol = get_existing_series_timestamps(
+                        exchange=adapter.exchange_id,
+                        series_type=series_type,
+                        symbols=supported_symbols,
+                        timestamps=target_times,
+                        period=period,
+                        session=db_session,
+                    )
                 for symbol in supported_symbols:
                     missing_times = [timestamp for timestamp in target_times if timestamp not in existing_by_symbol.get(symbol, set())]
                     if not missing_times:
@@ -633,6 +693,7 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                         )
 
     precheck_duration_ms = (time.perf_counter() - precheck_started_at) * 1000
+    precheck_breakdown['precheck_ms'] += precheck_duration_ms
     unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
     logger.info(
         '预检完成: 模式=rolling 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 耗时=%.2fms',
@@ -658,6 +719,7 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                 db_session=session,
             )
         except _RATE_LIMIT_EXCEPTIONS as exc:
+            cooldown_skip_ms = max(0.0, float(getattr(exc, 'wait_seconds', 0.0) or 0.0) * 1000)
             logger.warning(
                 '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=%s',
                 task['exchange'],
@@ -665,16 +727,20 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                 task['series_type'],
                 _reason_label(_budget_unavailable_reason(task['exchange'])),
             )
-            return {
-                'exchange': task['exchange'],
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': task['period'],
-                'status': 'skipped',
-                'mode': 'rolling',
-                'reason': _budget_unavailable_reason(task['exchange']),
-                'error': str(exc),
-            }
+            return _result_with_breakdown(
+                {
+                    'exchange': task['exchange'],
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': task['period'],
+                    'status': 'skipped',
+                    'mode': 'rolling',
+                    'reason': _budget_unavailable_reason(task['exchange']),
+                    'cooldown_skip_ms': cooldown_skip_ms,
+                    'error': str(exc),
+                },
+                {'cooldown_skip_ms': cooldown_skip_ms},
+            )
         except GateUnsupportedContract as exc:
             logger.warning(
                 '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
@@ -703,15 +769,18 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                 task['period'],
                 exc,
             )
-            return {
-                'exchange': task['exchange'],
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': task['period'],
-                'status': 'error',
-                'mode': 'rolling',
-                'error': str(exc),
-            }
+            return _result_with_breakdown(
+                {
+                    'exchange': task['exchange'],
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': task['period'],
+                    'status': 'error',
+                    'mode': 'rolling',
+                    'error': str(exc),
+                },
+                {},
+            )
         finally:
             if own_session:
                 session.close()
@@ -754,6 +823,10 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             group_runner=run_exchange_group,
         )
     )
+    results_breakdown = sum_duration_breakdowns(item.get('duration_breakdown_ms') for item in results)
+    total_breakdown = empty_duration_breakdown()
+    add_duration_breakdown(total_breakdown, precheck_breakdown)
+    add_duration_breakdown(total_breakdown, results_breakdown)
     summary = _build_summary(
         mode='rolling',
         symbols=target_symbols,
@@ -768,6 +841,9 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             'pending_task_count': len(tasks),
             'unsupported_count': unsupported_count,
             'exchange_progress': exchange_progress,
+            'duration_breakdown_ms': total_breakdown,
+            'duration_breakdown_by_exchange': _build_grouped_duration_breakdowns(results, 'exchange'),
+            'duration_breakdown_by_series_type': _build_grouped_duration_breakdowns(results, 'series_type'),
         },
     )
     _log_repair_summary(summary)
@@ -800,6 +876,8 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
     effective_coverage_hours = coverage_hours or REPAIR_HISTORY_COVERAGE_HOURS
     worker_count = max_workers if max_workers is not None else REPAIR_HISTORY_MAX_WORKERS
     started_at = time.perf_counter()
+    precheck_started_at = time.perf_counter()
+    precheck_breakdown = empty_duration_breakdown()
     tasks = []
     skipped_results = []
     exchange_task_counts = {}
@@ -814,7 +892,8 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
                 for symbol in target_symbols:
                     try:
-                        is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
+                        with timed_category(precheck_breakdown, 'api_ms'):
+                            is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
                     except Exception as exc:
                         skipped_results.append(
                             _supported_symbol_lookup_failed_result(
@@ -861,7 +940,10 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     )
                     exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + 1
 
+    precheck_breakdown['precheck_ms'] += (time.perf_counter() - precheck_started_at) * 1000
+
     def worker(task, db_session=None):
+        breakdown = empty_duration_breakdown()
         own_session = db_session is None
         session = db_session or get_session()
         window_precise = task['adapter'].supports_time_window(task['series_type'])
@@ -878,24 +960,27 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
 
             while cursor_time <= target_end_time:
                 page_end_time = _page_end_time(cursor_time, target_end_time, limit, period=period) if window_precise else None
-                payload = task['adapter'].fetch_series_payload(
-                    series_type=task['series_type'],
-                    symbol=task['symbol'],
-                    period=period,
-                    limit=limit,
-                    session=http_session if db_session is not None else None,
-                    start_time=cursor_time if window_precise else None,
-                    end_time=page_end_time if window_precise else None,
-                )
-                records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
-                records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
-                current_end_time = page_end_time if window_precise else target_end_time
-                filtered_records = [
-                    record
-                    for record in records
-                    if target_start_time <= record.get(time_field, -1) <= current_end_time
-                ]
-                affected += upsert_series_records(task['exchange'], task['series_type'], filtered_records, session=session)
+                with timed_category(breakdown, 'api_ms'):
+                    payload = task['adapter'].fetch_series_payload(
+                        series_type=task['series_type'],
+                        symbol=task['symbol'],
+                        period=period,
+                        limit=limit,
+                        session=http_session if db_session is not None else None,
+                        start_time=cursor_time if window_precise else None,
+                        end_time=page_end_time if window_precise else None,
+                    )
+                with timed_category(breakdown, 'parse_ms'):
+                    records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
+                    records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
+                    current_end_time = page_end_time if window_precise else target_end_time
+                    filtered_records = [
+                        record
+                        for record in records
+                        if target_start_time <= record.get(time_field, -1) <= current_end_time
+                    ]
+                with timed_category(breakdown, 'db_write_ms'):
+                    affected += upsert_series_records(task['exchange'], task['series_type'], filtered_records, session=session)
                 record_count += len(filtered_records)
                 if filtered_records:
                     pages += 1
@@ -904,20 +989,23 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     break
                 cursor_time = page_end_time + _period_to_ms(period)
 
-            return {
-                'exchange': task['exchange'],
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': period,
-                'status': 'success',
-                'mode': 'history',
-                'window_precise': window_precise,
-                'start_time': target_start_time,
-                'end_time': target_end_time,
-                'affected': affected,
-                'records': record_count,
-                'pages': pages,
-            }
+            return _result_with_breakdown(
+                {
+                    'exchange': task['exchange'],
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': period,
+                    'status': 'success',
+                    'mode': 'history',
+                    'window_precise': window_precise,
+                    'start_time': target_start_time,
+                    'end_time': target_end_time,
+                    'affected': affected,
+                    'records': record_count,
+                    'pages': pages,
+                },
+                breakdown,
+            )
         except GateUnsupportedContract as exc:
             logger.warning(
                 '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
@@ -939,6 +1027,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 },
             )
         except _RATE_LIMIT_EXCEPTIONS as exc:
+            cooldown_skip_ms = max(0.0, float(getattr(exc, 'wait_seconds', 0.0) or 0.0) * 1000)
             logger.warning(
                 '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=%s',
                 task['exchange'],
@@ -946,17 +1035,21 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 task['series_type'],
                 _reason_label(_budget_unavailable_reason(task['exchange'])),
             )
-            return {
-                'exchange': task['exchange'],
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': task['period'],
-                'status': 'skipped',
-                'mode': 'history',
-                'window_precise': window_precise,
-                'reason': _budget_unavailable_reason(task['exchange']),
-                'error': str(exc),
-            }
+            return _result_with_breakdown(
+                {
+                    'exchange': task['exchange'],
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': task['period'],
+                    'status': 'skipped',
+                    'mode': 'history',
+                    'window_precise': window_precise,
+                    'reason': _budget_unavailable_reason(task['exchange']),
+                    'cooldown_skip_ms': cooldown_skip_ms,
+                    'error': str(exc),
+                },
+                {'cooldown_skip_ms': cooldown_skip_ms},
+            )
         except Exception as exc:
             logger.error(
                 '修补失败: 模式=history 交易所=%s 币种=%s 序列类型=%s 周期=%s 错误=%s',
@@ -966,16 +1059,19 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 task['period'],
                 exc,
             )
-            return {
-                'exchange': task['exchange'],
-                'symbol': task['symbol'],
-                'series_type': task['series_type'],
-                'period': task['period'],
-                'status': 'error',
-                'mode': 'history',
-                'window_precise': window_precise,
-                'error': str(exc),
-            }
+            return _result_with_breakdown(
+                {
+                    'exchange': task['exchange'],
+                    'symbol': task['symbol'],
+                    'series_type': task['series_type'],
+                    'period': task['period'],
+                    'status': 'error',
+                    'mode': 'history',
+                    'window_precise': window_precise,
+                    'error': str(exc),
+                },
+                breakdown,
+            )
         finally:
             if own_session:
                 session.close()
@@ -1021,6 +1117,10 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         db_session=db_session,
         group_runner=run_exchange_group,
     )
+    results_breakdown = sum_duration_breakdowns(item.get('duration_breakdown_ms') for item in results)
+    total_breakdown = empty_duration_breakdown()
+    add_duration_breakdown(total_breakdown, precheck_breakdown)
+    add_duration_breakdown(total_breakdown, results_breakdown)
     summary = _build_summary(
         mode='history',
         symbols=target_symbols,
@@ -1033,6 +1133,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             'start_time': summary_start_time,
             'end_time': summary_end_time,
             'full_scan': full_scan,
+            'duration_breakdown_ms': total_breakdown,
+            'duration_breakdown_by_exchange': _build_grouped_duration_breakdowns(results, 'exchange'),
+            'duration_breakdown_by_series_type': _build_grouped_duration_breakdowns(results, 'series_type'),
         },
     )
     _log_repair_summary(summary)
@@ -1054,6 +1157,7 @@ def _build_summary(mode, symbols, series_types, exchanges, results, started_at, 
             'results': exchange_results,
         }
 
+    duration_ms = (time.perf_counter() - started_at) * 1000
     summary = {
         'status': 'success' if failure_count == 0 else 'partial_success',
         'mode': mode,
@@ -1064,10 +1168,18 @@ def _build_summary(mode, symbols, series_types, exchanges, results, started_at, 
         'success_count': success_count,
         'failure_count': failure_count,
         'skipped_count': skipped_count,
-        'duration_ms': (time.perf_counter() - started_at) * 1000,
+        'duration_ms': duration_ms,
         'exchange_summaries': exchange_summaries,
         'results': results,
     }
     if extra:
         summary.update(extra)
+    summary['duration_breakdown_ms'] = attach_other_duration(
+        summary.get('duration_breakdown_ms') or sum_duration_breakdowns(
+            item.get('duration_breakdown_ms') for item in results
+        ),
+        duration_ms,
+    )
+    summary.setdefault('duration_breakdown_by_exchange', _build_grouped_duration_breakdowns(results, 'exchange'))
+    summary.setdefault('duration_breakdown_by_series_type', _build_grouped_duration_breakdowns(results, 'series_type'))
     return summary

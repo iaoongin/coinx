@@ -2,7 +2,7 @@ import time
 import requests
 
 from coinx.collector.binance.client import get_session, request_with_retry
-from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable
+from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable, record_rate_limit_wait_seconds
 from coinx.config import (
     GATE_403_RETRY_FALLBACK_SECONDS,
     GATE_BASE_URL,
@@ -286,6 +286,7 @@ def _request_gate(path, params, session=None, timeout=10):
             _mark_gate_budget_unavailable()
             raise GateRateLimitUnavailable(float(GATE_403_RETRY_FALLBACK_SECONDS)) from exc
 
+        record_rate_limit_wait_seconds(backoff_seconds)
         time.sleep(backoff_seconds)
         _wait_for_gate_slot()
         response = request_with_retry(
