@@ -22,6 +22,7 @@ from coinx.collector.timing import (
     attach_other_duration,
     empty_duration_breakdown,
     format_duration_breakdown,
+    format_duration_ms,
     record_sleep_ms,
     round_duration_breakdown,
     sum_duration_breakdowns,
@@ -85,7 +86,7 @@ def _finalize_repair_summary_timing(summary, started_at):
 
 
 def _log_repair_summary_timing(message, summary):
-    logger.info(f"{message} 耗时分类={format_duration_breakdown(summary.get('duration_breakdown_ms'))}")
+    logger.info(f"{message} 累计耗时分类={format_duration_breakdown(summary.get('duration_breakdown_ms'))}")
 
 
 def floor_to_completed_5m(now_ms):
@@ -1017,7 +1018,7 @@ def repair_rolling_tracked_symbols(
     }, started_at)
     _log_repair_summary_timing(
         f"滚动补齐完成: 总任务数={len(results)}, 成功={success_count}, 失败={failure_count}, "
-        f"跳过={skipped_count}, 耗时={duration_ms:.2f}ms",
+        f"跳过={skipped_count}, 耗时={format_duration_ms(duration_ms)}",
         summary,
     )
     return summary
@@ -1128,7 +1129,7 @@ def repair_tracked_symbols(
     }, started_at)
     _log_repair_summary_timing(
         f"历史序列修补完成: 总任务数={len(tasks)}, 成功={success_count}, 失败={failure_count}, "
-        f"跳过={skipped_count}, 耗时={duration_ms:.2f}ms",
+        f"跳过={skipped_count}, 耗时={format_duration_ms(duration_ms)}",
         summary,
     )
     return summary

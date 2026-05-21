@@ -572,7 +572,11 @@
         const formatDuration = (durationMs) => {
           if (durationMs === null || durationMs === undefined) return '--';
           if (durationMs < 1000) return `${durationMs.toFixed(0)}ms`;
-          return `${(durationMs / 1000).toFixed(2)}s`;
+          const seconds = durationMs / 1000;
+          if (seconds < 60) return `${seconds.toFixed(2)}s`;
+          const minutes = Math.floor(seconds / 60);
+          const remainingSeconds = seconds - minutes * 60;
+          return `${minutes}m${remainingSeconds.toFixed(1)}s`;
         };
 
         const durationValue = (breakdown, key) => Number(breakdown?.[key] || 0);
@@ -592,6 +596,7 @@
             ['读库', 'db_read_ms'],
             ['写库', 'db_write_ms'],
             ['解析', 'parse_ms'],
+            ['预检墙钟', 'precheck_ms'],
             ['其他', 'other_ms'],
           ];
           return parts

@@ -10,6 +10,7 @@ from coinx.collector.gate import series as gate_series
 from coinx.collector.gate.series import GateUnsupportedContract
 from coinx.collector.exchange_repair import repair_history_symbols, repair_rolling_symbols
 from coinx.collector.okx.series import OKXRateLimitUnavailable, clear_okx_rate_limit_state
+from coinx.collector.timing import format_duration_breakdown
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.repositories.series import upsert_series_records
 
@@ -26,6 +27,25 @@ def _assert_duration_breakdown(summary):
     for key in ('api_ms', 'rate_limit_wait_ms', 'db_read_ms', 'db_write_ms', 'parse_ms', 'other_ms'):
         assert key in breakdown
         assert breakdown[key] >= 0
+
+
+def test_format_duration_breakdown_uses_friendly_units():
+    text = format_duration_breakdown(
+        {
+            'api_ms': 66164.68,
+            'rate_limit_wait_ms': 178734.75,
+            'db_read_ms': 4586.63,
+            'db_write_ms': 277092.41,
+            'parse_ms': 26.58,
+            'precheck_ms': 5516.23,
+            'other_ms': 0,
+        }
+    )
+
+    assert 'API=1m6.2s' in text
+    assert '限流等待=2m58.7s' in text
+    assert '读库=4.59s' in text
+    assert '解析=27ms' in text
 
 
 @dataclass(frozen=True)

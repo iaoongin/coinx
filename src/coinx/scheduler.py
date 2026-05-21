@@ -27,6 +27,7 @@ from .config import (
 )
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
 from .repositories.market_structure_score import get_market_structure_score_symbols
+from .collector.timing import format_duration_ms
 from .utils import logger
 
 
@@ -157,14 +158,14 @@ def scheduled_repair_market_rolling():
         )
         logger.info(
             '滚动修补市场币种最新点完成: symbols=%d precheck_complete=%d pending_tasks=%d '
-            'success=%d failure=%d skipped=%d duration_ms=%.2f',
+            'success=%d failure=%d skipped=%d duration=%s',
             len(score_symbols),
             precheck_complete,
             task_total,
             summary.get('success_count', 0),
             summary.get('failure_count', 0),
             summary.get('skipped_count', 0),
-            summary.get('duration_ms', 0.0),
+            format_duration_ms(summary.get('duration_ms', 0.0)),
         )
     except Exception as e:
         _mark_job_finished('repair_market_rolling_job', status='error', error=e, started_at=started_at)
@@ -215,13 +216,13 @@ if REPAIR_HISTORY_ENABLED:
             )
             _mark_job_finished('repair_market_history_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
             logger.info(
-                '低频历史补齐任务完成: status=%s symbols=%d success=%d failure=%d skipped=%d duration_ms=%.2f',
+                '低频历史补齐任务完成: status=%s symbols=%d success=%d failure=%d skipped=%d duration=%s',
                 summary.get('status'),
                 len(symbols),
                 summary.get('success_count', 0),
                 summary.get('failure_count', 0),
                 summary.get('skipped_count', 0),
-                summary.get('duration_ms', 0.0),
+                format_duration_ms(summary.get('duration_ms', 0.0)),
             )
         except Exception as e:
             _mark_job_finished('repair_market_history_job', status='error', error=e, started_at=started_at)

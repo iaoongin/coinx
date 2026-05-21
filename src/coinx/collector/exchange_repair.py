@@ -13,6 +13,7 @@ from coinx.collector.timing import (
     attach_other_duration,
     empty_duration_breakdown,
     format_duration_breakdown,
+    format_duration_ms,
     round_duration_breakdown,
     sum_duration_breakdowns,
     timed_category,
@@ -305,8 +306,8 @@ def _log_repair_summary(summary):
         f"跳过={summary['skipped_count']} "
         f"跳过原因={_format_reason_counts(summary.get('results') or [])} "
         f"各交易所={_format_exchange_result_summary(summary.get('results') or [], summary.get('exchanges') or [])} "
-        f"耗时={summary['duration_ms']:.2f}ms "
-        f"耗时分类={format_duration_breakdown(summary.get('duration_breakdown_ms'))}"
+        f"耗时={format_duration_ms(summary.get('duration_ms'))} "
+        f"累计耗时分类={format_duration_breakdown(summary.get('duration_breakdown_ms'))}"
     )
     if extra_parts:
         message = f"{message} {' '.join(extra_parts)}"
@@ -696,12 +697,12 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
     precheck_breakdown['precheck_ms'] += precheck_duration_ms
     unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
     logger.info(
-        '预检完成: 模式=rolling 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 耗时=%.2fms',
+        '预检完成: 模式=rolling 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 耗时=%s',
         _format_exchange_progress(exchange_progress) if exchange_progress else '无',
         precheck_skipped_count,
         len(tasks),
         unsupported_count,
-        precheck_duration_ms,
+        format_duration_ms(precheck_duration_ms),
     )
 
     def worker(task, db_session=None):
@@ -803,13 +804,13 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
-            '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%.2fms',
+            '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s',
             exchange,
             result_stats['success_count'],
             result_stats['failure_count'],
             result_stats['skipped_count'],
             _format_reason_counts(group_results),
-            (time.perf_counter() - started) * 1000,
+            format_duration_ms((time.perf_counter() - started) * 1000),
         )
         return group_results
 
@@ -1088,13 +1089,13 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
-            '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%.2fms',
+            '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s',
             exchange,
             result_stats['success_count'],
             result_stats['failure_count'],
             result_stats['skipped_count'],
             _format_reason_counts(group_results),
-            (time.perf_counter() - started) * 1000,
+            format_duration_ms((time.perf_counter() - started) * 1000),
         )
         return group_results
 

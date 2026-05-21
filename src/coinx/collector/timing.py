@@ -76,10 +76,22 @@ def attach_other_duration(breakdown, total_ms):
     measured = sum(
         value
         for key, value in normalize_duration_breakdown(breakdown).items()
-        if key not in ('other_ms', 'cooldown_skip_ms')
+        if key not in ('other_ms', 'cooldown_skip_ms', 'precheck_ms')
     )
     breakdown['other_ms'] = max(0.0, float(total_ms or 0.0) - measured)
     return round_duration_breakdown(breakdown)
+
+
+def format_duration_ms(duration_ms):
+    duration_ms = max(0.0, float(duration_ms or 0.0))
+    if duration_ms < 1000:
+        return f'{duration_ms:.0f}ms'
+    seconds = duration_ms / 1000
+    if seconds < 60:
+        return f'{seconds:.2f}s'
+    minutes = int(seconds // 60)
+    remaining_seconds = seconds - minutes * 60
+    return f'{minutes}m{remaining_seconds:.1f}s'
 
 
 def format_duration_breakdown(breakdown):
@@ -90,11 +102,11 @@ def format_duration_breakdown(breakdown):
         ('读库', 'db_read_ms'),
         ('写库', 'db_write_ms'),
         ('解析', 'parse_ms'),
-        ('预检', 'precheck_ms'),
+        ('预检墙钟', 'precheck_ms'),
         ('其他', 'other_ms'),
     )
-    parts = [f'{label}={breakdown.get(key, 0.0):.2f}ms' for label, key in labels]
+    parts = [f'{label}={format_duration_ms(breakdown.get(key, 0.0))}' for label, key in labels]
     cooldown_skip_ms = breakdown.get('cooldown_skip_ms', 0.0)
     if cooldown_skip_ms > 0:
-        parts.append(f'冷却剩余={cooldown_skip_ms:.2f}ms')
+        parts.append(f'冷却剩余={format_duration_ms(cooldown_skip_ms)}')
     return ','.join(parts)
