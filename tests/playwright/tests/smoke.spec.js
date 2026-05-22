@@ -21,13 +21,6 @@ test.describe('契约 Smoke', () => {
     await expect(button(page, '从币安更新币种')).toBeVisible();
   });
 
-  test('历史序列关键元素可见', async ({ page }) => {
-    await visit(page, '/binance-series');
-    await expect(heading(page, 'Binance 历史序列管理', 1)).toBeVisible();
-    await expect(button(page, '执行缺口修补')).toBeVisible();
-    await expect(button(page, '执行单条采集')).toBeVisible();
-  });
-
   test('对冲计算器关键元素可见', async ({ page }) => {
     await visit(page, '/hedge-calculator');
     await expect(heading(page, '对冲计算器', 1)).toBeVisible();

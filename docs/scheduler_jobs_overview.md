@@ -29,7 +29,6 @@
 | `market_rank_refresh_job` | `scheduled_market_rank_refresh` | 行情刷新 | `interval`，每 `UPDATE_INTERVAL` 秒 | 刷新行情榜快照 | 全市场行情榜币种 | 行情榜快照数据 | 是 |
 | `repair_market_rolling_job` | `scheduled_repair_market_rolling` | 滚动修补 | `interval`，每 `REPAIR_TRACKED_INTERVAL` 秒 | 滚动修补市场币种最新序列 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
 | `repair_market_history_job` | `scheduled_repair_market_history` | 历史补齐 | `interval`，每 `REPAIR_HISTORY_INTERVAL` 秒 | 补市场币种历史缺口 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
-| `binance_series_repair_job` | `scheduled_binance_series_repair_update` | 专项修补 | `interval`，每 `BINANCE_SERIES_REPAIR_INTERVAL` 秒 | 修补 Binance 专有序列 | Binance 币种 | Binance 专有情绪与结构序列 | 是 |
 | `update_coins_config_job` | `scheduled_coins_config_update` | 配置刷新 | `cron`，每天 `00:00` | 刷新跟踪币配置 | 币种配置 | 跟踪币配置列表 | 否 |
 
 ## 启动期补全任务
@@ -82,23 +81,7 @@
 - 与滚动修补不同，这个任务不是补最新点，而是补历史缺口
 - 用于保证长窗口计算时数据连续
 
-### 4. `binance_series_repair_job`
-
-- 任务类型：专项修补
-- 主要作用：修补 Binance 独有序列
-- 范围：
-  - Binance
-- 主要数据：
-  - 大户持仓比
-  - 大户账户比
-  - 全市场账户比
-
-说明：
-
-- 这些序列不属于当前多交易所统一修补任务
-- 因此需要单独保留该任务
-
-### 5. `update_coins_config_job`
+### 4. `update_coins_config_job`
 
 - 任务类型：配置刷新
 - 主要作用：更新跟踪币配置
@@ -135,7 +118,6 @@
 - 跟踪币最新点滚动修补
 - 成交额前 N 最新点滚动修补
 - 市场币种历史缺口补齐
-- Binance 专有序列补齐
 - 启动期立即补一轮市场币种最新序列
 
 ### 当前不属于这些定时任务的能力
@@ -151,7 +133,6 @@
 - 一个行情刷新任务：`market_rank_refresh_job`
 - 一个统一滚动修补任务：`repair_market_rolling_job`
 - 一个统一历史补齐任务：`repair_market_history_job`
-- 一个 Binance 专项任务：`binance_series_repair_job`
 - 一个配置刷新任务：`update_coins_config_job`
 - 一个启动即执行一次的市场补全任务：`start_startup_repair`
 

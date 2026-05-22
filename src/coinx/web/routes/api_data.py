@@ -6,8 +6,6 @@ from flask import Blueprint, jsonify, request
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector import (
-    collect_and_store_series,
-    collect_series_batch,
     get_24hr_ticker,
     get_exchange_distribution_real,
     get_funding_rate,
@@ -20,21 +18,8 @@ from coinx.collector import (
     repair_tracked_symbols,
 )
 from coinx.collector.exchange_repair import resolve_repair_worker_count
-from coinx.collector.binance.repair import (
-    repair_rolling_tracked_symbols as repair_binance_rolling_tracked_symbols,
-)
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
 from coinx.config import (
-    BINANCE_SERIES_LIMIT,
-    BINANCE_SERIES_PERIODS,
-    BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS,
-    BINANCE_SERIES_REPAIR_ENABLED,
-    BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
-    BINANCE_SERIES_REPAIR_INTERVAL,
-    BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
-    BINANCE_SERIES_REPAIR_PERIOD,
-    BINANCE_SERIES_REPAIR_SLEEP_MS,
-    BINANCE_SERIES_TYPES,
     ENABLED_EXCHANGES,
     REPAIR_HISTORY_COVERAGE_HOURS,
     REPAIR_HISTORY_ENABLED,
@@ -70,23 +55,10 @@ HOMEPAGE_SNAPSHOT_CACHE = {}
 HOME_PAGE_LAST_REFRESH_SUMMARY = None
 MARKET_STRUCTURE_LAST_REFRESH_SUMMARY = None
 
-SUPPORTED_SERIES_TYPES = {
-    'top_long_short_position_ratio',
-    'top_long_short_account_ratio',
-    'open_interest_hist',
-    'klines',
-    'global_long_short_account_ratio',
-    'taker_buy_sell_vol',
-}
 MARKET_STRUCTURE_MARKET_SERIES_TYPES = {
     'klines',
     'open_interest_hist',
     'taker_buy_sell_vol',
-}
-MARKET_STRUCTURE_SENTIMENT_SERIES_TYPES = {
-    'top_long_short_position_ratio',
-    'top_long_short_account_ratio',
-    'global_long_short_account_ratio',
 }
 
 TASK_JOB_ACTIONS = {'run', 'pause', 'resume'}
@@ -94,7 +66,6 @@ TASK_JOB_LABELS = {
     'market_rank_refresh_job': '行情榜快照刷新',
     'repair_market_rolling_job': '市场滚动补齐',
     'repair_market_history_job': '低频历史补齐',
-    'binance_series_repair_job': 'Binance 历史修补',
     'update_coins_config_job': '币种配置刷新',
 }
 
@@ -319,21 +290,14 @@ def _run_market_structure_refresh(symbols, series_types, exchanges=None):
             for series_type in normalized_series_types
             if series_type in MARKET_STRUCTURE_MARKET_SERIES_TYPES
         ]
-        sentiment_series_types = [
-            series_type
-            for series_type in normalized_series_types
-            if series_type in MARKET_STRUCTURE_SENTIMENT_SERIES_TYPES
-        ]
 
         market_summary = None
-        sentiment_summary = None
 
         logger.info(
-            '开始执行市场结构评分补齐: symbols=%s exchanges=%s market_series=%s sentiment_series=%s',
+            '开始执行市场结构评分补齐: symbols=%s exchanges=%s market_series=%s',
             len(symbols or []),
             exchanges or [],
             market_series_types,
-            sentiment_series_types,
         )
 
         if market_series_types:
@@ -349,18 +313,6 @@ def _run_market_structure_refresh(symbols, series_types, exchanges=None):
             )
             _log_market_structure_refresh_component('market_series', market_summary)
 
-        if sentiment_series_types:
-            sentiment_started_at = time.perf_counter()
-            sentiment_summary = repair_binance_rolling_tracked_symbols(
-                symbols=symbols,
-                series_types=sentiment_series_types,
-            )
-            logger.info(
-                '市场结构评分情绪序列补齐耗时=%.2fs',
-                time.perf_counter() - sentiment_started_at,
-            )
-            _log_market_structure_refresh_component('binance_sentiment_series', sentiment_summary)
-
         component_results = []
         if market_summary:
             market_stats = _summarize_market_structure_refresh_results(market_summary)
@@ -372,24 +324,13 @@ def _run_market_structure_refresh(symbols, series_types, exchanges=None):
                     'stats': market_stats,
                 }
             )
-        if sentiment_summary:
-            sentiment_stats = _summarize_market_structure_refresh_results(sentiment_summary)
-            component_results.append(
-                {
-                    'component': 'binance_sentiment_series',
-                    'mode': sentiment_summary.get('mode') or 'rolling',
-                    'summary': sentiment_summary,
-                    'stats': sentiment_stats,
-                }
-            )
 
-        success_count = sum((item.get('success_count') or 0) for item in (market_summary, sentiment_summary) if item)
-        failure_count = sum((item.get('failure_count') or 0) for item in (market_summary, sentiment_summary) if item)
-        skipped_count = sum((item.get('skipped_count') or 0) for item in (market_summary, sentiment_summary) if item)
+        success_count = market_summary.get('success_count', 0) if market_summary else 0
+        failure_count = market_summary.get('failure_count', 0) if market_summary else 0
+        skipped_count = market_summary.get('skipped_count', 0) if market_summary else 0
         merged_results = []
-        for item in (market_summary, sentiment_summary):
-            if item:
-                merged_results.extend(item.get('results') or [])
+        if market_summary:
+            merged_results.extend(market_summary.get('results') or [])
         total_stats = _summarize_market_structure_refresh_results({'results': merged_results})
 
         if failure_count == 0:
@@ -516,19 +457,6 @@ def _format_homepage_coins_payload(coins_data):
     return formatted_data
 
 
-def _validate_series_types(series_types):
-    if series_types is None:
-        return None
-    if not isinstance(series_types, list):
-        return 'series_types must be a list'
-
-    invalid_types = [series_type for series_type in series_types if series_type not in SUPPORTED_SERIES_TYPES]
-    if invalid_types:
-        return f'unsupported series_type values: {invalid_types}'
-
-    return None
-
-
 def _normalize_series_types(value):
     if value is None:
         return []
@@ -537,39 +465,6 @@ def _normalize_series_types(value):
     if isinstance(value, str):
         return [item.strip() for item in value.split(',') if item.strip()]
     return [item for item in value if item]
-
-
-@api_data_bp.route('/api/binance-series/config')
-def get_binance_series_config():
-    return jsonify(
-        {
-            'status': 'success',
-            'message': 'binance series config loaded',
-            'data': {
-                'collect': {
-                    'limit': BINANCE_SERIES_LIMIT,
-                    'series_types': _normalize_series_types(BINANCE_SERIES_TYPES),
-                    'periods': _normalize_series_types(BINANCE_SERIES_PERIODS),
-                },
-                'repair': {
-                    'enabled': BINANCE_SERIES_REPAIR_ENABLED,
-                    'interval': BINANCE_SERIES_REPAIR_INTERVAL,
-                    'period': BINANCE_SERIES_REPAIR_PERIOD,
-                    'bootstrap_days': BINANCE_SERIES_REPAIR_BOOTSTRAP_DAYS,
-                    'klines_page_limit': BINANCE_SERIES_REPAIR_KLINES_PAGE_LIMIT,
-                    'futures_page_limit': BINANCE_SERIES_REPAIR_FUTURES_PAGE_LIMIT,
-                    'sleep_ms': BINANCE_SERIES_REPAIR_SLEEP_MS,
-                    'rolling_points': REPAIR_ROLLING_POINTS,
-                    'rolling_max_workers': _default_exchange_repair_workers(),
-                    'history_enabled': REPAIR_HISTORY_ENABLED,
-                    'history_interval': REPAIR_HISTORY_INTERVAL,
-                    'history_max_workers': _default_exchange_repair_workers(),
-                    'history_symbol_batch_size': REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
-                    'history_coverage_hours': REPAIR_HISTORY_COVERAGE_HOURS,
-                },
-            },
-        }
-    )
 
 
 @api_data_bp.route('/api/market-structure-score')
@@ -918,115 +813,3 @@ def control_task_job(job_id):
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to {action} job: {str(e)}'}), 500
 
-
-@api_data_bp.route('/api/binance-series/collect', methods=['POST'])
-def collect_binance_series():
-    payload = request.get_json(silent=True) or {}
-    series_type = payload.get('series_type')
-    symbol = payload.get('symbol')
-    period = payload.get('period')
-    limit = payload.get('limit')
-
-    if not series_type or not symbol or not period or limit is None:
-        return jsonify(
-            {
-                'status': 'error',
-                'message': 'missing required fields: series_type, symbol, period, limit',
-            }
-        ), 400
-
-    if series_type not in SUPPORTED_SERIES_TYPES:
-        return jsonify({'status': 'error', 'message': f'unsupported series_type: {series_type}'}), 400
-
-    try:
-        result = collect_and_store_series(
-            series_type=series_type,
-            symbol=symbol,
-            period=period,
-            limit=int(limit),
-        )
-        return jsonify({'status': 'success', 'message': 'series collected', 'data': result})
-    except Exception as e:
-        logger.error(f'采集历史序列失败: {e}')
-        logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to collect series: {str(e)}'}), 500
-
-
-@api_data_bp.route('/api/binance-series/batch-collect', methods=['POST'])
-def batch_collect_binance_series():
-    payload = request.get_json(silent=True) or {}
-    symbols = payload.get('symbols')
-    periods = payload.get('periods')
-    series_types = payload.get('series_types')
-    limit = payload.get('limit')
-
-    if not symbols or not periods or limit is None:
-        return jsonify(
-            {
-                'status': 'error',
-                'message': 'missing required fields: symbols, periods, limit',
-            }
-        ), 400
-
-    if not isinstance(symbols, list) or not isinstance(periods, list):
-        return jsonify({'status': 'error', 'message': 'symbols and periods must be lists'}), 400
-
-    error = _validate_series_types(series_types)
-    if error:
-        return jsonify({'status': 'error', 'message': error}), 400
-
-    try:
-        result = collect_series_batch(
-            symbols=symbols,
-            periods=periods,
-            series_types=series_types,
-            limit=int(limit),
-        )
-        return jsonify({'status': 'success', 'message': 'batch series collected', 'data': result})
-    except Exception as e:
-        logger.error(f'批量采集历史序列失败: {e}')
-        logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to batch collect series: {str(e)}'}), 500
-
-
-@api_data_bp.route('/api/binance-series/repair-tracked', methods=['POST'])
-def repair_tracked_binance_series():
-    payload = request.get_json(silent=True) or {}
-    symbols = payload.get('symbols')
-    exchanges = payload.get('exchanges')
-    series_types = payload.get('series_types')
-    mode = payload.get('mode', 'history')
-    full_scan = bool(payload.get('full_scan', False))
-    coverage_hours = payload.get('coverage_hours')
-    max_workers = payload.get('max_workers')
-
-    error = _validate_series_types(series_types)
-    if error:
-        return jsonify({'status': 'error', 'message': error}), 400
-    if symbols is not None and not isinstance(symbols, list):
-        return jsonify({'status': 'error', 'message': 'symbols must be a list'}), 400
-    if exchanges is not None and not isinstance(exchanges, list):
-        return jsonify({'status': 'error', 'message': 'exchanges must be a list'}), 400
-    if mode not in ('history', 'legacy'):
-        return jsonify({'status': 'error', 'message': 'mode must be history or legacy'}), 400
-
-    try:
-        if symbols is None and coverage_hours is None and max_workers is None and not full_scan:
-            repair_kwargs = {'series_types': series_types}
-            if exchanges is not None:
-                repair_kwargs['exchanges'] = exchanges
-            result = repair_tracked_symbols(**repair_kwargs)
-        else:
-            result = repair_tracked_symbols(
-                symbols=symbols,
-                series_types=series_types,
-                exchanges=exchanges,
-                coverage_hours=int(coverage_hours) if coverage_hours is not None else None,
-                max_workers=int(max_workers) if max_workers is not None else 1,
-                symbol_batch_size=None if full_scan else REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
-            )
-        return jsonify({'status': 'success', 'message': 'tracked series repaired', 'data': result})
-    except Exception as e:
-        logger.error(f'修补已跟踪币种历史序列失败: {e}')
-        logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to repair tracked series: {str(e)}'}), 500

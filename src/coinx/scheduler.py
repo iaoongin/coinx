@@ -8,12 +8,10 @@ from .collector import (
     refresh_market_tickers,
     repair_rolling_tracked_symbols,
     run_history_repair_job,
-    run_series_repair_job,
 )
 from .collector.exchange_repair import resolve_repair_worker_count
 from .coin_manager import get_active_coins, update_coins_config
 from .config import (
-    BINANCE_SERIES_REPAIR_INTERVAL,
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
     FETCH_COINS_TOP_VOLUME_COUNT,
@@ -228,24 +226,6 @@ if REPAIR_HISTORY_ENABLED:
             _mark_job_finished('repair_market_history_job', status='error', error=e, started_at=started_at)
             logger.error(f'低频历史补齐任务失败: {e}')
             logger.exception(e)
-
-
-@scheduler.scheduled_job('interval', seconds=BINANCE_SERIES_REPAIR_INTERVAL, id='binance_series_repair_job')
-def scheduled_binance_series_repair_update():
-    """Run the configured generic Binance series repair job."""
-    started_at = time.perf_counter()
-    _mark_job_started('binance_series_repair_job')
-    try:
-        summary = run_series_repair_job()
-        _mark_job_finished('binance_series_repair_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
-        logger.info(
-            f"Binance 历史序列定时修补完成: 状态={summary.get('status')}, "
-            f"成功={summary.get('success_count', 0)}, 失败={summary.get('failure_count', 0)}"
-        )
-    except Exception as e:
-        _mark_job_finished('binance_series_repair_job', status='error', error=e, started_at=started_at)
-        logger.error(f'Binance 历史序列定时修补任务失败: {e}')
-        logger.exception(e)
 
 
 @scheduler.scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')

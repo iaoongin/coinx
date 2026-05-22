@@ -2,7 +2,6 @@ const NAV_ITEMS = [
   { name: '首页', href: '/' },
   { name: '行情榜', href: '/market-rank' },
   { name: '结构评分', href: '/market-structure-score' },
-  { name: '历史序列', href: '/binance-series' },
   { name: '对冲计算器', href: '/hedge-calculator' },
   { name: '币种配置', href: '/coins-config' },
   { name: '任务管理', href: '/task-jobs' },

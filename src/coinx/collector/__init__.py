@@ -23,28 +23,14 @@ from coinx.collector.binance.service import (
 )
 from coinx.collector.binance.cache import get_cache_update_time, should_update_cache
 from coinx.collector.binance.series import (
-    collect_and_store_series,
-    collect_series_batch,
-    fetch_global_long_short_account_ratio,
     fetch_klines,
     fetch_open_interest_hist,
     fetch_series_payload,
     fetch_taker_buy_sell_vol,
-    fetch_top_long_short_account_ratio,
-    fetch_top_long_short_position_ratio,
-    parse_global_long_short_account_ratio,
     parse_klines,
     parse_open_interest_hist,
     parse_series_payload,
     parse_taker_buy_sell_vol,
-    parse_top_long_short_account_ratio,
-    parse_top_long_short_position_ratio,
-)
-from coinx.collector.binance.repair import (
-    build_repair_window,
-    floor_to_completed_5m,
-    repair_single_series,
-    run_series_repair_job as run_binance_series_repair_job,
 )
 from coinx.collector.exchange_repair import (
     repair_history_symbols,
@@ -120,7 +106,3 @@ def run_history_repair_job(symbols=None, series_types=None, full_scan=False, exc
         full_scan=full_scan,
         max_workers=max_workers,
     )
-
-
-def run_series_repair_job():
-    return run_binance_series_repair_job()

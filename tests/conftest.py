@@ -11,12 +11,6 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from coinx.database import Base
 from coinx.models import (
-    BinanceTopLongShortPositionRatio,
-    BinanceTopLongShortAccountRatio,
-    BinanceOpenInterestHist,
-    BinanceKline,
-    BinanceGlobalLongShortAccountRatio,
-    BinanceTakerBuySellVol,
     MarketKline,
     MarketOpenInterestHist,
     MarketTickers,
@@ -30,12 +24,6 @@ def db_session():
     Base.metadata.create_all(
         bind=engine,
         tables=[
-            BinanceTopLongShortPositionRatio.__table__,
-            BinanceTopLongShortAccountRatio.__table__,
-            BinanceOpenInterestHist.__table__,
-            BinanceKline.__table__,
-            BinanceGlobalLongShortAccountRatio.__table__,
-            BinanceTakerBuySellVol.__table__,
             MarketOpenInterestHist.__table__,
             MarketKline.__table__,
             MarketTakerBuySellVol.__table__,

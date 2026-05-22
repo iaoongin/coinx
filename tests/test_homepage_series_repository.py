@@ -10,9 +10,6 @@ from coinx.repositories.homepage_series import (
     should_refresh_homepage_series,
 )
 from coinx.models import (
-    BinanceKline,
-    BinanceOpenInterestHist,
-    BinanceTakerBuySellVol,
     MarketKline,
     MarketOpenInterestHist,
     MarketTakerBuySellVol,
@@ -39,17 +36,18 @@ def seed_series(
         open_price = price_base + index * price_step - 0.5
         close_price = price_base + index * price_step
         session.add(
-            BinanceOpenInterestHist(
+            MarketOpenInterestHist(
+                exchange='binance',
                 symbol=symbol,
                 period='5m',
                 event_time=event_time,
                 sum_open_interest=oi_base + index * oi_step,
                 sum_open_interest_value=(oi_base + index * oi_step) * close_price,
-                cmc_circulating_supply=None,
             )
         )
         session.add(
-            BinanceKline(
+            MarketKline(
+                exchange='binance',
                 symbol=symbol,
                 period='5m',
                 open_time=event_time,
@@ -67,7 +65,8 @@ def seed_series(
         )
         if include_taker_vol:
             session.add(
-                BinanceTakerBuySellVol(
+                MarketTakerBuySellVol(
+                    exchange='binance',
                     symbol=symbol,
                     period='5m',
                     event_time=event_time,
@@ -113,10 +112,10 @@ def test_get_homepage_series_data_uses_oi_kline_anchor_when_taker_vol_lags(db_se
     pytest.skip('旧的单交易所部分可用语义已废弃')
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 20, include_taker_vol=True)
-    db_session.query(BinanceTakerBuySellVol).filter(
-        BinanceTakerBuySellVol.symbol == 'BTCUSDT',
-        BinanceTakerBuySellVol.period == '5m',
-        BinanceTakerBuySellVol.event_time == start_time + 19 * FIVE_MINUTES_MS,
+    db_session.query(MarketTakerBuySellVol).filter(
+        MarketTakerBuySellVol.symbol == 'BTCUSDT',
+        MarketTakerBuySellVol.period == '5m',
+        MarketTakerBuySellVol.event_time == start_time + 19 * FIVE_MINUTES_MS,
     ).delete()
     db_session.commit()
 
@@ -137,10 +136,10 @@ def test_get_homepage_series_data_keeps_168h_changes_when_taker_vol_lags_by_one_
     pytest.skip('旧的单交易所部分可用语义已废弃')
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 2017, include_taker_vol=True)
-    db_session.query(BinanceTakerBuySellVol).filter(
-        BinanceTakerBuySellVol.symbol == 'BTCUSDT',
-        BinanceTakerBuySellVol.period == '5m',
-        BinanceTakerBuySellVol.event_time == start_time + 2016 * FIVE_MINUTES_MS,
+    db_session.query(MarketTakerBuySellVol).filter(
+        MarketTakerBuySellVol.symbol == 'BTCUSDT',
+        MarketTakerBuySellVol.period == '5m',
+        MarketTakerBuySellVol.event_time == start_time + 2016 * FIVE_MINUTES_MS,
     ).delete()
     db_session.commit()
 
@@ -163,10 +162,10 @@ def test_get_homepage_series_data_returns_none_for_missing_interval_points(db_se
 
     missing_target_time = start_time + 8 * FIVE_MINUTES_MS
     missing_window_time = start_time + 9 * FIVE_MINUTES_MS
-    db_session.query(BinanceKline).filter(
-        BinanceKline.symbol == 'BTCUSDT',
-        BinanceKline.period == '5m',
-        BinanceKline.open_time.in_([missing_target_time, missing_window_time]),
+    db_session.query(MarketKline).filter(
+        MarketKline.symbol == 'BTCUSDT',
+        MarketKline.period == '5m',
+        MarketKline.open_time.in_([missing_target_time, missing_window_time]),
     ).delete()
     db_session.commit()
 
@@ -185,9 +184,9 @@ def test_get_homepage_series_data_logs_kline_rejection_reason(db_session, monkey
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 2017, include_taker_vol=True)
-    db_session.query(BinanceKline).filter(
-        BinanceKline.symbol == 'BTCUSDT',
-        BinanceKline.period == '5m',
+    db_session.query(MarketKline).filter(
+        MarketKline.symbol == 'BTCUSDT',
+        MarketKline.period == '5m',
     ).delete()
     db_session.commit()
 
@@ -211,9 +210,9 @@ def test_get_homepage_series_data_logs_open_interest_rejection_reason(db_session
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 2017, include_taker_vol=True)
-    db_session.query(BinanceOpenInterestHist).filter(
-        BinanceOpenInterestHist.symbol == 'BTCUSDT',
-        BinanceOpenInterestHist.period == '5m',
+    db_session.query(MarketOpenInterestHist).filter(
+        MarketOpenInterestHist.symbol == 'BTCUSDT',
+        MarketOpenInterestHist.period == '5m',
     ).delete()
     db_session.commit()
 
@@ -323,7 +322,7 @@ def test_load_taker_vol_model_map_batches_small_symbol_sets(db_session, monkeypa
 
     records = _load_taker_vol_model_map(
         db_session,
-        BinanceTakerBuySellVol,
+        MarketTakerBuySellVol,
         symbols,
     )
 
@@ -472,10 +471,10 @@ def test_get_homepage_series_snapshot_ignores_empty_symbol_current_time_when_com
 def test_should_refresh_homepage_series_when_latest_is_current_but_long_history_is_missing(db_session):
     start_time = 1_700_000_000_000
     seed_series(db_session, 'BTCUSDT', start_time, 2017, include_taker_vol=True)
-    db_session.query(BinanceOpenInterestHist).filter(
-        BinanceOpenInterestHist.symbol == 'BTCUSDT',
-        BinanceOpenInterestHist.period == '5m',
-        BinanceOpenInterestHist.event_time < start_time + 1441 * FIVE_MINUTES_MS,
+    db_session.query(MarketOpenInterestHist).filter(
+        MarketOpenInterestHist.symbol == 'BTCUSDT',
+        MarketOpenInterestHist.period == '5m',
+        MarketOpenInterestHist.event_time < start_time + 1441 * FIVE_MINUTES_MS,
     ).delete()
     db_session.commit()
 

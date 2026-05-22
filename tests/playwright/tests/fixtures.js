@@ -183,23 +183,6 @@ const mockMarketRankRefreshed = [
   },
 ];
 
-const mockBinanceSeriesConfig = {
-  collect: {
-    limit: 30,
-    series_types: ['klines', 'open_interest_hist', 'top_long_short_position_ratio'],
-    periods: ['5m', '15m', '1h'],
-  },
-  repair: {
-    enabled: true,
-    interval: 300,
-    period: '5m',
-    bootstrap_days: 7,
-    klines_page_limit: 1000,
-    futures_page_limit: 500,
-    sleep_ms: 0,
-  },
-};
-
 const mockCoinDetail = {
   symbol: 'BTCUSDT',
   latest_price: 69234.12,
@@ -308,15 +291,6 @@ const mockMarketStructureScores = [
       },
     ],
     funding_rate: 0.0008,
-    binance_context: {
-      top_long_short_position_ratio: { current: { long_short_ratio: 1.96 }, previous: { long_short_ratio: 1.83 } },
-      top_long_short_account_ratio: { current: { long_short_ratio: 1.48 }, previous: { long_short_ratio: 1.37 } },
-      global_long_short_account_ratio: { current: { long_short_ratio: 0.88 }, previous: { long_short_ratio: 0.95 } },
-    },
-    top_long_short_ratio: 1.96,
-    global_long_short_ratio: 0.88,
-    top_long_short_ratio_delta: 0.13,
-    global_long_short_ratio_delta: -0.07,
     exchange_open_interest: [
       { exchange: 'binance', open_interest: 1200000, open_interest_value: 40000000, share_percent: 52, quantity_share_percent: 55, score: 74.1, weighted_score: 38.53 },
       { exchange: 'okx', open_interest: 800000, open_interest_value: 25000000, share_percent: 31, quantity_share_percent: 29, score: 68.3, weighted_score: 21.17 },
@@ -350,15 +324,6 @@ const mockMarketStructureScores = [
       { exchange: 'okx', weight: 0.35, weight_percent: 35, total_score: 36.5, weighted_total_score: 12.8, open_interest_value: 15000000, open_interest: 420000, current_price: 3519.9, ema20: 3508.5, ema60: 3498.8, atr: 54.8, volume_ratio: 1.08, taker_net_pressure_ratio: 0.11, open_interest_change_ratio: 0.02, trend_direction: '震荡', momentum_direction: '弱', position_structure: '蓄势增仓', funding_rate: 0.0002 },
     ],
     funding_rate: 0.0003,
-    binance_context: {
-      top_long_short_position_ratio: { current: { long_short_ratio: 1.58 }, previous: { long_short_ratio: 1.50 } },
-      top_long_short_account_ratio: { current: { long_short_ratio: 1.25 }, previous: { long_short_ratio: 1.18 } },
-      global_long_short_account_ratio: { current: { long_short_ratio: 1.02 }, previous: { long_short_ratio: 0.97 } },
-    },
-    top_long_short_ratio: 1.58,
-    global_long_short_ratio: 1.02,
-    top_long_short_ratio_delta: 0.08,
-    global_long_short_ratio_delta: 0.05,
     exchange_open_interest: [
       { exchange: 'binance', open_interest: 800000, open_interest_value: 28000000, share_percent: 65, quantity_share_percent: 66, score: 40.0, weighted_score: 26.0 },
       { exchange: 'okx', open_interest: 420000, open_interest_value: 15000000, share_percent: 35, quantity_share_percent: 34, score: 36.5, weighted_score: 12.8 },
@@ -504,65 +469,6 @@ const test = base.extend({
       if (pathname === '/api/coins-config/update-from-binance' && request.method() === 'POST') {
         coinsConfig.XRPUSDT = false;
         await route.fulfill(jsonResponse({ status: 'success', message: '币种配置更新成功' }));
-        return;
-      }
-
-      if (pathname === '/api/binance-series/config') {
-        await route.fulfill(
-          jsonResponse({
-            status: 'success',
-            message: 'binance series config loaded',
-            data: mockBinanceSeriesConfig,
-          })
-        );
-        return;
-      }
-
-      if (pathname === '/api/binance-series/repair-tracked' && request.method() === 'POST') {
-        await route.fulfill(
-          jsonResponse({
-            status: 'success',
-            message: 'repair completed',
-            data: {
-              success_count: 3,
-              failure_count: 0,
-              skipped_count: 0,
-            },
-          })
-        );
-        return;
-      }
-
-      if (pathname === '/api/binance-series/collect' && request.method() === 'POST') {
-        const payload = request.postDataJSON();
-        await route.fulfill(
-          jsonResponse({
-            status: 'success',
-            message: 'collect completed',
-            data: {
-              affected: 1,
-              series_type: payload.series_type,
-              symbol: payload.symbol,
-              period: payload.period,
-            },
-          })
-        );
-        return;
-      }
-
-      if (pathname === '/api/binance-series/batch-collect' && request.method() === 'POST') {
-        const payload = request.postDataJSON();
-        await route.fulfill(
-          jsonResponse({
-            status: 'success',
-            message: 'batch collect completed',
-            data: {
-              success_count: payload.symbols.length,
-              failure_count: 0,
-              limit: payload.limit,
-            },
-          })
-        );
         return;
       }
 

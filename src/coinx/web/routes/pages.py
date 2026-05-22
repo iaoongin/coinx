@@ -52,13 +52,6 @@ def hedge_calculator():
     return render_template('hedge_calculator.html')
 
 
-@pages_bp.route('/binance-series')
-def binance_series():
-    """Binance 历史序列管理页面"""
-    logger.info("访问 Binance 历史序列管理页面")
-    return render_template('binance_series.html')
-
-
 @pages_bp.route('/market-structure-score')
 def market_structure_score():
     """合约市场结构评分页面"""

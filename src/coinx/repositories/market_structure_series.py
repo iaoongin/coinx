@@ -9,9 +9,6 @@ from coinx.collector.exchange_adapters import get_exchange_adapter, get_supporte
 from coinx.config import ENABLED_EXCHANGES, TIME_INTERVALS
 from coinx.database import get_session
 from coinx.models import (
-    BinanceKline,
-    BinanceOpenInterestHist,
-    BinanceTakerBuySellVol,
     MarketKline,
     MarketOpenInterestHist,
     MarketTakerBuySellVol,
@@ -99,58 +96,6 @@ def _build_taker_buy_sell_vol_point(row):
 
 def _get_enabled_exchanges():
     return _normalize_exchange_list(ENABLED_EXCHANGES)
-
-
-def _get_latest_series_time_map(session, model, symbols, time_field_name, upper_bound=None):
-    if not symbols:
-        return {}
-
-    time_field = getattr(model, time_field_name)
-    query = session.query(model.symbol, func.max(time_field)).filter(
-        model.symbol.in_(symbols),
-        model.period == '5m',
-    )
-    if upper_bound is not None:
-        query = query.filter(time_field <= upper_bound)
-    rows = query.group_by(model.symbol).all()
-    return {symbol: int(latest_time) for symbol, latest_time in rows if latest_time is not None}
-
-
-def _build_market_structure_lower_bounds(session, symbols, upper_bound=None):
-    latest_oi_time_map = _get_latest_series_time_map(
-        session=session,
-        model=BinanceOpenInterestHist,
-        symbols=symbols,
-        time_field_name='event_time',
-        upper_bound=upper_bound,
-    )
-    latest_kline_time_map = _get_latest_series_time_map(
-        session=session,
-        model=BinanceKline,
-        symbols=symbols,
-        time_field_name='open_time',
-        upper_bound=upper_bound,
-    )
-    latest_taker_vol_time_map = _get_latest_series_time_map(
-        session=session,
-        model=BinanceTakerBuySellVol,
-        symbols=symbols,
-        time_field_name='event_time',
-        upper_bound=upper_bound,
-    )
-
-    lower_bounds = {}
-    for symbol in symbols:
-        latest_oi_time = latest_oi_time_map.get(symbol)
-        latest_kline_time = latest_kline_time_map.get(symbol)
-        latest_taker_vol_time = latest_taker_vol_time_map.get(symbol)
-        if latest_oi_time is None or latest_kline_time is None or latest_taker_vol_time is None:
-            continue
-
-        current_time = min(latest_oi_time, latest_kline_time, latest_taker_vol_time)
-        lower_bounds[symbol] = current_time - _MARKET_STRUCTURE_LOOKBACK_MS
-
-    return lower_bounds
 
 
 def _get_recent_lower_bound(
@@ -560,69 +505,6 @@ def load_market_structure_exchange_maps(session, exchange, symbols, upper_bound=
     kline_map = component_results['kline']
     taker_maps_by_period = component_results['taker']
     quote_volume_24h_map = component_results['quote_volume_24h']
-
-    if exchange == 'binance':
-        legacy_start = time.perf_counter()
-        missing_oi_symbols = [symbol for symbol in symbols if not oi_map.get(symbol)]
-        missing_kline_symbols = [symbol for symbol in symbols if not kline_map.get(symbol)]
-        missing_taker_symbols = [
-            symbol
-            for symbol in symbols
-            if not (taker_maps_by_period.get('5m') or {}).get(symbol)
-        ]
-
-        if missing_oi_symbols:
-            legacy_oi_map = _load_open_interest_model_map(
-                session,
-                BinanceOpenInterestHist,
-                missing_oi_symbols,
-                upper_bound=upper_bound,
-                lookback_ms=_MARKET_STRUCTURE_CONTEXT_LOOKBACK_MS,
-            )
-            for symbol in missing_oi_symbols:
-                oi_map[symbol] = legacy_oi_map.get(symbol, {})
-
-        if missing_kline_symbols:
-            legacy_kline_map = _load_kline_model_map(
-                session,
-                BinanceKline,
-                missing_kline_symbols,
-                upper_bound=upper_bound,
-                lookback_ms=_MARKET_STRUCTURE_KLINE_LOOKBACK_MS,
-            )
-            for symbol in missing_kline_symbols:
-                kline_map[symbol] = legacy_kline_map.get(symbol, {})
-            legacy_quote_volume_24h_map = _load_quote_volume_24h_map(
-                session,
-                BinanceKline,
-                missing_kline_symbols,
-                upper_bound=upper_bound,
-            )
-            for symbol in missing_kline_symbols:
-                if symbol not in quote_volume_24h_map and symbol in legacy_quote_volume_24h_map:
-                    quote_volume_24h_map[symbol] = legacy_quote_volume_24h_map[symbol]
-
-        if missing_taker_symbols:
-            legacy_taker_map = _load_taker_vol_model_map(
-                session,
-                BinanceTakerBuySellVol,
-                missing_taker_symbols,
-                upper_bound=upper_bound,
-                period='5m',
-                lookback_ms=_MARKET_STRUCTURE_CONTEXT_LOOKBACK_MS,
-            )
-            taker_maps_by_period.setdefault('5m', {})
-            for symbol in missing_taker_symbols:
-                taker_maps_by_period['5m'][symbol] = legacy_taker_map.get(symbol, {})
-
-        logger.info(
-            '评分映射 Binance 兼容加载完成: exchange=%s missing_oi=%d missing_kline=%d missing_taker=%d 耗时=%.2fs',
-            exchange,
-            len(missing_oi_symbols),
-            len(missing_kline_symbols),
-            len(missing_taker_symbols),
-            time.perf_counter() - legacy_start,
-        )
 
     total_duration = time.perf_counter() - start_time
     slowest_component = 'N/A'

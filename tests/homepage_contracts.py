@@ -1,4 +1,4 @@
-from coinx.models import BinanceKline, BinanceOpenInterestHist, BinanceTakerBuySellVol
+from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.repositories.homepage_series import FIVE_MINUTES_MS
 
 
@@ -17,17 +17,18 @@ def seed_complete_homepage_series(session, symbol='BTCUSDT', start_time_ms=START
         taker_base = 2000.0 + index * 5.0
 
         session.add(
-            BinanceOpenInterestHist(
+            MarketOpenInterestHist(
+                exchange='binance',
                 symbol=symbol,
                 period='5m',
                 event_time=event_time,
                 sum_open_interest=open_interest,
                 sum_open_interest_value=open_interest_value,
-                cmc_circulating_supply=None,
             )
         )
         session.add(
-            BinanceKline(
+            MarketKline(
+                exchange='binance',
                 symbol=symbol,
                 period='5m',
                 open_time=event_time,
@@ -44,7 +45,8 @@ def seed_complete_homepage_series(session, symbol='BTCUSDT', start_time_ms=START
             )
         )
         session.add(
-            BinanceTakerBuySellVol(
+            MarketTakerBuySellVol(
+                exchange='binance',
                 symbol=symbol,
                 period='5m',
                 event_time=event_time,

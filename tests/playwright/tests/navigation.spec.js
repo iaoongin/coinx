@@ -1,7 +1,7 @@
 const { test, expect } = require('./fixtures');
 const { NAV_ITEMS, navLinks, visit } = require('./contracts');
 
-const pages = ['/', '/market-rank', '/market-structure-score', '/binance-series', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs'];
+const pages = ['/', '/market-rank', '/market-structure-score', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs'];
 
 async function navToContentGap(page) {
   const metrics = await page.evaluate(() => {

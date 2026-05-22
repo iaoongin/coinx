@@ -17,8 +17,7 @@
 
 1. 首页 `/`
 2. 行情榜 `/market-rank`
-3. 历史序列 `/binance-series`
-4. 币种配置 `/coins-config`
+3. 币种配置 `/coins-config`
 
 ---
 
@@ -89,7 +88,6 @@ test('导航菜单显示', async ({ page }) => {
   await page.goto('http://localhost:5000/');
   await expect(page.locator('text=首页')).toBeVisible();
   await expect(page.locator('text=行情榜')).toBeVisible();
-  await expect(page.locator('text=历史序列')).toBeVisible();
   await expect(page.locator('text=币种配置')).toBeVisible();
 });
 
@@ -153,14 +151,6 @@ test('搜索功能', async ({ page }) => {
 });
 ```
 
-#### binance_series.spec.js - 历史序列测试
-```javascript
-test('表单提交', async ({ page }) => {
-  await page.goto('http://localhost:5000/binance-series');
-  await page.click('text=执行单条采集');
-});
-```
-
 #### coin_detail.spec.js - 币种详情测试
 ```javascript
 test('详情页加载', async ({ page }) => {
@@ -176,7 +166,7 @@ test('详情页加载', async ({ page }) => {
 | Vue CDN 加载 | Vue 全局对象存在 |
 | Vue 实例挂载 | #app 元素有内容 |
 | Element Plus 加载 | UI 组件正常渲染 |
-| 导航栏 | 4个菜单项显示正确 |
+| 导航栏 | 菜单项显示正确 |
 | 导航高亮 | 当前页面对应菜单高亮 |
 | 导航跳转 | 点击跳转正确页面 |
 | 表格渲染 | 数据正确显示 |
@@ -212,17 +202,15 @@ test('详情页加载', async ({ page }) => {
 | 3.1 | index.html | 3分钟 |
 | 3.2 | market_rank.html | 3分钟 |
 | 3.3 | coins_config.html | 3分钟 |
-| 3.4 | binance_series.html | 3分钟 |
 
 ### 阶段 4：Vue 迁移
 
 | 步骤 | 页面 | 复杂度 | 预计时间 |
 |------|------|--------|----------|
-| 4.1 | binance_series.html | 低 | 1小时 |
-| 4.2 | coin_detail.html | 中 | 1小时 |
-| 4.3 | coins_config.html | 中 | 1-2小时 |
-| 4.4 | market_rank.html | 高 | 2-3小时 |
-| 4.5 | index.html | 高 | 2-3小时 |
+| 4.1 | coin_detail.html | 中 | 1小时 |
+| 4.2 | coins_config.html | 中 | 1-2小时 |
+| 4.3 | market_rank.html | 高 | 2-3小时 |
+| 4.4 | index.html | 高 | 2-3小时 |
 
 ### 阶段 5：E2E 测试验收
 

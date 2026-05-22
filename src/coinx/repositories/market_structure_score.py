@@ -3,22 +3,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 import time
 
-from sqlalchemy import func, or_
-
 from coinx.coin_manager import get_active_coins
 from coinx.collector.binance.market import get_all_funding_rates as get_all_binance_funding_rates
 from coinx.collector.bybit.series import get_all_funding_rates as get_all_bybit_funding_rates
-from coinx.collector.binance.repair import latest_closed_5m_open_time
+from coinx.collector.exchange_repair import latest_closed_5m_open_time
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
 from coinx.collector.gate.series import get_all_funding_rates as get_all_gate_funding_rates
 from coinx.collector.okx.series import get_all_funding_rates as get_all_okx_funding_rates
 from coinx.config import ENABLED_EXCHANGES, FETCH_COINS_TOP_VOLUME_COUNT
 from coinx.database import get_session
-from coinx.models import (
-    BinanceGlobalLongShortAccountRatio,
-    BinanceTopLongShortAccountRatio,
-    BinanceTopLongShortPositionRatio,
-)
 from coinx.repositories.market_tickers import get_market_ticker_symbols
 from coinx.repositories.market_structure_series import load_market_structure_exchange_maps
 from coinx.utils import logger
@@ -43,11 +36,6 @@ EXCHANGE_FUNDING_LOADERS = {
     'okx': get_all_okx_funding_rates,
     'bybit': get_all_bybit_funding_rates,
     'gate': get_all_gate_funding_rates,
-}
-BINANCE_CONTEXT_SERIES_LABELS = {
-    'top_long_short_position_ratio': '大户持仓比',
-    'top_long_short_account_ratio': '大户账户比',
-    'global_long_short_account_ratio': '全市场账户比',
 }
 EXCHANGE_DIAGNOSTIC_REASON_LABELS = {
     'included': '已纳入',
@@ -257,21 +245,6 @@ def _calc_position_score(current_price, previous_price, current_open_interest_va
     return 0, '换手'
 
 
-def _calc_sentiment_score(top_ratio_delta, global_ratio_delta):
-    if top_ratio_delta is None or global_ratio_delta is None:
-        return 0, '中性'
-
-    if top_ratio_delta > 0 and global_ratio_delta < 0:
-        return 10, '大户偏多，散户偏空/离场'
-    if top_ratio_delta < 0 and global_ratio_delta > 0:
-        return -10, '大户偏空，散户偏多/接盘'
-    if top_ratio_delta > 0 and global_ratio_delta > 0:
-        return 5, '多头共识增强'
-    if top_ratio_delta < 0 and global_ratio_delta < 0:
-        return -5, '空头共识增强'
-    return 0, '中性'
-
-
 def _calc_risk_score(direction_hint, funding_rate, price_move_ratio, atr_ratio):
     score = 0
     reasons = []
@@ -407,137 +380,6 @@ def _score_signal(total_score):
     return '强空', '只找反抽做空，不追空'
 
 
-def _load_binance_context(session, symbol, anchor_time):
-    context_map = _load_binance_context_map(session, [symbol], anchor_time)
-    return context_map.get(symbol, {})
-
-
-def _log_binance_context_freshness(context_map, anchor_time):
-    if not context_map:
-        logger.info('评分 Binance 情绪数据为空: anchor_time=%s', anchor_time)
-        return
-
-    for series_type in (
-        'top_long_short_position_ratio',
-        'top_long_short_account_ratio',
-        'global_long_short_account_ratio',
-    ):
-        matched = 0
-        stale = 0
-        missing = 0
-        latest_event_time = None
-        max_lag_bars = 0
-
-        for symbol_context in context_map.values():
-            current = ((symbol_context or {}).get(series_type) or {}).get('current') or {}
-            event_time = current.get('event_time')
-            if event_time is None:
-                missing += 1
-                continue
-
-            matched += 1
-            latest_event_time = max(latest_event_time or event_time, event_time)
-            lag_bars = 0
-            if anchor_time is not None and event_time <= anchor_time:
-                lag_bars = max(0, int((anchor_time - event_time) // (5 * 60 * 1000)))
-            max_lag_bars = max(max_lag_bars, lag_bars)
-            if lag_bars > 0:
-                stale += 1
-
-        logger.info(
-            '评分 Binance 情绪新鲜度: series_type=%s matched=%s missing=%s stale=%s latest_event_time=%s anchor_time=%s max_lag_bars=%s',
-            series_type,
-            matched,
-            missing,
-            stale,
-            latest_event_time,
-            anchor_time,
-            max_lag_bars,
-        )
-
-
-def _summarize_binance_context_health(context_map, anchor_time, symbol_count):
-    dimensions = []
-    latest_event_time = None
-    max_lag_bars = 0
-    ready_symbols = 0
-    available_symbols = 0
-
-    for series_type, label in BINANCE_CONTEXT_SERIES_LABELS.items():
-        matched = 0
-        stale = 0
-        missing = 0
-        dimension_latest_event_time = None
-        dimension_max_lag_bars = 0
-
-        for symbol_context in context_map.values():
-            current = ((symbol_context or {}).get(series_type) or {}).get('current') or {}
-            event_time = current.get('event_time')
-            if event_time is None:
-                missing += 1
-                continue
-
-            matched += 1
-            dimension_latest_event_time = max(dimension_latest_event_time or event_time, event_time)
-            lag_bars = 0
-            if anchor_time is not None and event_time <= anchor_time:
-                lag_bars = max(0, int((anchor_time - event_time) // (5 * 60 * 1000)))
-            dimension_max_lag_bars = max(dimension_max_lag_bars, lag_bars)
-            if lag_bars > 0:
-                stale += 1
-
-        latest_event_time = max(latest_event_time or dimension_latest_event_time, dimension_latest_event_time or 0) if dimension_latest_event_time is not None else latest_event_time
-        max_lag_bars = max(max_lag_bars, dimension_max_lag_bars)
-        coverage_percent = 0.0 if symbol_count <= 0 else (matched / symbol_count) * 100
-        dimensions.append(
-            {
-                'series_type': series_type,
-                'label': label,
-                'matched': matched,
-                'missing': missing,
-                'stale': stale,
-                'coverage_percent': coverage_percent,
-                'latest_event_time': dimension_latest_event_time,
-                'max_lag_bars': dimension_max_lag_bars,
-            }
-        )
-
-    for symbol_context in context_map.values():
-        available = False
-        ready = True
-        for series_type in BINANCE_CONTEXT_SERIES_LABELS:
-            current = ((symbol_context or {}).get(series_type) or {}).get('current') or {}
-            event_time = current.get('event_time')
-            if event_time is not None:
-                available = True
-            if event_time is None or (anchor_time is not None and event_time != anchor_time):
-                ready = False
-        if available:
-            available_symbols += 1
-        if ready:
-            ready_symbols += 1
-
-    worst_dimension = None
-    if dimensions:
-        worst_dimension = min(dimensions, key=lambda item: (item['coverage_percent'], item['matched'], item['label']))
-
-    overall_coverage_percent = 0.0
-    if dimensions:
-        overall_coverage_percent = sum(item['coverage_percent'] for item in dimensions) / len(dimensions)
-
-    return {
-        'symbol_count': symbol_count,
-        'ready_symbols': ready_symbols,
-        'available_symbols': available_symbols,
-        'overall_coverage_percent': overall_coverage_percent,
-        'latest_event_time': latest_event_time,
-        'max_lag_bars': max_lag_bars,
-        'lag_minutes': max_lag_bars * 5,
-        'worst_dimension': worst_dimension,
-        'dimensions': dimensions,
-    }
-
-
 def _build_exchange_diagnostic(exchange, included, reason, detail=None):
     return {
         'exchange': exchange,
@@ -600,71 +442,6 @@ def _build_symbol_exchange_diagnostics(exchange_maps, symbol, symbol_anchor_time
         diagnostics.append(_build_exchange_diagnostic(exchange, False, 'metric_unavailable', detail=detail))
 
     return diagnostics
-
-
-def _load_binance_context_map(session, symbols, anchor_time):
-    context_map = {symbol: {} for symbol in symbols}
-    models = {
-        'top_long_short_position_ratio': BinanceTopLongShortPositionRatio,
-        'top_long_short_account_ratio': BinanceTopLongShortAccountRatio,
-        'global_long_short_account_ratio': BinanceGlobalLongShortAccountRatio,
-    }
-
-    if not symbols:
-        return context_map
-
-    for key, model in models.items():
-        ranked_rows = (
-            session.query(
-                model.symbol.label('symbol'),
-                model.event_time.label('event_time'),
-                model.long_short_ratio.label('long_short_ratio'),
-                model.long_account.label('long_account'),
-                model.short_account.label('short_account'),
-                func.row_number().over(
-                    partition_by=model.symbol,
-                    order_by=model.event_time.desc(),
-                ).label('rn'),
-            )
-            .filter(model.symbol.in_(symbols), model.period == '5m')
-        )
-        if anchor_time is not None:
-            ranked_rows = ranked_rows.filter(model.event_time <= anchor_time)
-
-        subquery = ranked_rows.subquery()
-        rows = (
-            session.query(subquery)
-            .filter(subquery.c.rn <= 2)
-            .order_by(subquery.c.symbol.asc(), subquery.c.rn.asc())
-            .all()
-        )
-
-        rows_by_symbol = {}
-        for row in rows:
-            rows_by_symbol.setdefault(row.symbol, []).append(row)
-
-        for symbol in symbols:
-            symbol_rows = rows_by_symbol.get(symbol, [])
-            current = symbol_rows[0] if symbol_rows else None
-            previous = symbol_rows[1] if len(symbol_rows) > 1 else None
-
-            context_map[symbol][key] = {
-                'current': {
-                    'event_time': int(current.event_time) if current is not None else None,
-                    'long_short_ratio': _safe_float(getattr(current, 'long_short_ratio', None)) if current is not None else None,
-                    'long_account': _safe_float(getattr(current, 'long_account', None)) if current is not None else None,
-                    'short_account': _safe_float(getattr(current, 'short_account', None)) if current is not None else None,
-                },
-                'previous': {
-                    'event_time': int(previous.event_time) if previous is not None else None,
-                    'long_short_ratio': _safe_float(getattr(previous, 'long_short_ratio', None)) if previous is not None else None,
-                    'long_account': _safe_float(getattr(previous, 'long_account', None)) if previous is not None else None,
-                    'short_account': _safe_float(getattr(previous, 'short_account', None)) if previous is not None else None,
-                },
-            }
-
-    _log_binance_context_freshness(context_map, anchor_time)
-    return context_map
 
 
 def _build_exchange_metric(
@@ -895,28 +672,12 @@ def _aggregate_weighted_scores(exchange_metrics, sentiment_score, sentiment_stat
     }
 
 
-def _build_symbol_report(symbol, exchange_metrics, binance_context, funding_rate, anchor_time, exchange_diagnostics=None):
+def _build_symbol_report(symbol, exchange_metrics, funding_rate, anchor_time, exchange_diagnostics=None):
     valid_metrics = [metric for metric in exchange_metrics if metric is not None]
     if not valid_metrics:
         return None
 
-    latest_top_ratio = binance_context.get('top_long_short_position_ratio', {})
-    latest_global_ratio = binance_context.get('global_long_short_account_ratio', {})
-
-    top_current = latest_top_ratio.get('current') or {}
-    top_previous = latest_top_ratio.get('previous') or {}
-    global_current = latest_global_ratio.get('current') or {}
-    global_previous = latest_global_ratio.get('previous') or {}
-
-    top_delta = None
-    if top_current.get('long_short_ratio') is not None and top_previous.get('long_short_ratio') is not None:
-        top_delta = top_current['long_short_ratio'] - top_previous['long_short_ratio']
-
-    global_delta = None
-    if global_current.get('long_short_ratio') is not None and global_previous.get('long_short_ratio') is not None:
-        global_delta = global_current['long_short_ratio'] - global_previous['long_short_ratio']
-
-    sentiment_score, sentiment_state = _calc_sentiment_score(top_delta, global_delta)
+    sentiment_score, sentiment_state = 0, '中性'
 
     weights = _build_metric_weights(valid_metrics)
     for metric in valid_metrics:
@@ -997,16 +758,8 @@ def _build_symbol_report(symbol, exchange_metrics, binance_context, funding_rate
         'exchange_open_interest': exchange_open_interest,
         'exchange_scores': exchange_scores,
         'funding_rate': effective_funding_rate,
-        'binance_context': binance_context,
-        'top_long_short_ratio': top_current.get('long_short_ratio'),
-        'global_long_short_ratio': global_current.get('long_short_ratio'),
-        'top_long_short_ratio_delta': top_delta,
-        'global_long_short_ratio_delta': global_delta,
         'raw_inputs': {
             'funding_rate': effective_funding_rate,
-            'top_long_short_position_ratio': top_current,
-            'top_long_short_account_ratio': (binance_context.get('top_long_short_account_ratio') or {}).get('current') or {},
-            'global_long_short_account_ratio': global_current,
         },
     }
 
@@ -1072,15 +825,6 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
             exchange_load_duration,
         )
 
-        binance_context_start = time.perf_counter()
-        binance_context_map = _load_binance_context_map(db, target_symbols, anchor_time)
-        context_duration = time.perf_counter() - binance_context_start
-        logger.info(
-            '评分 Binance 情绪数据加载完成: symbols=%d 耗时=%.2fs',
-            len(target_symbols),
-            context_duration,
-        )
-
         funding_start = time.perf_counter()
         exchange_funding_maps = _load_exchange_funding_rate_maps(exchange_maps.keys(), target_symbols)
         funding_duration = time.perf_counter() - funding_start
@@ -1105,11 +849,6 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
             'medium_risk_count': 0,
             'high_risk_count': 0,
         }
-        summary['sentiment_health'] = _summarize_binance_context_health(
-            binance_context_map,
-            anchor_time=anchor_time,
-            symbol_count=len(target_symbols),
-        )
         symbol_collect_duration = 0.0
         symbol_align_duration = 0.0
         symbol_report_duration = 0.0
@@ -1199,11 +938,9 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
                 included_exchanges=[metric['exchange'] for metric in aligned_metrics],
                 enabled_exchanges=target_exchanges,
             )
-            binance_context = binance_context_map.get(symbol, {})
             report = _build_symbol_report(
                 symbol=symbol,
                 exchange_metrics=aligned_metrics,
-                binance_context=binance_context,
                 funding_rate=None,
                 anchor_time=symbol_anchor_time,
                 exchange_diagnostics=exchange_diagnostics,
@@ -1258,10 +995,9 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
 
         overall_duration = time.perf_counter() - overall_start
         logger.info(
-            '合约市场结构评分阶段汇总: total=%.2fs exchange_maps=%.2fs binance_context=%.2fs funding=%.2fs symbol_collect=%.2fs symbol_align=%.2fs symbol_report=%.2fs symbol_total=%.2fs',
+            '合约市场结构评分阶段汇总: total=%.2fs exchange_maps=%.2fs funding=%.2fs symbol_collect=%.2fs symbol_align=%.2fs symbol_report=%.2fs symbol_total=%.2fs',
             overall_duration,
             exchange_load_duration,
-            context_duration,
             funding_duration,
             symbol_collect_duration,
             symbol_align_duration,

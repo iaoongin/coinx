@@ -41,14 +41,14 @@ def test_login_allows_access_to_protected_page():
 
     response = client.post(
         '/login',
-        data={'username': auth_context['username'], 'password': auth_context['password'], 'next': '/binance-series'},
+        data={'username': auth_context['username'], 'password': auth_context['password'], 'next': '/market-rank'},
         follow_redirects=False,
     )
 
     assert response.status_code == 302
-    assert response.headers['Location'].endswith('/binance-series')
+    assert response.headers['Location'].endswith('/market-rank')
 
-    page_response = client.get('/binance-series')
+    page_response = client.get('/market-rank')
     assert page_response.status_code == 200
 
 
@@ -76,7 +76,7 @@ def test_login_rejects_wrong_username():
 
     response = client.post(
         '/login',
-        data={'username': 'wrong-user', 'password': auth_context['password'], 'next': '/binance-series'},
+        data={'username': 'wrong-user', 'password': auth_context['password'], 'next': '/market-rank'},
         follow_redirects=True,
     )
 
