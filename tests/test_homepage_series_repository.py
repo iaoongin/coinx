@@ -1,6 +1,8 @@
 from coinx.repositories.homepage_series import (
     FIVE_MINUTES_MS,
     TIME_INTERVALS,
+    _MAX_INTERVAL_MS,
+    _load_taker_vol_model_map,
     _summarize_homepage_rejection_reasons,
     get_homepage_series_snapshot,
     get_homepage_series_data,
@@ -272,6 +274,66 @@ def test_get_homepage_series_data_does_not_reject_when_taker_mapping_is_missing(
     assert '168h' not in coin['net_inflow']
     assert any('首页交易所聚合完成' in message for message in info_logs)
     assert not any('首页交易所门禁否决' in message for message in warning_logs)
+
+
+def test_load_taker_vol_model_map_batches_small_symbol_sets(db_session, monkeypatch):
+    from sqlalchemy.orm import Query
+
+    start_time = 1_700_000_000_000
+    periods = 2017
+    symbols = ['BTCUSDT', 'ETHUSDT']
+
+    seed_series(db_session, 'BTCUSDT', start_time, periods, include_taker_vol=True)
+    seed_series(
+        db_session,
+        'ETHUSDT',
+        start_time,
+        periods,
+        include_taker_vol=True,
+        taker_vol_base=2000.0,
+    )
+
+    expected_lower_bound = start_time + (periods - 1) * FIVE_MINUTES_MS - _MAX_INTERVAL_MS
+    tracked = {
+        'limit_calls': 0,
+        'all_calls': 0,
+        'all_sql': [],
+    }
+    original_limit = Query.limit
+    original_all = Query.all
+
+    def tracking_limit(self, value):
+        tracked['limit_calls'] += 1
+        return original_limit(self, value)
+
+    def tracking_all(self):
+        tracked['all_calls'] += 1
+        tracked['all_sql'].append(
+            str(
+                self.statement.compile(
+                    dialect=db_session.bind.dialect,
+                    compile_kwargs={'literal_binds': True},
+                )
+            )
+        )
+        return original_all(self)
+
+    monkeypatch.setattr(Query, 'limit', tracking_limit)
+    monkeypatch.setattr(Query, 'all', tracking_all)
+
+    records = _load_taker_vol_model_map(
+        db_session,
+        BinanceTakerBuySellVol,
+        symbols,
+    )
+
+    assert set(records.keys()) == set(symbols)
+    assert all(len(records[symbol]) == periods for symbol in symbols)
+    assert tracked['limit_calls'] == 0
+    assert tracked['all_calls'] == 1
+    assert ' IN (' in tracked['all_sql'][0]
+    assert 'event_time >=' in tracked['all_sql'][0]
+    assert str(expected_lower_bound) in tracked['all_sql'][0]
 
 
 def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(db_session, monkeypatch):

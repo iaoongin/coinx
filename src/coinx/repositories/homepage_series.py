@@ -1137,27 +1137,33 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         return {}
 
     if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
-        records_by_symbol = {symbol: {} for symbol in symbols}
-        for symbol in symbols:
-            query = session.query(
-                model.symbol,
-                model.event_time,
-                model.buy_sell_ratio,
-                model.buy_vol,
-                model.sell_vol,
-            ).filter(
-                model.symbol == symbol,
-                model.period == period,
-            )
-            if hasattr(model, 'exchange') and exchange is not None:
-                query = query.filter(model.exchange == exchange)
-            if upper_bound is not None:
-                query = query.filter(model.event_time <= upper_bound)
+        lower_bound = _get_recent_lower_bound(
+            session=session,
+            model=model,
+            symbols=symbols,
+            time_field_name='event_time',
+            upper_bound=upper_bound,
+            exchange=exchange,
+            period=period,
+        )
+        query = session.query(
+            model.symbol,
+            model.event_time,
+            model.buy_sell_ratio,
+            model.buy_vol,
+            model.sell_vol,
+        ).filter(model.symbol.in_(symbols), model.period == period)
+        if hasattr(model, 'exchange') and exchange is not None:
+            query = query.filter(model.exchange == exchange)
+        if upper_bound is not None:
+            query = query.filter(model.event_time <= upper_bound)
+        if lower_bound is not None:
+            query = query.filter(model.event_time >= lower_bound)
 
-            rows = query.order_by(model.event_time.desc()).limit(_REQUIRED_POINTS).all()
-            for row in rows:
-                point = _build_taker_buy_sell_vol_point(row)
-                records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+        records_by_symbol = {symbol: {} for symbol in symbols}
+        for row in query.all():
+            point = _build_taker_buy_sell_vol_point(row)
+            records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
         return records_by_symbol
 
     lower_bound = _get_recent_lower_bound(
