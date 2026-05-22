@@ -36,7 +36,7 @@ pip install -e .
 
 ### 2. 初始化数据库
 
-先创建数据库：
+如果使用外部或本机 MySQL，先创建数据库：
 
 ```sql
 CREATE DATABASE coinx DEFAULT CHARACTER SET utf8mb4;
@@ -47,6 +47,55 @@ CREATE DATABASE coinx DEFAULT CHARACTER SET utf8mb4;
 ```bash
 mysql -u root -p coinx < sql/schema.sql
 ```
+
+如果使用 Docker Compose 内置 MySQL，可以跳过手动创建数据库和导入表结构；容器会根据 `.env` 中的 `DB_NAME`、`DB_USER`、`DB_PASSWORD` 初始化数据库和应用用户，并在空数据卷首次启动时自动执行 `sql/schema.sql`。
+
+### Docker Compose 可选 MySQL
+
+默认只启动应用服务，适合连接外部 MySQL：
+
+```bash
+docker compose up -d
+```
+
+需要同时启动内置 MySQL 时，启用 `mysql` profile：
+
+```bash
+docker compose --profile mysql up -d
+```
+
+`.env.example` 默认面向内置 MySQL，核心配置如下：
+
+```env
+DB_HOST=mysql
+DB_PORT=3306
+DB_USER=coinx
+DB_PASSWORD=coinx_password
+DB_NAME=coinx
+DB_CHARSET=utf8mb4
+```
+
+MySQL 容器会引用 `DB_NAME`、`DB_USER`、`DB_PASSWORD` 初始化应用数据库；只需要单独配置 root 密码：
+
+```env
+MYSQL_ROOT_PASSWORD=coinx_root_password
+```
+
+连接外部 MySQL 时，把 `DB_HOST`、`DB_USER`、`DB_PASSWORD`、`DB_NAME` 改为外部数据库配置即可。
+
+`mysql` profile 启动过之后，后续只运行 `docker compose up -d` 不一定会自动删除之前创建的 MySQL 容器。切回外部 MySQL 时，先调整 `.env` 的 `DB_*` 配置，再显式停止可选 MySQL：
+
+```bash
+docker compose --profile mysql down
+```
+
+或只停止 MySQL 服务：
+
+```bash
+docker compose stop mysql
+```
+
+MySQL 数据保存在 Docker 命名卷 `mysql_data` 中。普通停止、重建容器不会删除数据；只有执行带 volume 删除的命令，例如 `docker compose down -v`，才会清理数据库数据。
 
 ### 3. 配置环境
 
@@ -90,12 +139,13 @@ mysql -u root -p coinx < sql/schema.sql
 | `USE_PROXY` | 是否启用 HTTP/HTTPS 代理，支持 `true/false/1/0/yes/no` | `false` |
 | `PROXY_HOST` | 代理主机地址 | `127.0.0.1` |
 | `PROXY_PORT` | 代理端口 | `7897` |
-| `DB_HOST` | MySQL 主机地址 | `localhost` |
+| `DB_HOST` | MySQL 主机地址；Compose 内置 MySQL 使用 `mysql` | 代码默认 `localhost`，`.env.example` 为 `mysql` |
 | `DB_PORT` | MySQL 端口 | `3306` |
-| `DB_USER` | MySQL 用户名 | `root` |
-| `DB_PASSWORD` | MySQL 密码 | 空 |
+| `DB_USER` | MySQL 用户名 | 代码默认 `root`，`.env.example` 为 `coinx` |
+| `DB_PASSWORD` | MySQL 密码 | 代码默认空，`.env.example` 为 `coinx_password` |
 | `DB_NAME` | 数据库名 | `coinx` |
 | `DB_CHARSET` | MySQL 字符集 | `utf8mb4` |
+| `MYSQL_ROOT_PASSWORD` | Docker Compose 内置 MySQL 的 root 密码，仅容器初始化使用 | `coinx_root_password` |
 | `WEB_HOST` | Web 服务监听地址 | `0.0.0.0` |
 | `WEB_PORT` | Web 服务端口 | `5000` |
 | `WEB_DEBUG` | 是否启用 Flask Debug，支持 `true/false/1/0/yes/no` | `false` |
@@ -237,122 +287,3 @@ coinx/
 - 统一缓存策略
 - 校准 `compose.yml` 与当前真实入口
 
-## Binance 历史序列
-
-当前项目已经支持以下 Binance 历史序列的结构化采集、落库、接口触发与页面管理：
-
-- `top_long_short_position_ratio`
-- `top_long_short_account_ratio`
-- `open_interest_hist`
-- `klines`
-- `global_long_short_account_ratio`
-
-对应数据表：
-
-- `binance_top_long_short_position_ratio`
-- `binance_top_long_short_account_ratio`
-- `binance_open_interest_hist`
-- `binance_klines`
-- `binance_global_long_short_account_ratio`
-
-### 近期变更
-
-- `feat(binance): 新增历史序列采集与管理页`
-- `feat(binance): 新增历史序列修补与双模式入口`
-- `feat(binance): 支持历史序列覆盖回补`
-- `feat(binance): 首页切换到历史序列快照链路`
-- `docs(binance): 补充历史序列使用说明`
-
-### 页面
-
-- `/binance-series`
-  - Binance 历史序列管理页
-
-### 接口
-
-- `POST /api/binance-series/collect`
-  - 采集单个历史序列并写入 MySQL
-- `POST /api/binance-series/batch-collect`
-  - 按币种、周期、序列类型批量采集历史序列
-- `POST /api/binance-series/repair-tracked`
-  - 对 tracked 币种执行 `5m` 历史序列覆盖回补与尾部追平
-
-## 首页历史序列说明
-
-- 首页数据现在直接来自 `binance_open_interest_hist` 与 `binance_klines`
-- `GET /api/coins` 会一次性构建首页快照，并同时返回：
-  - `data`
-  - `cache_update_time`
-- `GET /api/update`、`POST /api/binance-series/repair-tracked` 与首页定时刷新统一复用 coverage-aware repair
-- 首页长周期区间统一基于 `5m` 历史序列推导：
-  - `5m`
-  - `15m`
-  - `30m`
-  - `1h`
-  - `4h`
-  - `12h`
-  - `24h`
-  - `48h`
-  - `72h`
-  - `168h`
-
-### 首页查询优化
-
-为降低首页加载延迟，首页查询做了以下约束：
-
-- 只查询首页真正需要的列，不加载 `raw_json` 等大字段
-- 小规模 tracked 币种优先走按币种索引倒序 `limit` 查询
-- `GET /api/coins` 不重复构建两次首页快照
-- futures 历史接口修补按固定时间窗分页，避免长周期覆盖看似修补成功但实际没有前移
-
-这意味着首页性能瓶颈主要在数据库查询，而不是前端渲染或 Python 计算。
-
-### 脚本示例
-
-```bash
-python scripts/fetch_binance_series.py klines --symbol BTCUSDT --period 5m --limit 20
-python scripts/fetch_binance_series.py open_interest_hist --symbol BTCUSDT --period 5m --limit 20
-python scripts/fetch_binance_series.py top_long_short_position_ratio --symbol BTCUSDT --period 5m --limit 20
-```
-
-### 调度配置
-
-`application.yml` 中的相关配置如下：
-
-```yaml
-app:
-  binance_series:
-    limit: 30
-    types:
-      - top_long_short_position_ratio
-      - top_long_short_account_ratio
-      - open_interest_hist
-      - klines
-      - global_long_short_account_ratio
-    periods:
-      - 5m
-    repair:
-      enabled: false
-      interval: 900
-      period: 5m
-      bootstrap_days: 7
-      coverage_hours: 168
-      klines_page_limit: 1000
-      futures_page_limit: 500
-      sleep_ms: 500
-```
-
-手动采集继续按页面或 API 按需触发，调度器定时执行的是 `repair` 链路。
-
-### 相关测试
-
-相关测试包括：
-
-- `tests/test_binance_market_parsers.py`
-- `tests/test_binance_series_repository.py`
-- `tests/test_binance_series_integration.py`
-- `tests/test_binance_series_service.py`
-- `tests/test_binance_series_api.py`
-- `tests/test_binance_series_page.py`
-- `tests/test_binance_series_repair_window.py`
-- `tests/test_binance_series_repair_service.py`
