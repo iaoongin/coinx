@@ -3,6 +3,7 @@ gunicorn==22.0.0
 requests==2.31.0
 apscheduler==3.10.4
 pymysql==1.1.0
+cryptography==42.0.8
 sqlalchemy==2.0.35
 psutil==5.9.8
 python-dotenv==1.0.0
