@@ -1001,3 +1001,125 @@ def test_gate_history_repair_paginates_open_interest_without_end_time(db_session
     assert len(rows) == 1500
     assert rows[0].event_time == 0
     assert rows[-1].event_time == 1499 * FIVE_MINUTES_MS
+
+
+def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_session, monkeypatch):
+    _clear_rate_limit_states()
+
+    class OkxBackwardPagingAdapter:
+        exchange_id = 'okx'
+        supported_series_types = ('open_interest_hist',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def page_limit(self, series_type):
+            return 100
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            assert series_type == 'open_interest_hist'
+            if (start_time, end_time) == (500 * FIVE_MINUTES_MS, 599 * FIVE_MINUTES_MS):
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(599, 499, -1)
+                ]
+            if (start_time, end_time) == (400 * FIVE_MINUTES_MS, 499 * FIVE_MINUTES_MS):
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(499, 399, -1)
+                ]
+            if (start_time, end_time) == (300 * FIVE_MINUTES_MS, 399 * FIVE_MINUTES_MS):
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(399, 299, -1)
+                ]
+            if (start_time, end_time) == (200 * FIVE_MINUTES_MS, 299 * FIVE_MINUTES_MS):
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(299, 199, -1)
+                ]
+            if (start_time, end_time) == (100 * FIVE_MINUTES_MS, 199 * FIVE_MINUTES_MS):
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(199, 99, -1)
+                ]
+            if (start_time, end_time) == (0, 99 * FIVE_MINUTES_MS):
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(99, -1, -1)
+                ]
+            return []
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [OkxBackwardPagingAdapter()])
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['open_interest_hist'],
+        exchanges=['okx'],
+        now_ms=600 * FIVE_MINUTES_MS,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=(600 * 5) // 60,
+        db_session=db_session,
+    )
+
+    rows = (
+        db_session.query(MarketOpenInterestHist)
+        .filter(
+            MarketOpenInterestHist.exchange == 'okx',
+            MarketOpenInterestHist.symbol == 'BTCUSDT',
+            MarketOpenInterestHist.period == '5m',
+        )
+        .order_by(MarketOpenInterestHist.event_time)
+        .all()
+    )
+
+    assert summary['success_count'] == 1
+    assert len(rows) == 600
+    assert rows[0].event_time == 0
+    assert rows[-1].event_time == 599 * FIVE_MINUTES_MS

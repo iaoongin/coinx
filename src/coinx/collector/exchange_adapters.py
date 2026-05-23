@@ -125,6 +125,9 @@ def _build_okx_adapter():
         precise_window_series_types=tuple(okx_series.SUPPORTED_SERIES_TYPES),
         is_symbol_supported=okx_series.is_symbol_supported,
         supported_symbols_fetcher=okx_series.get_supported_symbols,
+        page_limits={
+            'open_interest_hist': 100,
+        },
         series_periods={
             'taker_buy_sell_vol': ('5m', '1H'),
         },

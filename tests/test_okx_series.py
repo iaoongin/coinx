@@ -98,9 +98,9 @@ def test_okx_rubik_fetchers_pass_begin_and_end(monkeypatch):
     fetch_taker_buy_sell_vol('BTCUSDT', '5m', 500, start_time=1000, end_time=2000)
 
     assert calls[0] == (
-        '/api/v5/rubik/stat/contracts/open-interest-volume',
+        '/api/v5/rubik/stat/contracts/open-interest-history',
         {
-            'ccy': 'BTC',
+            'instId': 'BTC-USDT-SWAP',
             'period': '5m',
             'begin': '1000',
             'end': '2000',
@@ -118,15 +118,126 @@ def test_okx_rubik_fetchers_pass_begin_and_end(monkeypatch):
     )
 
 
+def test_okx_fetch_klines_uses_after_for_start_and_before_for_end(monkeypatch):
+    calls = []
+
+    def fake_request(path, params, session=None):
+        calls.append((path, params))
+        return []
+
+    monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
+
+    okx_series.fetch_klines('BTCUSDT', '5m', 500, start_time=1000, end_time=2000)
+
+    assert calls == [
+        (
+            '/api/v5/market/history-candles',
+            {
+                'instId': 'BTC-USDT-SWAP',
+                'bar': '5m',
+                'limit': '300',
+                'before': '1000',
+                'after': '2000',
+            },
+        )
+    ]
+
+
+def test_okx_rubik_5m_window_keeps_168h_requests(monkeypatch):
+    calls = []
+
+    def fake_request(path, params, session=None):
+        calls.append((path, params))
+        return []
+
+    monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
+    monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 8 * 24 * 60 * 60)
+
+    start_time = 24 * 60 * 60 * 1000
+    end_time = 8 * 24 * 60 * 60 * 1000
+    fetch_open_interest_hist('BTCUSDT', '5m', 500, start_time=start_time, end_time=end_time)
+
+    assert calls == [
+        (
+            '/api/v5/rubik/stat/contracts/open-interest-history',
+            {
+                'instId': 'BTC-USDT-SWAP',
+                'period': '5m',
+                'begin': str(6 * 24 * 60 * 60 * 1000),
+                'end': str(end_time),
+            },
+        )
+    ]
+
+
+def test_okx_open_interest_history_uses_inst_id_and_returns_last_page_within_window(monkeypatch):
+    calls = []
+
+    def fake_request(path, params, session=None):
+        calls.append((path, params))
+        return [
+            ['1779556200000', '3500484.79', '35004.8479', '2641056265.81'],
+            ['1779526500000', '3480898.71', '34808.9871', '2598080140.96'],
+        ]
+
+    monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
+
+    payload = fetch_open_interest_hist(
+        'BTCUSDT',
+        '5m',
+        500,
+        start_time=1778951400000,
+        end_time=1779556200000,
+    )
+
+    assert calls == [
+        (
+            '/api/v5/rubik/stat/contracts/open-interest-history',
+            {
+                'instId': 'BTC-USDT-SWAP',
+                'period': '5m',
+                'begin': '1779383400000',
+                'end': '1779556200000',
+            },
+        )
+    ]
+    assert payload[0][0] == '1779556200000'
+    assert payload[-1][0] == '1779526500000'
+
+
 def test_okx_rubik_fetchers_skip_windows_older_than_retention(monkeypatch):
     calls = []
 
-    monkeypatch.setattr('coinx.collector.okx.series._request_okx', lambda *args, **kwargs: calls.append(args) or [])
+    def fake_request(path, params, session=None):
+        calls.append((path, params))
+        return []
+
+    monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
     monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 3 * 24 * 60 * 60)
 
     assert fetch_open_interest_hist('BTCUSDT', '5m', 500, start_time=0, end_time=1000) == []
     assert fetch_taker_buy_sell_vol('BTCUSDT', '5m', 500, start_time=0, end_time=1000) == []
-    assert calls == []
+    assert calls == [
+        (
+            '/api/v5/rubik/stat/contracts/open-interest-history',
+            {
+                'instId': 'BTC-USDT-SWAP',
+                'period': '5m',
+                'begin': '0',
+                'end': '1000',
+            },
+        ),
+        (
+            '/api/v5/rubik/stat/taker-volume',
+            {
+                'ccy': 'BTC',
+                'instType': 'CONTRACTS',
+                'period': '5m',
+                'begin': '0',
+                'end': '1000',
+            },
+        ),
+    ]
 
 
 def test_okx_rubik_fetchers_clip_windows_to_retention(monkeypatch):
@@ -137,13 +248,14 @@ def test_okx_rubik_fetchers_clip_windows_to_retention(monkeypatch):
         return []
 
     monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
-    monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 3 * 24 * 60 * 60)
+    monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 40 * 24 * 60 * 60)
 
-    earliest_time = 24 * 60 * 60 * 1000
-    fetch_open_interest_hist('BTCUSDT', '5m', 500, start_time=0, end_time=earliest_time + 1000)
+    earliest_time = 10 * 24 * 60 * 60 * 1000
+    end_time = 40 * 24 * 60 * 60 * 1000
+    fetch_open_interest_hist('BTCUSDT', '1H', 500, start_time=0, end_time=end_time)
 
     assert calls[0][1]['begin'] == str(earliest_time)
-    assert calls[0][1]['end'] == str(earliest_time + 1000)
+    assert calls[0][1]['end'] == str(end_time)
 
 
 def test_okx_adapter_marks_homepage_series_as_precise_windows():

@@ -223,7 +223,8 @@ def _rubik_time_window(period, start_time=None, end_time=None, now_ms=None):
         return start_time, end_time
 
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    earliest_time = current_time_ms - history_limit_ms
+    reference_end_time = end_time if end_time is not None else current_time_ms
+    earliest_time = reference_end_time - history_limit_ms
     effective_start = max(start_time, earliest_time) if start_time is not None else earliest_time
     effective_end = end_time
 
@@ -238,12 +239,12 @@ def fetch_klines(symbol, period, limit, session=None, start_time=None, end_time=
     params = {
         'instId': to_exchange_symbol(symbol),
         'bar': _okx_bar(period),
-        'limit': str(limit),
+        'limit': str(min(int(limit), 300)),
     }
-    if end_time is not None:
-        params['before'] = str(end_time)
     if start_time is not None:
-        params['after'] = str(start_time)
+        params['before'] = str(start_time)
+    if end_time is not None:
+        params['after'] = str(end_time)
     return _request_okx('/api/v5/market/history-candles', params, session=session)
 
 
@@ -253,14 +254,14 @@ def fetch_open_interest_hist(symbol, period, limit, session=None, start_time=Non
         return []
 
     params = {
-        'ccy': _base_asset(symbol),
+        'instId': to_exchange_symbol(symbol),
         'period': _okx_bar(period),
     }
     if start_time is not None:
         params['begin'] = str(start_time)
     if end_time is not None:
         params['end'] = str(end_time)
-    payload = _request_okx('/api/v5/rubik/stat/contracts/open-interest-volume', params, session=session)
+    payload = _request_okx('/api/v5/rubik/stat/contracts/open-interest-history', params, session=session)
     if limit:
         return payload[:limit]
     return payload

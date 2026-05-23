@@ -89,7 +89,7 @@
 
 #### OKX Rubik 官方已确认接口
 
-以下接口已从 OKX 官方文档、changelog 或官方接口实际返回确认存在；其中 `open-interest-volume` 的 `period` 已确认支持 `5m 1H 1D`，并且需要使用大写 `1H` / `1D`：
+以下接口已从 OKX 官方文档、changelog 或官方接口实际返回确认存在。当前代码里的 OKX 持仓历史实现曾误接到 `open-interest-volume`，后续应以 `open-interest-history` 为准重新校正：
 
 - `Get contract open interest history`
 - `Get contract taker volume`
@@ -99,7 +99,7 @@
 
 补充说明：
 
-- `GET /api/v5/rubik/stat/contracts/open-interest-volume` 传 `period=1h` 会返回 `51000`
+- `GET /api/v5/rubik/stat/contracts/open-interest-history` 会校验 `instId`，缺失时返回 `50014 instId can’t be empty`
 - 官方返回的错误提示明确为 `support [5m,1H,1D]`
 - 因此项目里 OKX OI 的逻辑长周期虽然仍按 `1h` 处理，但请求与存储口径必须映射为 `1H`
 
@@ -110,8 +110,9 @@
 | 接口 | 本地用途 | 关键参数 | 官方限流 | 限流规则 | 当前建议节流值 |
 |---|---|---|---|---|---|
 | `GET /api/v5/public/instruments` | 拉 OKX 可用 USDT 永续合约列表，做 `supports_symbol` 缓存 | `instType=SWAP` | `20次/2s` | `IP + Instrument Type` | 走缓存，避免高频刷新 |
-| `GET /api/v5/market/history-candles` | 拉 K 线历史 | `instId`, `bar`, `before`, `after`, `limit` | `20次/2s` | `IP` | 可保守按 `100ms+` 间隔控制 |
-| `GET /api/v5/rubik/stat/contracts/open-interest-volume` | 拉持仓历史 `open_interest_hist` | `ccy`, `period`, `begin`, `end` | `5次/2s` | `IP` | 建议与 `rubik` 其他接口共用节流组，按 `400-500ms` 间隔串行 |
+| `GET /api/v5/market/history-candles` | 拉 K 线历史 | `instId`, `bar`, `before`, `after`, `limit` | `20次/2s` | `IP` | `limit` 最大 `300`；实测需按 `before=start_time`、`after=end_time` 传参 |
+| `GET /api/v5/rubik/stat/contracts/open-interest-history` | 拉持仓历史 `open_interest_hist` | `instId`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前实测默认仅返回 `100` 条，分页方式仍需继续确认 |
+| `GET /api/v5/rubik/stat/contracts/open-interest-volume` | 合约持仓统计量 | `ccy`, `period`, `begin`, `end` | `5次/2s` | `IP` | 不再作为 `open_interest_hist` 主接口候选 |
 | `GET /api/v5/rubik/stat/taker-volume` | 拉主动买卖量 `taker_buy_sell_vol` | `ccy`, `instType=CONTRACTS`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前最容易触发 `429`，建议按 `400-500ms` 间隔串行 |
 | `GET /api/v5/public/funding-rate` | 拉单币/全量资金费率 | `instId` | `10次/2s` | `IP + Instrument ID` | 建议按 `200ms+` 间隔控制，全量加载避免频繁触发 |
 
@@ -295,3 +296,7 @@
 - Gate API v4 Futures: [docs](https://www.gate.com/docs/developers/apiv4/en/futures/)
 - OKX API docs v5: [docs-v5](https://www.okx.com/docs-v5/en)
 - OKX API changelog: [log_en](https://www.okx.com/docs-v5/log_en/)
+- 补充实测结论：
+  - `history-candles` 若把 `before/after` 方向传反，会直接返回空数组。
+  - `open-interest-volume` 的 `5m` 实测只会返回最近约 `48h`（约 `570-575` 条）切片；更早时间会返回 `50030 Illegal time range`，说明它并不适合做精确的持仓历史补齐。
+  - `open-interest-history` 才是更贴近“持仓量历史”的接口，但当前实测仅返回最近 `100` 条，且尚未确认有效的翻页/游标参数，暂时不能直接替换上线。
