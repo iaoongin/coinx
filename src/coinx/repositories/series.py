@@ -45,6 +45,76 @@ def _is_mysql_deadlock_error(exc):
         return False
 
 
+def _build_values_list(model, exchange, records):
+    values_list = []
+    model_columns = {column.name for column in model.__table__.columns}
+    for record in records:
+        values = dict(record)
+        values['exchange'] = exchange
+        values = {key: value for key, value in values.items() if key in model_columns}
+        values_list.append(values)
+    return values_list
+
+
+def _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=True):
+    statement = mysql_insert(model).values(values_list)
+    update_columns = {
+        column.name: statement.inserted[column.name]
+        for column in model.__table__.columns
+        if column.name not in ('id', 'created_at')
+    }
+    for attempt in range(1, MYSQL_DEADLOCK_MAX_RETRIES + 1):
+        try:
+            db.execute(statement.on_duplicate_key_update(**update_columns))
+            if commit:
+                db.commit()
+            return len(values_list)
+        except Exception as exc:
+            db.rollback()
+            if not _is_mysql_deadlock_error(exc) or attempt >= MYSQL_DEADLOCK_MAX_RETRIES:
+                raise
+            logger.warning(
+                'MySQL deadlock，准备重试市场序列写入: exchange=%s series_type=%s records=%d attempt=%d/%d',
+                exchange,
+                series_type,
+                len(values_list),
+                attempt,
+                MYSQL_DEADLOCK_MAX_RETRIES,
+            )
+            time.sleep(MYSQL_DEADLOCK_RETRY_DELAY_SECONDS * attempt)
+
+
+def upsert_series_records_in_batches(exchange, series_type, records, batch_size, session=None):
+    if not records:
+        return 0
+
+    model = get_series_model(series_type)
+    own_session = session is None
+    db = session or get_session()
+    effective_batch_size = max(1, int(batch_size or 1))
+
+    try:
+        affected = 0
+        if db.bind and db.bind.dialect.name == 'mysql':
+            for index in range(0, len(records), effective_batch_size):
+                batch_records = records[index:index + effective_batch_size]
+                values_list = _build_values_list(model, exchange, batch_records)
+                affected += _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=False)
+            db.commit()
+            return affected
+
+        for index in range(0, len(records), effective_batch_size):
+            batch_records = records[index:index + effective_batch_size]
+            affected += upsert_series_records(exchange, series_type, batch_records, session=db)
+        return affected
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if own_session:
+            db.close()
+
+
 def upsert_series_records(exchange, series_type, records, session=None):
     if not records:
         return 0
@@ -56,39 +126,10 @@ def upsert_series_records(exchange, series_type, records, session=None):
     db = session or get_session()
 
     try:
-        values_list = []
-        model_columns = {column.name for column in model.__table__.columns}
-        for record in records:
-            values = dict(record)
-            values['exchange'] = exchange
-            values = {key: value for key, value in values.items() if key in model_columns}
-            values_list.append(values)
+        values_list = _build_values_list(model, exchange, records)
 
         if db.bind and db.bind.dialect.name == 'mysql':
-            statement = mysql_insert(model).values(values_list)
-            update_columns = {
-                column.name: statement.inserted[column.name]
-                for column in model.__table__.columns
-                if column.name not in ('id', 'created_at')
-            }
-            for attempt in range(1, MYSQL_DEADLOCK_MAX_RETRIES + 1):
-                try:
-                    db.execute(statement.on_duplicate_key_update(**update_columns))
-                    db.commit()
-                    return len(values_list)
-                except Exception as exc:
-                    db.rollback()
-                    if not _is_mysql_deadlock_error(exc) or attempt >= MYSQL_DEADLOCK_MAX_RETRIES:
-                        raise
-                    logger.warning(
-                        'MySQL deadlock，准备重试市场序列写入: exchange=%s series_type=%s records=%d attempt=%d/%d',
-                        exchange,
-                        series_type,
-                        len(values_list),
-                        attempt,
-                        MYSQL_DEADLOCK_MAX_RETRIES,
-                    )
-                    time.sleep(MYSQL_DEADLOCK_RETRY_DELAY_SECONDS * attempt)
+            return _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=True)
 
         key_values = [tuple(values[field] for field in key_fields) for values in values_list]
         key_columns = [getattr(model, field) for field in key_fields]

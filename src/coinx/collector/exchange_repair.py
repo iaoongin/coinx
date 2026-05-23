@@ -25,12 +25,16 @@ from coinx.config import (
     REPAIR_HISTORY_COVERAGE_HOURS,
     REPAIR_HISTORY_MAX_WORKERS,
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
+    REPAIR_HISTORY_WRITE_BATCH_SIZE,
     REPAIR_ROLLING_MAX_WORKERS,
     REPAIR_ROLLING_POINTS,
     REPAIR_ROLLING_WRITE_BATCH_SIZE,
 )
 from coinx.database import get_session
-from coinx.repositories.series import get_existing_series_timestamps, upsert_series_records
+from coinx.repositories.series import (
+    get_existing_series_timestamps,
+    upsert_series_records_in_batches,
+)
 from coinx.utils import logger
 
 
@@ -463,7 +467,7 @@ def _filter_budget_unavailable_tasks(tasks, mode):
     return runnable, skipped
 
 
-def _flush_group_records(exchange, group_results, db_session=None):
+def _flush_group_records(exchange, group_results, db_session=None, mode='rolling'):
     pending_by_series = {}
     result_refs_by_series = {}
     for result in group_results:
@@ -477,9 +481,32 @@ def _flush_group_records(exchange, group_results, db_session=None):
     for series_type, records in pending_by_series.items():
         write_breakdown = empty_duration_breakdown()
         affected = 0
+        batch_size = REPAIR_HISTORY_WRITE_BATCH_SIZE if mode == 'history' else REPAIR_ROLLING_WRITE_BATCH_SIZE
+        logger.info(
+            '批量写入开始: 模式=%s 交易所=%s 序列类型=%s 记录数=%d batch_size=%d',
+            mode,
+            exchange,
+            series_type,
+            len(records),
+            batch_size,
+        )
         with timed_category(write_breakdown, 'db_write_ms'):
-            for batch in _chunks(records, REPAIR_ROLLING_WRITE_BATCH_SIZE):
-                affected += upsert_series_records(exchange, series_type, batch, session=db_session)
+            affected += upsert_series_records_in_batches(
+                exchange,
+                series_type,
+                records,
+                batch_size=batch_size,
+                session=db_session,
+            )
+        logger.info(
+            '批量写入完成: 模式=%s 交易所=%s 序列类型=%s 记录数=%d 影响行=%d 耗时=%s',
+            mode,
+            exchange,
+            series_type,
+            len(records),
+            affected,
+            format_duration_ms(write_breakdown.get('db_write_ms', 0.0)),
+        )
 
         refs = result_refs_by_series.get(series_type) or []
         total_records = sum(record_count for _, record_count in refs)
@@ -850,7 +877,7 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
-        group_results = _flush_group_records(exchange, group_results, db_session=db_session)
+        group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='rolling')
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
@@ -1140,7 +1167,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='history')
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
-        group_results = _flush_group_records(exchange, group_results, db_session=db_session)
+        group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='history')
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',

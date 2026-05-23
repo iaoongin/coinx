@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.exc import OperationalError
 
-from coinx.repositories.series import upsert_series_records
+from coinx.repositories.series import upsert_series_records, upsert_series_records_in_batches
 
 
 class _FakeMysqlSession:
@@ -62,3 +62,43 @@ def test_upsert_series_records_retries_mysql_deadlock(monkeypatch):
     assert session.rollback_calls == 2
     assert sleep_calls == [0.2, 0.4]
 
+
+def test_upsert_series_records_in_batches_commits_once(monkeypatch):
+    session = _FakeMysqlSession()
+    sleep_calls = []
+    monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
+
+    affected = upsert_series_records_in_batches(
+        'binance',
+        'klines',
+        [
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 1711526400000,
+                'close_time': 1711526699999,
+                'open_price': 68000.1,
+                'high_price': 68100.2,
+                'low_price': 67950.3,
+                'close_price': 68020.4,
+            },
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 1711526700000,
+                'close_time': 1711526999999,
+                'open_price': 68020.4,
+                'high_price': 68110.2,
+                'low_price': 68000.0,
+                'close_price': 68080.4,
+            },
+        ],
+        batch_size=1,
+        session=session,
+    )
+
+    assert affected == 2
+    assert session.execute_calls == 2
+    assert session.commit_calls == 1
+    assert session.rollback_calls == 0
+    assert sleep_calls == []

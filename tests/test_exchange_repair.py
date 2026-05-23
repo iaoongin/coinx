@@ -534,7 +534,10 @@ def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monk
         'coinx.collector.exchange_repair.get_session',
         lambda: type('Session', (), {'close': lambda self: None})(),
     )
-    monkeypatch.setattr('coinx.collector.exchange_repair.upsert_series_records', lambda exchange, series_type, records, session=None: len(records))
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: len(records),
+    )
 
     result_holder = {}
 
@@ -804,9 +807,9 @@ def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
     monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
     monkeypatch.setattr('coinx.collector.exchange_repair.get_existing_series_timestamps', lambda **kwargs: {})
     monkeypatch.setattr(
-        'coinx.collector.exchange_repair.upsert_series_records',
-        lambda exchange, series_type, records, session=None: upsert_calls.append(
-            (exchange, series_type, [record['open_time'] for record in records])
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: upsert_calls.append(
+            (exchange, series_type, [record['open_time'] for record in records], batch_size)
         ) or len(records),
     )
 
@@ -822,7 +825,7 @@ def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
 
     assert summary['success_count'] == 2
     assert len(calls) == 2
-    assert upsert_calls == [('binance', 'klines', [1200000, 1200000])]
+    assert upsert_calls == [('binance', 'klines', [1200000, 1200000], 500)]
     assert [item['affected'] for item in summary['results']] == [1, 1]
 
 
@@ -834,9 +837,9 @@ def test_exchange_history_repair_batches_group_writes(monkeypatch):
 
     monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
     monkeypatch.setattr(
-        'coinx.collector.exchange_repair.upsert_series_records',
-        lambda exchange, series_type, records, session=None: upsert_calls.append(
-            (exchange, series_type, [record['open_time'] for record in records])
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: upsert_calls.append(
+            (exchange, series_type, [record['open_time'] for record in records], batch_size)
         ) or len(records),
     )
 
@@ -853,7 +856,7 @@ def test_exchange_history_repair_batches_group_writes(monkeypatch):
 
     assert summary['success_count'] == 2
     assert len(calls) == 2
-    assert upsert_calls == [('binance', 'klines', [900000, 900000])]
+    assert upsert_calls == [('binance', 'klines', [900000, 900000], 2000)]
     assert [item['affected'] for item in summary['results']] == [1, 1]
 
 
@@ -862,9 +865,9 @@ def test_exchange_repair_grouped_flush_handles_multiple_series(monkeypatch):
     upsert_calls = []
 
     monkeypatch.setattr(
-        'coinx.collector.exchange_repair.upsert_series_records',
-        lambda exchange, series_type, records, session=None: upsert_calls.append(
-            (exchange, series_type, len(records))
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: upsert_calls.append(
+            (exchange, series_type, len(records), batch_size)
         ) or len(records),
     )
 
@@ -883,5 +886,39 @@ def test_exchange_repair_grouped_flush_handles_multiple_series(monkeypatch):
 
     flushed = _flush_group_records('binance', group_results, db_session=None)
 
-    assert upsert_calls == [('binance', 'klines', 1), ('binance', 'open_interest_hist', 1)]
+    assert upsert_calls == [('binance', 'klines', 1, 500), ('binance', 'open_interest_hist', 1, 500)]
+    assert all('pending_records' not in item for item in flushed)
+
+
+def test_exchange_repair_grouped_flush_uses_history_batch_size_and_logs(monkeypatch):
+    _clear_rate_limit_states()
+    upsert_calls = []
+    info_logs = []
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.REPAIR_HISTORY_WRITE_BATCH_SIZE', 2)
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: upsert_calls.append(
+            (exchange, series_type, len(records), batch_size)
+        ) or len(records),
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append(args[0] % args[1:]),
+    )
+
+    group_results = [
+        {
+            'exchange': 'gate',
+            'symbol': 'BTCUSDT',
+            'series_type': 'klines',
+            'pending_records': [{'open_time': 1}, {'open_time': 2}, {'open_time': 3}],
+            'duration_breakdown_ms': {},
+        },
+    ]
+
+    flushed = _flush_group_records('gate', group_results, db_session=None, mode='history')
+
+    assert upsert_calls == [('gate', 'klines', 3, 2)]
+    assert any('批量写入开始: 模式=history 交易所=gate 序列类型=klines 记录数=3 batch_size=2' in line for line in info_logs)
     assert all('pending_records' not in item for item in flushed)
