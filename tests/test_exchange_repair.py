@@ -8,7 +8,11 @@ from coinx.collector.binance.client import (
 from coinx.collector.bybit.series import BybitRateLimitUnavailable, clear_bybit_rate_limit_state
 from coinx.collector.gate import series as gate_series
 from coinx.collector.gate.series import GateUnsupportedContract
-from coinx.collector.exchange_repair import repair_history_symbols, repair_rolling_symbols
+from coinx.collector.exchange_repair import (
+    _flush_group_records,
+    repair_history_symbols,
+    repair_rolling_symbols,
+)
 from coinx.collector.okx.series import OKXRateLimitUnavailable, clear_okx_rate_limit_state
 from coinx.collector.timing import format_duration_breakdown
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
@@ -820,3 +824,64 @@ def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
     assert len(calls) == 2
     assert upsert_calls == [('binance', 'klines', [1200000, 1200000])]
     assert [item['affected'] for item in summary['results']] == [1, 1]
+
+
+def test_exchange_history_repair_batches_group_writes(monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    upsert_calls = []
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records',
+        lambda exchange, series_type, records, session=None: upsert_calls.append(
+            (exchange, series_type, [record['open_time'] for record in records])
+        ) or len(records),
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT', 'ETHUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=1500000,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=None,
+    )
+
+    assert summary['success_count'] == 2
+    assert len(calls) == 2
+    assert upsert_calls == [('binance', 'klines', [900000, 900000])]
+    assert [item['affected'] for item in summary['results']] == [1, 1]
+
+
+def test_exchange_repair_grouped_flush_handles_multiple_series(monkeypatch):
+    _clear_rate_limit_states()
+    upsert_calls = []
+
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records',
+        lambda exchange, series_type, records, session=None: upsert_calls.append(
+            (exchange, series_type, len(records))
+        ) or len(records),
+    )
+
+    group_results = [
+        {
+            'series_type': 'klines',
+            'pending_records': [{'open_time': 1}],
+            'duration_breakdown_ms': {},
+        },
+        {
+            'series_type': 'open_interest_hist',
+            'pending_records': [{'event_time': 2}],
+            'duration_breakdown_ms': {},
+        },
+    ]
+
+    flushed = _flush_group_records('binance', group_results, db_session=None)
+
+    assert upsert_calls == [('binance', 'klines', 1), ('binance', 'open_interest_hist', 1)]
+    assert all('pending_records' not in item for item in flushed)

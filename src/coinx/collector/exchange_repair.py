@@ -463,7 +463,7 @@ def _filter_budget_unavailable_tasks(tasks, mode):
     return runnable, skipped
 
 
-def _flush_rolling_group_records(exchange, group_results, db_session=None):
+def _flush_group_records(exchange, group_results, db_session=None):
     pending_by_series = {}
     result_refs_by_series = {}
     for result in group_results:
@@ -850,7 +850,7 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
-        group_results = _flush_rolling_group_records(exchange, group_results, db_session=db_session)
+        group_results = _flush_group_records(exchange, group_results, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
@@ -1007,6 +1007,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             target_start_time = task['start_time']
             target_end_time = task['end_time']
             cursor_time = target_start_time
+            pending_records = []
             affected = 0
             record_count = 0
             pages = 0
@@ -1032,8 +1033,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         for record in records
                         if target_start_time <= record.get(time_field, -1) <= current_end_time
                     ]
-                with timed_category(breakdown, 'db_write_ms'):
-                    affected += upsert_series_records(task['exchange'], task['series_type'], filtered_records, session=session)
+                pending_records.extend(filtered_records)
                 record_count += len(filtered_records)
                 if filtered_records:
                     pages += 1
@@ -1056,6 +1056,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'affected': affected,
                     'records': record_count,
                     'pages': pages,
+                    'pending_records': pending_records,
                 },
                 breakdown,
             )
@@ -1139,6 +1140,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='history')
         group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
+        group_results = _flush_group_records(exchange, group_results, db_session=db_session)
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
