@@ -77,7 +77,7 @@ def test_gate_fetchers_use_expected_request_params(monkeypatch):
             'contract': 'BTC_USDT',
             'interval': '5m',
             'from': '1',
-            'to': '2',
+            'limit': '1000',
         },
     )
 

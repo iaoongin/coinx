@@ -19,6 +19,9 @@ from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySell
 from coinx.repositories.series import upsert_series_records
 
 
+FIVE_MINUTES_MS = 5 * 60 * 1000
+
+
 def _clear_rate_limit_states():
     clear_binance_rate_limit_state()
     clear_bybit_rate_limit_state()
@@ -922,3 +925,79 @@ def test_exchange_repair_grouped_flush_uses_history_batch_size_and_logs(monkeypa
     assert upsert_calls == [('gate', 'klines', 3, 2)]
     assert any('批量写入开始: 模式=history 交易所=gate 序列类型=klines 记录数=3 batch_size=2' in line for line in info_logs)
     assert all('pending_records' not in item for item in flushed)
+
+
+def test_gate_history_repair_paginates_open_interest_without_end_time(db_session, monkeypatch):
+    _clear_rate_limit_states()
+
+    class GatePagingAdapter:
+        exchange_id = 'gate'
+        supported_series_types = ('open_interest_hist',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            assert series_type == 'open_interest_hist'
+            assert end_time is None
+            if start_time == 0:
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(1000)
+                ]
+            if start_time == 1000 * FIVE_MINUTES_MS:
+                return [
+                    {
+                        'symbol': symbol,
+                        'period': period,
+                        'event_time': index * FIVE_MINUTES_MS,
+                        'sum_open_interest': 10 + index,
+                        'sum_open_interest_value': 100 + index,
+                    }
+                    for index in range(1000, 1500)
+                ]
+            return []
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [GatePagingAdapter()])
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['open_interest_hist'],
+        exchanges=['gate'],
+        now_ms=1500 * FIVE_MINUTES_MS,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=(1500 * 5) // 60,
+        db_session=db_session,
+    )
+
+    rows = (
+        db_session.query(MarketOpenInterestHist)
+        .filter(
+            MarketOpenInterestHist.exchange == 'gate',
+            MarketOpenInterestHist.symbol == 'BTCUSDT',
+            MarketOpenInterestHist.period == '5m',
+        )
+        .order_by(MarketOpenInterestHist.event_time)
+        .all()
+    )
+
+    assert summary['success_count'] == 1
+    assert len(rows) == 1500
+    assert rows[0].event_time == 0
+    assert rows[-1].event_time == 1499 * FIVE_MINUTES_MS

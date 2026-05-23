@@ -227,13 +227,15 @@
 |---|---|---|---|---|---|
 | `GET /api/v4/futures/{settle}/contracts` | 拉 Gate 可用合约列表，做 `supports_symbol` 缓存 | 无 | `200次/10s/endpoint` | `IP` | 走缓存，避免高频刷新 |
 | `GET /api/v4/futures/{settle}/candlesticks` | 拉 K 线历史 | `contract`, `interval`, `from`, `to`, `limit` | `200次/10s/endpoint` | `IP` | 建议结合 `x-gate-ratelimit-*` 头按预算串行控制 |
-| `GET /api/v4/futures/{settle}/contract_stats` | 拉持仓历史 `open_interest_hist` | `contract`, `interval`, `from`, `to`, `limit` | `200次/10s/endpoint` | `IP` | 建议结合 `x-gate-ratelimit-*` 头按预算串行控制 |
+| `GET /api/v4/futures/{settle}/contract_stats` | 拉持仓历史 `open_interest_hist` | `contract`, `interval`, `from`, `limit` | `200次/10s/endpoint` | `IP` | 建议结合 `x-gate-ratelimit-*` 头按预算串行控制 |
 | `GET /api/v4/futures/{settle}/funding_rate` | 拉单币资金费率 | `contract` | `200次/10s/endpoint` | `IP` | 正常节奏即可，避免和历史补齐高峰叠加 |
 | `GET /api/v4/futures/{settle}/tickers` | 拉全量 ticker/资金费率 | 无 | `200次/10s/endpoint` | `IP` | 建议优先使用全量接口，减少单币请求数 |
 
 补充说明：
 
 - Gate 返回头会带 `x-gate-ratelimit-limit`、`x-gate-ratelimit-requests-remain`、`x-gate-ratelimit-reset-timestamp`，适合直接做预算式流控。
+- `contract_stats` 官方参数不包含 `to`。实测如果额外传 `to`，接口会退化成只返回最近一小段数据，无法按长窗口稳定取历史。
+- `contract_stats` 在 `interval=5m` 下单次返回会被 `limit` 截断；实测 `limit=1000` 时单页约覆盖 `83h`，补 `168h` 必须按返回结果的最后 `event_time` 继续翻页。
 - 项目中的 Gate 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/gate/series.py)。
 
 ### Binance 当前实际使用接口与限流

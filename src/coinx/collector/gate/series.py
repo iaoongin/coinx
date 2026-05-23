@@ -374,11 +374,9 @@ def fetch_open_interest_hist(symbol, period, limit, session=None, start_time=Non
         'contract': to_exchange_symbol(symbol),
         'interval': _gate_interval(period),
     }
-    if start_time is not None or end_time is not None:
+    if start_time is not None:
         params['from'] = str(int(start_time) // 1000)
-        params['to'] = str(int(end_time) // 1000)
-    else:
-        params['limit'] = str(min(int(limit), 1000))
+    params['limit'] = str(min(int(limit), 1000))
     return _request_gate(f'/api/v4/futures/{GATE_SETTLE}/contract_stats', params, session=session)
 
 

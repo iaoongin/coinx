@@ -168,6 +168,13 @@ def _page_end_time(start_time, end_time, page_limit, period='5m'):
     return min(end_time, start_time + max(page_limit - 1, 0) * _period_to_ms(period))
 
 
+def _uses_open_ended_history_paging(adapter, series_type):
+    return (
+        getattr(adapter, 'exchange_id', None) == 'gate'
+        and series_type == 'open_interest_hist'
+    )
+
+
 def resolve_repair_worker_count(exchanges=None, max_workers=None):
     resolved_exchanges = list(exchanges or ENABLED_EXCHANGES)
     if max_workers is not None:
@@ -1040,7 +1047,12 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             pages = 0
 
             while cursor_time <= target_end_time:
-                page_end_time = _page_end_time(cursor_time, target_end_time, limit, period=period) if window_precise else None
+                use_open_ended_history_paging = _uses_open_ended_history_paging(task['adapter'], task['series_type'])
+                page_end_time = (
+                    None
+                    if use_open_ended_history_paging
+                    else (_page_end_time(cursor_time, target_end_time, limit, period=period) if window_precise else None)
+                )
                 with timed_category(breakdown, 'api_ms'):
                     payload = task['adapter'].fetch_series_payload(
                         series_type=task['series_type'],
@@ -1054,7 +1066,11 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 with timed_category(breakdown, 'parse_ms'):
                     records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
                     records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
-                    current_end_time = page_end_time if window_precise else target_end_time
+                    current_end_time = (
+                        target_end_time
+                        if use_open_ended_history_paging
+                        else (page_end_time if window_precise else target_end_time)
+                    )
                     filtered_records = [
                         record
                         for record in records
@@ -1067,6 +1083,16 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
 
                 if not window_precise:
                     break
+                if use_open_ended_history_paging:
+                    if not filtered_records:
+                        break
+                    last_time = filtered_records[-1].get(time_field)
+                    if last_time is None or last_time < cursor_time:
+                        break
+                    cursor_time = last_time + _period_to_ms(period)
+                    if len(filtered_records) < limit:
+                        break
+                    continue
                 cursor_time = page_end_time + _period_to_ms(period)
 
             return _result_with_breakdown(
