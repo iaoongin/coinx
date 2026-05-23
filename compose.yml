@@ -19,6 +19,8 @@ services:
     container_name: coinx-mysql
     profiles:
       - mysql
+    ports:
+      - "${DB_PORT:-3306}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-coinx_root_password}
       MYSQL_DATABASE: ${DB_NAME:-coinx}
