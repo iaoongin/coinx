@@ -411,7 +411,7 @@
         <div class="coin-head">
           <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-symbol">[[ shortSymbol(coin.symbol) ]]</a>
           <div class="coin-meta-line" :title="coinMetaLine(coin)">
-            <span class="coin-meta-total">持仓量 <b>[[ coin.current_open_interest_formatted || 'N/A' ]]</b></span>
+            <span class="coin-meta-total">持仓价值 <b>[[ coin.current_open_interest_value_formatted || 'N/A' ]]</b></span>
             <span
               v-for="item in coin.exchange_statuses || []"
               :key="item.exchange"
@@ -575,21 +575,21 @@
         const formatExchangeEntry = (item) => {
           const exchangeName = formatExchangeName(item?.exchange);
           if (item?.status === 'included') {
-            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(${formatPercent(item.quantity_share_percent)})`;
+            return `${exchangeName} ${item.open_interest_value_formatted || 'N/A'}(${formatPercent(item.share_percent)})`;
           }
           if (item?.status === 'excluded') {
             const reason = formatExchangeRejectReason(item);
-            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(剔除${reason ? `: ${reason}` : ''})`;
+            return `${exchangeName} ${item.open_interest_value_formatted || 'N/A'}(剔除${reason ? `: ${reason}` : ''})`;
           }
           if (item?.status === 'unknown') {
             const reason = formatExchangeRejectReason(item);
-            return `${exchangeName} ${item.open_interest_formatted || 'N/A'}(未纳入${reason ? `: ${reason}` : ''})`;
+            return `${exchangeName} ${item.open_interest_value_formatted || 'N/A'}(未纳入${reason ? `: ${reason}` : ''})`;
           }
           return `${exchangeName} 不支持`;
         };
 
         const coinMetaLine = (coin) => {
-          const parts = [`${shortSymbol(coin?.symbol || '')}`, `持仓量 ${coin?.current_open_interest_formatted || 'N/A'}`];
+          const parts = [`${shortSymbol(coin?.symbol || '')}`, `持仓价值 ${coin?.current_open_interest_value_formatted || 'N/A'}`];
           const items = Array.isArray(coin?.exchange_statuses) ? coin.exchange_statuses : [];
           items.forEach((item) => {
             parts.push(formatExchangeEntry(item));

@@ -17,11 +17,11 @@ test.describe('首页测试', () => {
   test('首页渲染了币种数据', async ({ page }) => {
     await visit(page, '/');
     await expect(page.locator('body')).toContainText('BTC');
-    await expect(page.locator('body')).toContainText('BTC · 持仓量 1.23M');
-    await expect(page.locator('body')).toContainText('1.23M');
-    await expect(page.locator('body')).toContainText('0.89M(72%)');
-    await expect(page.locator('body')).toContainText('0.34M(28%)');
-    await expect(page.locator('body')).toContainText('0.12M(剔除)');
+    await expect(page.locator('body')).toContainText('BTC · 持仓价值 85.43M');
+    await expect(page.locator('body')).toContainText('85.43M');
+    await expect(page.locator('body')).toContainText('$62.00M(72%)');
+    await expect(page.locator('body')).toContainText('$23.43M(28%)');
+    await expect(page.locator('body')).toContainText('$8.40M(剔除)');
   });
 
   test('首页标题与状态操作在同一标题行', async ({ page }) => {
