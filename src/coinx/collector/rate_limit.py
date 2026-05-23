@@ -54,13 +54,13 @@ class RateLimitRegistry:
         with self._lock:
             self._states.clear()
 
-    def reset_group(self, exchange, group):
+    def reset_group(self, exchange, group, proxy_id='direct'):
         with self._lock:
-            self._states[(exchange, group)] = RateLimitState(last_headers={})
+            self._states[(exchange, group, proxy_id)] = RateLimitState(last_headers={})
 
-    def get_state_snapshot(self, exchange, group):
+    def get_state_snapshot(self, exchange, group, proxy_id='direct'):
         with self._lock:
-            state = self._states.setdefault((exchange, group), RateLimitState(last_headers={}))
+            state = self._states.setdefault((exchange, group, proxy_id), RateLimitState(last_headers={}))
             return RateLimitState(
                 next_allowed_at=state.next_allowed_at,
                 cooldown_until=state.cooldown_until,
@@ -72,9 +72,9 @@ class RateLimitRegistry:
                 last_headers=dict(state.last_headers or {}),
             )
 
-    def unavailable_remaining_seconds(self, exchange, group):
+    def unavailable_remaining_seconds(self, exchange, group, proxy_id='direct'):
         with self._lock:
-            state = self._states.setdefault((exchange, group), RateLimitState(last_headers={}))
+            state = self._states.setdefault((exchange, group, proxy_id), RateLimitState(last_headers={}))
             now = time.time()
             waits = [
                 max(0.0, state.cooldown_until - now),
@@ -84,12 +84,12 @@ class RateLimitRegistry:
                 waits.append(max(0.0, state.reset_at - now))
             return max(waits)
 
-    def wait_for_slot(self, exchange, group, min_interval_ms=0, consume_budget=False):
+    def wait_for_slot(self, exchange, group, proxy_id='direct', min_interval_ms=0, consume_budget=False):
         min_interval_seconds = max(0.0, float(min_interval_ms) / 1000.0)
         total_wait_seconds = 0.0
         while True:
             with self._lock:
-                state = self._states.setdefault((exchange, group), RateLimitState(last_headers={}))
+                state = self._states.setdefault((exchange, group, proxy_id), RateLimitState(last_headers={}))
                 now = time.time()
 
                 if state.reset_at is not None and now >= state.reset_at:
@@ -116,11 +116,11 @@ class RateLimitRegistry:
             record_rate_limit_wait_seconds(wait_seconds)
             time.sleep(wait_seconds)
 
-    def mark_cooldown(self, exchange, group, wait_seconds, headers=None, budget_unavailable=False):
+    def mark_cooldown(self, exchange, group, wait_seconds, proxy_id='direct', headers=None, budget_unavailable=False):
         now = time.time()
         wait_seconds = max(0.0, float(wait_seconds))
         with self._lock:
-            state = self._states.setdefault((exchange, group), RateLimitState(last_headers={}))
+            state = self._states.setdefault((exchange, group, proxy_id), RateLimitState(last_headers={}))
             state.cooldown_until = max(state.cooldown_until, now + wait_seconds)
             state.next_allowed_at = max(state.next_allowed_at, now + wait_seconds)
             if headers is not None:
@@ -132,9 +132,20 @@ class RateLimitRegistry:
                 state.reset_at = None
                 state.budget_unavailable_until = max(state.budget_unavailable_until, now + wait_seconds)
 
-    def update_budget(self, exchange, group, *, limit=None, remain=None, reset_at=None, next_allowed_at=None, headers=None):
+    def update_budget(
+        self,
+        exchange,
+        group,
+        proxy_id='direct',
+        *,
+        limit=None,
+        remain=None,
+        reset_at=None,
+        next_allowed_at=None,
+        headers=None,
+    ):
         with self._lock:
-            state = self._states.setdefault((exchange, group), RateLimitState(last_headers={}))
+            state = self._states.setdefault((exchange, group, proxy_id), RateLimitState(last_headers={}))
             if headers is not None:
                 state.last_headers = dict(headers)
             if limit is not None:

@@ -7,6 +7,7 @@ from coinx.collector.binance.client import (
     request_with_binance_retry,
     request_with_retry,
 )
+from coinx.collector.proxy_pool import parse_proxy_pool_urls
 
 
 class _FakeResponse:
@@ -60,3 +61,32 @@ def test_request_with_binance_retry_marks_binance_cooldown_after_429(monkeypatch
 
     assert session.calls == 1
     assert sleep_calls == []
+
+
+def test_request_with_retry_logs_proxy_context_on_retry(monkeypatch, caplog):
+    session = _FakeSession([requests.exceptions.ConnectionError('boom'), _FakeResponse(200, 'OK')])
+    session.proxies = {'https': 'http://proxy.example.com:2261'}
+    sleep_calls = []
+
+    def fake_get(url, params=None, timeout=10):
+        session.calls += 1
+        response = session._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    session.get = fake_get
+    monkeypatch.setattr('coinx.collector.binance.client.time.sleep', lambda seconds: sleep_calls.append(seconds))
+
+    response = request_with_retry(session, 'https://example.com')
+
+    assert response.status_code == 200
+    assert session.calls == 2
+    assert sleep_calls == [0.5]
+    assert 'proxy.example.com:2261' in caplog.text
+
+
+def test_parse_proxy_pool_urls_keeps_socks5_scheme():
+    proxies = parse_proxy_pool_urls('DE=socks5://DE:token@proxy.example.com:2261')
+
+    assert proxies == [{'id': 'DE', 'url': 'socks5://DE:token@proxy.example.com:2261'}]

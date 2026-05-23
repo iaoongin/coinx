@@ -57,6 +57,10 @@ PROXY_PORT = get_env('PROXY_PORT', 7897, int)
 PROXY_URL = f'http://{PROXY_HOST}:{PROXY_PORT}'
 USE_PROXY = get_env('USE_PROXY', False, bool)
 HTTPS_PROXY_URL = f'http://{PROXY_HOST}:{PROXY_PORT}'
+USE_PROXY_POOL = get_env('USE_PROXY_POOL', False, bool)
+PROXY_POOL_URLS = get_env('PROXY_POOL_URLS', '')
+PROXY_POOL_STRATEGY = get_env('PROXY_POOL_STRATEGY', 'round_robin')
+PROXY_POOL_FAIL_COOLDOWN_SECONDS = get_env('PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30, int)
 
 DB_HOST = get_env('DB_HOST', 'localhost')
 DB_PORT = get_env('DB_PORT', 3306, int)

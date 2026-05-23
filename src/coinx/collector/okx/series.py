@@ -2,7 +2,12 @@ import time
 
 import requests
 
-from coinx.collector.binance.client import get_session, request_with_retry
+from coinx.collector.binance.client import request_with_retry
+from coinx.collector.proxy_pool import (
+    choose_okx_proxy_id,
+    get_okx_session,
+    mark_okx_proxy_failure,
+)
 from coinx.collector.rate_limit import RateLimitRegistry, RateLimitUnavailable, parse_retry_after_seconds
 from coinx.config import OKX_BASE_URL, OKX_429_RETRY_FALLBACK_SECONDS, OKX_RUBIK_MIN_INTERVAL_MS
 from coinx.repositories.series import upsert_series_records
@@ -79,8 +84,8 @@ def clear_okx_rate_limit_state():
     _okx_rate_limits.clear()
 
 
-def is_okx_budget_unavailable(group='rubik'):
-    return _okx_rate_limits.unavailable_remaining_seconds('okx', group) > 0
+def is_okx_budget_unavailable(group='rubik', proxy_id='direct'):
+    return _okx_rate_limits.unavailable_remaining_seconds('okx', group, proxy_id=proxy_id) > 0
 
 
 def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):
@@ -182,14 +187,20 @@ def _format_okx_rate_limit_headers(response):
     return interesting
 
 
-def _request_okx(path, params, session=None, timeout=10):
-    http_session = session or get_session()
+def _request_okx(path, params, session=None, timeout=10, proxy_id=None):
+    resolved_proxy_id = proxy_id or choose_okx_proxy_id()
+    http_session = session or get_okx_session(proxy_id=resolved_proxy_id)
     url = f"{OKX_BASE_URL}{path}"
     rate_limit_group = _okx_rate_limit_group(path)
-    wait_seconds = _okx_rate_limits.unavailable_remaining_seconds('okx', rate_limit_group)
+    wait_seconds = _okx_rate_limits.unavailable_remaining_seconds('okx', rate_limit_group, proxy_id=resolved_proxy_id)
     if wait_seconds > 0:
         raise OKXRateLimitUnavailable(rate_limit_group, wait_seconds)
-    _okx_rate_limits.wait_for_slot('okx', rate_limit_group, min_interval_ms=_okx_min_interval_ms(rate_limit_group))
+    _okx_rate_limits.wait_for_slot(
+        'okx',
+        rate_limit_group,
+        proxy_id=resolved_proxy_id,
+        min_interval_ms=_okx_min_interval_ms(rate_limit_group),
+    )
     try:
         response = request_with_retry(http_session, url, params=params, timeout=timeout)
     except requests.exceptions.HTTPError as exc:
@@ -204,7 +215,14 @@ def _request_okx(path, params, session=None, timeout=10):
                 backoff_seconds,
                 _format_okx_rate_limit_headers(response),
             )
-            _okx_rate_limits.mark_cooldown('okx', rate_limit_group, backoff_seconds, headers=_format_okx_rate_limit_headers(response))
+            _okx_rate_limits.mark_cooldown(
+                'okx',
+                rate_limit_group,
+                backoff_seconds,
+                proxy_id=resolved_proxy_id,
+                headers=_format_okx_rate_limit_headers(response),
+            )
+            mark_okx_proxy_failure(resolved_proxy_id, cooldown_seconds=backoff_seconds)
         raise
     response.raise_for_status()
     payload = response.json()

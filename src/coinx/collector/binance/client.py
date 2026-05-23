@@ -70,6 +70,15 @@ def _merge_request_headers(session, headers):
     return merged_headers
 
 
+def _session_proxy_summary(session):
+    proxies = getattr(session, 'proxies', None) or {}
+    if not isinstance(proxies, dict):
+        return 'direct'
+    https_proxy = proxies.get('https')
+    http_proxy = proxies.get('http')
+    return https_proxy or http_proxy or 'direct'
+
+
 def request_with_retry(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5, headers=None):
     """Perform GET requests with bounded retry only."""
     attempt = 0
@@ -100,11 +109,12 @@ def request_with_retry(session, url, params=None, timeout=10, max_retries=3, bas
             if delay > 1.5:
                 delay = 1.5
             logger.warning(
-                "请求失败，将在 %.2fs 后重试（第%d/%d次）: %s, 错误: %s",
+                "请求失败，将在 %.2fs 后重试（第%d/%d次）: %s, proxy=%s, 错误: %s",
                 delay,
                 attempt,
                 max_retries,
                 url,
+                _session_proxy_summary(session),
                 exc,
             )
             record_rate_limit_wait_seconds(delay)

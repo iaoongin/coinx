@@ -1,6 +1,7 @@
 import requests
 
 from coinx.collector.okx import series as okx_series
+from coinx.collector.rate_limit import RateLimitRegistry
 from coinx.collector.okx.series import (
     OKXRateLimitUnavailable,
     clear_supported_symbols_cache,
@@ -313,14 +314,15 @@ def test_okx_request_uses_retry_after_header_on_429(monkeypatch):
 
     monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
     monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
+    monkeypatch.setattr(okx_series, 'choose_okx_proxy_id', lambda: 'proxy-test')
 
     try:
-        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, proxy_id='proxy-test')
     except requests.exceptions.HTTPError:
         pass
 
     try:
-        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, proxy_id='proxy-test')
         assert False, 'expected OKXRateLimitUnavailable'
     except OKXRateLimitUnavailable as exc:
         assert round(exc.wait_seconds, 1) <= 7.0
@@ -343,14 +345,15 @@ def test_okx_request_uses_fallback_backoff_without_retry_header(monkeypatch):
     monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
     monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
     monkeypatch.setattr(okx_series, 'OKX_429_RETRY_FALLBACK_SECONDS', 9)
+    monkeypatch.setattr(okx_series, 'choose_okx_proxy_id', lambda: 'proxy-test')
 
     try:
-        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, proxy_id='proxy-test')
     except requests.exceptions.HTTPError:
         pass
 
     try:
-        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, proxy_id='proxy-test')
         assert False, 'expected OKXRateLimitUnavailable'
     except OKXRateLimitUnavailable as exc:
         assert round(exc.wait_seconds, 1) <= 9.0
@@ -360,11 +363,88 @@ def test_okx_request_uses_fallback_backoff_without_retry_header(monkeypatch):
 def test_okx_rubik_requests_respect_min_interval(monkeypatch):
     clear_okx_rate_limit_state()
     sleep_calls = []
-    time_values = iter([10.0, 10.0, 10.3, 10.3, 11.3, 11.3])
+    time_values = iter([10.0, 10.3, 10.3, 11.3])
 
-    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 1000)
-    monkeypatch.setattr(okx_series.time, 'time', lambda: next(time_values))
-    monkeypatch.setattr(okx_series.time, 'sleep', lambda seconds: sleep_calls.append(round(seconds, 2)))
+    monkeypatch.setattr('coinx.collector.rate_limit.time.time', lambda: next(time_values))
+    monkeypatch.setattr('coinx.collector.rate_limit.time.sleep', lambda seconds: sleep_calls.append(round(seconds, 2)))
+
+    okx_series._okx_rate_limits.wait_for_slot('okx', 'rubik', proxy_id='proxy-test', min_interval_ms=1000)
+    okx_series._okx_rate_limits.wait_for_slot('okx', 'rubik', proxy_id='proxy-test', min_interval_ms=1000)
+
+    assert sleep_calls == [0.7, 0.7]
+
+
+def test_okx_min_intervals_are_grouped_by_endpoint(monkeypatch):
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 500)
+
+    assert okx_series._okx_rate_limit_group('/api/v5/rubik/stat/taker-volume') == 'rubik'
+    assert okx_series._okx_min_interval_ms('rubik') == 500
+    assert okx_series._okx_rate_limit_group('/api/v5/public/funding-rate') == 'funding'
+    assert okx_series._okx_min_interval_ms('funding') == 200
+    assert okx_series._okx_rate_limit_group('/api/v5/market/history-candles') == 'default'
+    assert okx_series._okx_min_interval_ms('default') == 100
+
+
+def test_rate_limit_registry_uses_direct_proxy_by_default():
+    registry = RateLimitRegistry()
+
+    registry.mark_cooldown('okx', 'rubik', 5, proxy_id='direct')
+
+    assert registry.unavailable_remaining_seconds('okx', 'rubik') > 0
+    assert registry.unavailable_remaining_seconds('okx', 'rubik', proxy_id='direct') > 0
+    assert registry.unavailable_remaining_seconds('okx', 'rubik', proxy_id='proxy-a') == 0
+
+
+def test_okx_429_cooldown_only_blocks_current_proxy(monkeypatch):
+    clear_okx_rate_limit_state()
+
+    class FakeResponse:
+        status_code = 429
+        reason = 'Too Many Requests'
+        headers = {'Retry-After': '7'}
+
+    def fake_request(session, url, params=None, timeout=10, max_retries=3, base_delay=0.5):
+        error = requests.exceptions.HTTPError('429 Too Many Requests')
+        error.response = FakeResponse()
+        raise error
+
+    monkeypatch.setattr(okx_series, 'request_with_retry', fake_request)
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
+    monkeypatch.setattr(okx_series, 'get_okx_session', lambda proxy_id=None: requests.Session())
+
+    try:
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, proxy_id='proxy-a')
+    except requests.exceptions.HTTPError:
+        pass
+
+    with requests.Session() as session:
+        try:
+            okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, session=session, proxy_id='proxy-a')
+            assert False, 'expected OKXRateLimitUnavailable for proxy-a'
+        except OKXRateLimitUnavailable as exc:
+            assert round(exc.wait_seconds, 1) <= 7.0
+            assert round(exc.wait_seconds, 1) > 0
+
+    try:
+        okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'}, proxy_id='proxy-b')
+        assert False, 'expected upstream HTTPError for proxy-b'
+    except requests.exceptions.HTTPError:
+        pass
+
+
+def test_okx_request_uses_selected_proxy_session(monkeypatch):
+    calls = []
+
+    class FakeSession:
+        pass
+
+    def fake_get_okx_session(proxy_id=None):
+        calls.append(proxy_id)
+        return FakeSession()
+
+    monkeypatch.setattr(okx_series, 'get_okx_session', fake_get_okx_session)
+    monkeypatch.setattr(okx_series, 'choose_okx_proxy_id', lambda: 'proxy-jp')
+    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 0)
     monkeypatch.setattr(
         okx_series,
         'request_with_retry',
@@ -381,17 +461,5 @@ def test_okx_rubik_requests_respect_min_interval(monkeypatch):
     )
 
     okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
-    okx_series._request_okx('/api/v5/rubik/stat/taker-volume', {'ccy': 'BTC'})
 
-    assert sleep_calls == [0.7]
-
-
-def test_okx_min_intervals_are_grouped_by_endpoint(monkeypatch):
-    monkeypatch.setattr(okx_series, 'OKX_RUBIK_MIN_INTERVAL_MS', 500)
-
-    assert okx_series._okx_rate_limit_group('/api/v5/rubik/stat/taker-volume') == 'rubik'
-    assert okx_series._okx_min_interval_ms('rubik') == 500
-    assert okx_series._okx_rate_limit_group('/api/v5/public/funding-rate') == 'funding'
-    assert okx_series._okx_min_interval_ms('funding') == 200
-    assert okx_series._okx_rate_limit_group('/api/v5/market/history-candles') == 'default'
-    assert okx_series._okx_min_interval_ms('default') == 100
+    assert calls == ['proxy-jp']
