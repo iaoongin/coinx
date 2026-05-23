@@ -178,6 +178,8 @@ PROXY_POOL_URLS=HK=socks5h://user:pass@proxy.example.com:2261;JP=socks5h://user:
 PROXY_POOL_STRATEGY=round_robin
 ```
 
+如果代理地址使用 `socks5://` 或 `socks5h://`，部署环境还需要安装 `PySocks`；项目的 [requirements.txt](/Users/xhx-mbp/Code/project/coinx/requirements.txt) 已包含该依赖。
+
 ### 4. 启动项目
 
 Windows：

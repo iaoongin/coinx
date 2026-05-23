@@ -1,6 +1,7 @@
 flask==2.3.2
 gunicorn==22.0.0
 requests==2.31.0
+PySocks==1.7.1
 apscheduler==3.10.4
 pymysql==1.1.0
 cryptography==42.0.8
