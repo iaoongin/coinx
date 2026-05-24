@@ -94,15 +94,9 @@ def test_parse_proxy_pool_urls_keeps_socks5_scheme():
 
 
 def test_proxy_pool_filters_unavailable_proxies_during_initialization(monkeypatch):
-    def fake_check(self, proxy):
-        return proxy['id'] != 'bad'
-
-    monkeypatch.setattr(ProxyPool, '_is_proxy_available', fake_check)
-
     pool = ProxyPool(
         proxies=[
             {'id': 'good', 'url': 'http://good.example.com:2261'},
-            {'id': 'bad', 'url': 'http://bad.example.com:2261'},
         ]
     )
 
@@ -116,9 +110,75 @@ def test_build_okx_proxy_pool_falls_back_to_direct_when_all_proxies_unavailable(
     monkeypatch.setattr(proxy_pool, 'USE_PROXY_POOL', True)
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_STRATEGY', 'round_robin')
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30)
-    monkeypatch.setattr(ProxyPool, '_is_proxy_available', lambda self, proxy: False)
+    monkeypatch.setattr(
+        ProxyPool,
+        'check_proxies_concurrently',
+        staticmethod(
+            lambda proxies: {
+                'available': [],
+                'unavailable': [
+                    {'id': 'bad-a', 'latency_ms': 5000, 'reason': 'timed out'},
+                    {'id': 'bad-b', 'latency_ms': 5000, 'reason': 'timed out'},
+                ],
+            }
+        ),
+    )
 
     pool = proxy_pool.build_okx_proxy_pool()
 
     assert pool.enabled() is False
     assert pool.choose_proxy() == 'direct'
+
+
+def test_proxy_pool_concurrent_health_check_collects_latency_and_status(monkeypatch):
+    class _Session:
+        def __init__(self, proxy_url):
+            self.proxy_url = proxy_url
+
+        def get(self, url, timeout=10):
+            assert url == proxy_pool.PROXY_CHECK_URL
+            assert timeout == 5
+            if self.proxy_url.endswith('bad.example.com:2261'):
+                raise requests.exceptions.ConnectTimeout('timed out')
+            return _FakeResponse(200, 'OK')
+
+    time_points = iter([10.0, 10.12, 20.0, 25.0])
+    monkeypatch.setattr(proxy_pool, '_build_session', lambda proxy_url=None: _Session(proxy_url))
+    monkeypatch.setattr(proxy_pool.time, 'perf_counter', lambda: next(time_points))
+
+    results = ProxyPool.check_proxies_concurrently(
+        [
+            {'id': 'good', 'url': 'http://good.example.com:2261'},
+            {'id': 'bad', 'url': 'http://bad.example.com:2261'},
+        ]
+    )
+
+    assert [item['id'] for item in results['available']] == ['good']
+    assert [item['id'] for item in results['unavailable']] == ['bad']
+    assert results['available'][0]['latency_ms'] in (119, 120)
+    assert results['unavailable'][0]['latency_ms'] == 5000
+    assert 'timed out' in results['unavailable'][0]['reason']
+
+
+def test_build_okx_proxy_pool_logs_health_check_summary(monkeypatch, caplog):
+    monkeypatch.setattr(proxy_pool, 'PROXY_POOL_URLS', 'good=http://good.example.com:2261;bad=http://bad.example.com:2261')
+    monkeypatch.setattr(proxy_pool, 'USE_PROXY', False)
+    monkeypatch.setattr(proxy_pool, 'USE_PROXY_POOL', True)
+    monkeypatch.setattr(proxy_pool, 'PROXY_POOL_STRATEGY', 'round_robin')
+    monkeypatch.setattr(proxy_pool, 'PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30)
+    monkeypatch.setattr(
+        ProxyPool,
+        'check_proxies_concurrently',
+        staticmethod(
+            lambda proxies: {
+                'available': [{'id': 'good', 'url': 'http://good.example.com:2261', 'latency_ms': 123}],
+                'unavailable': [{'id': 'bad', 'url': 'http://bad.example.com:2261', 'latency_ms': 5000, 'reason': 'timed out'}],
+            }
+        ),
+    )
+
+    pool = proxy_pool.build_okx_proxy_pool()
+
+    assert pool.all_proxy_ids() == ['good']
+    assert 'available=good(123ms)' in caplog.text
+    assert 'unavailable=bad(5000ms, timed out)' in caplog.text
