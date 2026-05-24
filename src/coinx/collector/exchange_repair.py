@@ -113,6 +113,28 @@ def _build_rolling_target_times(now_ms, points, period='5m'):
     ]
 
 
+def _build_target_times_in_range(start_time, end_time, period='5m'):
+    if start_time > end_time:
+        return []
+    period_ms = _period_to_ms(period)
+    return list(range(start_time, end_time + 1, period_ms))
+
+
+def _split_history_window_by_day(start_time, end_time):
+    if start_time > end_time:
+        return []
+
+    day_ms = _period_to_ms('1d')
+    segments = []
+    current_start = start_time
+    while current_start <= end_time:
+        day_start = (current_start // day_ms) * day_ms
+        current_end = min(end_time, day_start + day_ms - 1)
+        segments.append((current_start, current_end))
+        current_start = current_end + 1
+    return segments
+
+
 def _result_with_breakdown(result, breakdown):
     result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
     return result
@@ -192,6 +214,40 @@ def resolve_repair_worker_count(exchanges=None, max_workers=None):
 def _active_series_types(adapter, series_types):
     requested_types = tuple(series_types or HOMEPAGE_SERIES_TYPES)
     return [series_type for series_type in requested_types if series_type in adapter.supported_series_types]
+
+
+def _build_history_gap_tasks(exchange, symbol, series_type, period, start_time, end_time, session=None):
+    target_times = _build_target_times_in_range(start_time, end_time, period=period)
+    if not target_times:
+        return []
+
+    existing_by_symbol = get_existing_series_timestamps(
+        exchange,
+        series_type,
+        [symbol],
+        target_times,
+        period=period,
+        session=session,
+    )
+    existing_times = existing_by_symbol.get(symbol, set())
+    gap_tasks = []
+    for segment_start, segment_end in _split_history_window_by_day(start_time, end_time):
+        segment_target_times = _build_target_times_in_range(segment_start, segment_end, period=period)
+        if not segment_target_times:
+            continue
+        if all(timestamp in existing_times for timestamp in segment_target_times):
+            continue
+        gap_tasks.append(
+            {
+                'exchange': exchange,
+                'symbol': symbol,
+                'series_type': series_type,
+                'period': period,
+                'start_time': segment_start,
+                'end_time': segment_target_times[-1],
+            }
+        )
+    return gap_tasks
 
 
 def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precise, extra=None):
@@ -1021,18 +1077,40 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                             )
                         )
                         continue
-                    tasks.append(
-                        {
-                            'adapter': adapter,
-                            'exchange': adapter.exchange_id,
-                            'symbol': symbol,
-                            'series_type': series_type,
-                            'period': period,
-                            'start_time': target_start_time,
-                            'end_time': target_end_time,
-                        }
-                    )
-                    exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + 1
+                    window_precise = adapter.supports_time_window(series_type)
+                    if not window_precise:
+                        tasks.append(
+                            {
+                                'adapter': adapter,
+                                'exchange': adapter.exchange_id,
+                                'symbol': symbol,
+                                'series_type': series_type,
+                                'period': period,
+                                'start_time': target_start_time,
+                                'end_time': target_end_time,
+                            }
+                        )
+                        exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + 1
+                        continue
+
+                    with timed_category(precheck_breakdown, 'db_read_ms'):
+                        gap_tasks = _build_history_gap_tasks(
+                            adapter.exchange_id,
+                            symbol,
+                            series_type,
+                            period,
+                            target_start_time,
+                            target_end_time,
+                            session=db_session,
+                        )
+                    for gap_task in gap_tasks:
+                        tasks.append(
+                            {
+                                'adapter': adapter,
+                                **gap_task,
+                            }
+                        )
+                    exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + len(gap_tasks)
 
     precheck_breakdown['precheck_ms'] += (time.perf_counter() - precheck_started_at) * 1000
 

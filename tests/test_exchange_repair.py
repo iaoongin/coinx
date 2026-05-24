@@ -946,29 +946,20 @@ def test_gate_history_repair_paginates_open_interest_without_end_time(db_session
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             assert series_type == 'open_interest_hist'
             assert end_time is None
-            if start_time == 0:
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(1000)
-                ]
-            if start_time == 1000 * FIVE_MINUTES_MS:
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(1000, 1500)
-                ]
-            return []
+            start_index = int((start_time or 0) / FIVE_MINUTES_MS)
+            if start_index >= 1500:
+                return []
+            end_index = min(start_index + limit, 1500)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'event_time': index * FIVE_MINUTES_MS,
+                    'sum_open_interest': 10 + index,
+                    'sum_open_interest_value': 100 + index,
+                }
+                for index in range(start_index, end_index)
+            ]
 
         def parse_series_payload(self, series_type, payload, symbol, period):
             return payload
@@ -997,7 +988,7 @@ def test_gate_history_repair_paginates_open_interest_without_end_time(db_session
         .all()
     )
 
-    assert summary['success_count'] == 1
+    assert summary['success_count'] == 6
     assert len(rows) == 1500
     assert rows[0].event_time == 0
     assert rows[-1].event_time == 1499 * FIVE_MINUTES_MS
@@ -1024,73 +1015,20 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
 
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             assert series_type == 'open_interest_hist'
-            if (start_time, end_time) == (500 * FIVE_MINUTES_MS, 599 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(599, 499, -1)
-                ]
-            if (start_time, end_time) == (400 * FIVE_MINUTES_MS, 499 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(499, 399, -1)
-                ]
-            if (start_time, end_time) == (300 * FIVE_MINUTES_MS, 399 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(399, 299, -1)
-                ]
-            if (start_time, end_time) == (200 * FIVE_MINUTES_MS, 299 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(299, 199, -1)
-                ]
-            if (start_time, end_time) == (100 * FIVE_MINUTES_MS, 199 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(199, 99, -1)
-                ]
-            if (start_time, end_time) == (0, 99 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(99, -1, -1)
-                ]
-            return []
+            assert start_time is not None
+            assert end_time is not None
+            start_index = int(start_time / FIVE_MINUTES_MS)
+            end_index = int(end_time / FIVE_MINUTES_MS)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'event_time': index * FIVE_MINUTES_MS,
+                    'sum_open_interest': 10 + index,
+                    'sum_open_interest_value': 100 + index,
+                }
+                for index in range(end_index, start_index - 1, -1)
+            ]
 
         def parse_series_payload(self, series_type, payload, symbol, period):
             return payload
@@ -1119,7 +1057,150 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
         .all()
     )
 
-    assert summary['success_count'] == 1
+    assert summary['success_count'] == 3
     assert len(rows) == 600
     assert rows[0].event_time == 0
     assert rows[-1].event_time == 599 * FIVE_MINUTES_MS
+
+
+def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    now_ms = (4 * day_ms) + (12 * 60 * 60 * 1000)
+
+    class DailyHistoryAdapter:
+        exchange_id = 'binance'
+        supported_series_types = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time))
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'open_time': start_time,
+                    'close_time': start_time + FIVE_MINUTES_MS - 1,
+                    'open_price': 1,
+                    'high_price': 2,
+                    'low_price': 1,
+                    'close_price': 1.5,
+                }
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    existing_times = {}
+    for day_index in (1, 3):
+        day_start = day_index * day_ms
+        existing_times['BTCUSDT'] = existing_times.get('BTCUSDT', set()) | {
+            timestamp
+            for timestamp in range(day_start, day_start + day_ms, FIVE_MINUTES_MS)
+        }
+    existing_times['BTCUSDT'].update(
+        timestamp
+        for timestamp in range(4 * day_ms, 4 * day_ms + 12 * 60 * 60 * 1000, FIVE_MINUTES_MS)
+    )
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [DailyHistoryAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: existing_times,
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=96,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 2
+    assert calls == [
+        (12 * 60 * 60 * 1000 - FIVE_MINUTES_MS, day_ms - FIVE_MINUTES_MS),
+        (2 * day_ms, (3 * day_ms) - FIVE_MINUTES_MS),
+    ]
+
+
+def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    now_ms = day_ms + (10 * 60 * 60 * 1000) + FIVE_MINUTES_MS
+
+    class PartialDayHistoryAdapter:
+        exchange_id = 'binance'
+        supported_series_types = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time))
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'open_time': start_time,
+                    'close_time': start_time + FIVE_MINUTES_MS - 1,
+                    'open_price': 1,
+                    'high_price': 2,
+                    'low_price': 1,
+                    'close_price': 1.5,
+                }
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    full_previous_day = {
+        timestamp
+        for timestamp in range(0, day_ms, FIVE_MINUTES_MS)
+    }
+    latest_closed = day_ms + (10 * 60 * 60 * 1000)
+    current_day_existing = {
+        timestamp
+        for timestamp in range(day_ms, latest_closed, FIVE_MINUTES_MS)
+    }
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [PartialDayHistoryAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BTCUSDT': full_previous_day | current_day_existing},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=48,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 1
+    assert calls == [
+        (day_ms, latest_closed),
+    ]
