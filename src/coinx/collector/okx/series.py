@@ -241,8 +241,7 @@ def _rubik_time_window(period, start_time=None, end_time=None, now_ms=None):
         return start_time, end_time
 
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    reference_end_time = end_time if end_time is not None else current_time_ms
-    earliest_time = reference_end_time - history_limit_ms
+    earliest_time = current_time_ms - history_limit_ms
     effective_start = max(start_time, earliest_time) if start_time is not None else earliest_time
     effective_end = end_time
 

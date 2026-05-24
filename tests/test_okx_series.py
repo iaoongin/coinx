@@ -182,6 +182,7 @@ def test_okx_open_interest_history_uses_inst_id_and_returns_last_page_within_win
         ]
 
     monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
+    monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 1779556200000 / 1000)
 
     payload = fetch_open_interest_hist(
         'BTCUSDT',
@@ -218,27 +219,7 @@ def test_okx_rubik_fetchers_skip_windows_older_than_retention(monkeypatch):
 
     assert fetch_open_interest_hist('BTCUSDT', '5m', 500, start_time=0, end_time=1000) == []
     assert fetch_taker_buy_sell_vol('BTCUSDT', '5m', 500, start_time=0, end_time=1000) == []
-    assert calls == [
-        (
-            '/api/v5/rubik/stat/contracts/open-interest-history',
-            {
-                'instId': 'BTC-USDT-SWAP',
-                'period': '5m',
-                'begin': '0',
-                'end': '1000',
-            },
-        ),
-        (
-            '/api/v5/rubik/stat/taker-volume',
-            {
-                'ccy': 'BTC',
-                'instType': 'CONTRACTS',
-                'period': '5m',
-                'begin': '0',
-                'end': '1000',
-            },
-        ),
-    ]
+    assert calls == []
 
 
 def test_okx_rubik_fetchers_clip_windows_to_retention(monkeypatch):
