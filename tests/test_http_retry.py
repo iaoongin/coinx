@@ -1,13 +1,14 @@
 import pytest
 import requests
 
+from coinx.collector import proxy_pool
 from coinx.collector.binance.client import (
     BinanceRateLimitUnavailable,
     clear_binance_rate_limit_state,
     request_with_binance_retry,
     request_with_retry,
 )
-from coinx.collector.proxy_pool import parse_proxy_pool_urls
+from coinx.collector.proxy_pool import ProxyPool, parse_proxy_pool_urls
 
 
 class _FakeResponse:
@@ -90,3 +91,34 @@ def test_parse_proxy_pool_urls_keeps_socks5_scheme():
     proxies = parse_proxy_pool_urls('DE=socks5://DE:token@proxy.example.com:2261')
 
     assert proxies == [{'id': 'DE', 'url': 'socks5://DE:token@proxy.example.com:2261'}]
+
+
+def test_proxy_pool_filters_unavailable_proxies_during_initialization(monkeypatch):
+    def fake_check(self, proxy):
+        return proxy['id'] != 'bad'
+
+    monkeypatch.setattr(ProxyPool, '_is_proxy_available', fake_check)
+
+    pool = ProxyPool(
+        proxies=[
+            {'id': 'good', 'url': 'http://good.example.com:2261'},
+            {'id': 'bad', 'url': 'http://bad.example.com:2261'},
+        ]
+    )
+
+    assert pool.enabled() is True
+    assert pool.all_proxy_ids() == ['good']
+
+
+def test_build_okx_proxy_pool_falls_back_to_direct_when_all_proxies_unavailable(monkeypatch):
+    monkeypatch.setattr(proxy_pool, 'PROXY_POOL_URLS', 'bad-a=http://bad-a.example.com:2261;bad-b=http://bad-b.example.com:2261')
+    monkeypatch.setattr(proxy_pool, 'USE_PROXY', False)
+    monkeypatch.setattr(proxy_pool, 'USE_PROXY_POOL', True)
+    monkeypatch.setattr(proxy_pool, 'PROXY_POOL_STRATEGY', 'round_robin')
+    monkeypatch.setattr(proxy_pool, 'PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30)
+    monkeypatch.setattr(ProxyPool, '_is_proxy_available', lambda self, proxy: False)
+
+    pool = proxy_pool.build_okx_proxy_pool()
+
+    assert pool.enabled() is False
+    assert pool.choose_proxy() == 'direct'

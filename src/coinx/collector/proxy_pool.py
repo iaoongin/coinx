@@ -18,6 +18,8 @@ from coinx.utils import logger
 
 
 DEFAULT_PROXY_ID = 'direct'
+PROXY_CHECK_URL = 'https://www.okx.com/api/v5/public/time'
+PROXY_CHECK_TIMEOUT_SECONDS = 5
 
 
 def _build_session(proxy_url=None):
@@ -76,6 +78,9 @@ class ProxyPool:
         for proxy in proxies or []:
             proxy_id = proxy['id']
             proxy_url = proxy.get('url')
+            if not self._is_proxy_available(proxy):
+                logger.warning('Proxy unavailable during initialization, skipped: %s', proxy_id)
+                continue
             self._proxies.append(
                 {
                     'id': proxy_id,
@@ -152,6 +157,19 @@ class ProxyPool:
         now = time.time()
         return [proxy for proxy in self._proxies if proxy['cooldown_until'] <= now]
 
+    def _is_proxy_available(self, proxy):
+        proxy_url = proxy.get('url')
+        if not proxy_url:
+            return True
+        session = _build_session(proxy_url)
+        try:
+            response = session.get(PROXY_CHECK_URL, timeout=PROXY_CHECK_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            return True
+        except requests.RequestException as exc:
+            logger.warning('Proxy health check failed for %s: %s', proxy['id'], exc)
+            return False
+
 
 def build_okx_proxy_pool():
     proxies = parse_proxy_pool_urls(PROXY_POOL_URLS)
@@ -160,11 +178,14 @@ def build_okx_proxy_pool():
             proxies = [{'id': DEFAULT_PROXY_ID, 'url': HTTPS_PROXY_URL or PROXY_URL}]
         else:
             proxies = [{'id': DEFAULT_PROXY_ID, 'url': None}]
-    return ProxyPool(
+    pool = ProxyPool(
         proxies=proxies,
         strategy=PROXY_POOL_STRATEGY,
         fail_cooldown_seconds=PROXY_POOL_FAIL_COOLDOWN_SECONDS,
     )
+    if proxies and not pool.enabled():
+        logger.warning('All configured proxies are unavailable during initialization, fallback to direct connection.')
+    return pool
 
 
 _okx_proxy_pool = build_okx_proxy_pool()
