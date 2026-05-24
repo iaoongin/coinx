@@ -54,6 +54,89 @@ class _FakeMysqlSession:
     def close(self):
         self.closed = True
 
+    def get_bind(self):
+        owner = self
+
+        class _FakeBind:
+            dialect = SimpleNamespace(name='mysql')
+
+            def connect(self_inner):
+                return owner
+
+        return _FakeBind()
+
+    def begin(self):
+        session = self
+
+        class _Txn:
+            def commit(self_inner):
+                session.commit_calls += 1
+
+            def rollback(self_inner):
+                session.rollback_calls += 1
+
+        return _Txn()
+
+
+class _FakeMysqlBoundConnection(_FakeMysqlSession):
+    def __init__(self, owner):
+        super().__init__(
+            failures_before_success=owner.failures_before_success,
+            failure_error_code=owner.failure_error_code,
+            lock_result=owner.lock_result,
+        )
+        self.owner = owner
+        self.transactions_started = 0
+        self.transactions_committed = 0
+        self.transactions_rolled_back = 0
+
+    def execute(self, statement, params=None):
+        result = super().execute(statement, params=params)
+        self.owner.executed_statements.extend(
+            (f'connection:{statement_text}', statement_params)
+            for statement_text, statement_params in self.executed_statements[len(self.owner.executed_statements):]
+        )
+        return result
+
+    def begin(self):
+        self.transactions_started += 1
+        connection = self
+
+        class _Txn:
+            def commit(self_inner):
+                connection.transactions_committed += 1
+
+            def rollback(self_inner):
+                connection.transactions_rolled_back += 1
+
+        return _Txn()
+
+    def close(self):
+        self.closed = True
+        self.owner.connection_closed = True
+
+
+class _FakeMysqlPinnedSession(_FakeMysqlSession):
+    def __init__(self, failures_before_success=0, failure_error_code=1213, lock_result=1):
+        super().__init__(
+            failures_before_success=failures_before_success,
+            failure_error_code=failure_error_code,
+            lock_result=lock_result,
+        )
+        self.connection = _FakeMysqlBoundConnection(self)
+        self.connection_closed = False
+
+    def get_bind(self):
+        owner = self
+
+        class _FakeBind:
+            dialect = SimpleNamespace(name='mysql')
+
+            def connect(self_inner):
+                return owner.connection
+
+        return _FakeBind()
+
 
 def test_upsert_series_records_retries_mysql_deadlock(monkeypatch):
     session = _FakeMysqlSession(failures_before_success=2)
@@ -252,3 +335,35 @@ def test_upsert_series_records_retries_mysql_named_lock_timeout(monkeypatch):
     assert len(get_lock_calls) == 2
     assert len(release_lock_calls) == 1
     assert sleep_calls == [0.2]
+
+
+def test_upsert_series_records_releases_mysql_named_lock_on_same_connection():
+    session = _FakeMysqlPinnedSession()
+
+    affected = upsert_series_records(
+        'binance',
+        'klines',
+        [
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 1711526400000,
+                'close_time': 1711526699999,
+                'open_price': 68000.1,
+                'high_price': 68100.2,
+                'low_price': 67950.3,
+                'close_price': 68020.4,
+            }
+        ],
+        session=session,
+    )
+
+    get_lock_calls = [statement for statement, _ in session.connection.executed_statements if 'GET_LOCK' in statement]
+    release_lock_calls = [statement for statement, _ in session.connection.executed_statements if 'RELEASE_LOCK' in statement]
+
+    assert affected == 1
+    assert len(get_lock_calls) == 1
+    assert len(release_lock_calls) == 1
+    assert session.connection.transactions_started == 1
+    assert session.connection.transactions_committed == 1
+    assert session.connection_closed is True

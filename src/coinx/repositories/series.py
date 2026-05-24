@@ -88,6 +88,20 @@ def _release_mysql_named_lock(db, lock_name):
     )
 
 
+def _with_mysql_named_lock(db, exchange, series_type, callback):
+    connection = db.get_bind().connect()
+    lock_name = None
+    try:
+        lock_name = _acquire_mysql_named_lock(connection, exchange, series_type)
+        return callback(connection)
+    finally:
+        try:
+            if lock_name:
+                _release_mysql_named_lock(connection, lock_name)
+        finally:
+            connection.close()
+
+
 def _build_values_list(model, exchange, records):
     values_list = []
     model_columns = {column.name for column in model.__table__.columns}
@@ -140,18 +154,32 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
     own_session = session is None
     db = session or get_session()
     effective_batch_size = max(1, int(batch_size or 1))
-    lock_name = None
 
     try:
         affected = 0
         if db.bind and db.bind.dialect.name == 'mysql':
-            lock_name = _acquire_mysql_named_lock(db, exchange, series_type)
-            for index in range(0, len(records), effective_batch_size):
-                batch_records = records[index:index + effective_batch_size]
-                values_list = _sort_values_list(series_type, _build_values_list(model, exchange, batch_records))
-                affected += _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=False)
-            db.commit()
-            return affected
+            def _write_batches(connection):
+                transaction = connection.begin()
+                try:
+                    mysql_affected = 0
+                    for index in range(0, len(records), effective_batch_size):
+                        batch_records = records[index:index + effective_batch_size]
+                        values_list = _sort_values_list(series_type, _build_values_list(model, exchange, batch_records))
+                        mysql_affected += _upsert_mysql_values(
+                            model,
+                            exchange,
+                            series_type,
+                            values_list,
+                            connection,
+                            commit=False,
+                        )
+                    transaction.commit()
+                    return mysql_affected
+                except Exception:
+                    transaction.rollback()
+                    raise
+
+            return _with_mysql_named_lock(db, exchange, series_type, _write_batches)
 
         for index in range(0, len(records), effective_batch_size):
             batch_records = records[index:index + effective_batch_size]
@@ -161,8 +189,6 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
         db.rollback()
         raise
     finally:
-        if lock_name:
-            _release_mysql_named_lock(db, lock_name)
         if own_session:
             db.close()
 
@@ -176,14 +202,28 @@ def upsert_series_records(exchange, series_type, records, session=None):
 
     own_session = session is None
     db = session or get_session()
-    lock_name = None
-
     try:
         values_list = _sort_values_list(series_type, _build_values_list(model, exchange, records))
 
         if db.bind and db.bind.dialect.name == 'mysql':
-            lock_name = _acquire_mysql_named_lock(db, exchange, series_type)
-            return _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=True)
+            def _write_records(connection):
+                transaction = connection.begin()
+                try:
+                    affected = _upsert_mysql_values(
+                        model,
+                        exchange,
+                        series_type,
+                        values_list,
+                        connection,
+                        commit=False,
+                    )
+                    transaction.commit()
+                    return affected
+                except Exception:
+                    transaction.rollback()
+                    raise
+
+            return _with_mysql_named_lock(db, exchange, series_type, _write_records)
 
         key_values = [tuple(values[field] for field in key_fields) for values in values_list]
         key_columns = [getattr(model, field) for field in key_fields]
@@ -216,8 +256,6 @@ def upsert_series_records(exchange, series_type, records, session=None):
         db.rollback()
         raise
     finally:
-        if lock_name:
-            _release_mysql_named_lock(db, lock_name)
         if own_session:
             db.close()
 
