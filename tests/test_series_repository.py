@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import InvalidRequestError, OperationalError
 
 from coinx.repositories.series import upsert_series_records, upsert_series_records_in_batches
 
@@ -89,8 +89,10 @@ class _FakeMysqlBoundConnection(_FakeMysqlSession):
         self.transactions_started = 0
         self.transactions_committed = 0
         self.transactions_rolled_back = 0
+        self.autobegin_started = False
 
     def execute(self, statement, params=None):
+        self.autobegin_started = True
         result = super().execute(statement, params=params)
         self.owner.executed_statements.extend(
             (f'connection:{statement_text}', statement_params)
@@ -99,17 +101,32 @@ class _FakeMysqlBoundConnection(_FakeMysqlSession):
         return result
 
     def begin(self):
+        if self.autobegin_started:
+            raise InvalidRequestError(
+                "This connection has already initialized a SQLAlchemy Transaction() object via begin() or autobegin;"
+                " can't call begin() here unless rollback() or commit() is called first."
+            )
         self.transactions_started += 1
         connection = self
 
         class _Txn:
             def commit(self_inner):
                 connection.transactions_committed += 1
+                connection.autobegin_started = False
 
             def rollback(self_inner):
                 connection.transactions_rolled_back += 1
+                connection.autobegin_started = False
 
         return _Txn()
+
+    def commit(self):
+        self.commit_calls += 1
+        self.autobegin_started = False
+
+    def rollback(self):
+        self.rollback_calls += 1
+        self.autobegin_started = False
 
     def close(self):
         self.closed = True
@@ -364,6 +381,6 @@ def test_upsert_series_records_releases_mysql_named_lock_on_same_connection():
     assert affected == 1
     assert len(get_lock_calls) == 1
     assert len(release_lock_calls) == 1
-    assert session.connection.transactions_started == 1
-    assert session.connection.transactions_committed == 1
+    assert session.connection.commit_calls == 1
+    assert session.connection.rollback_calls == 0
     assert session.connection_closed is True

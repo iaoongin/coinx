@@ -159,7 +159,6 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
         affected = 0
         if db.bind and db.bind.dialect.name == 'mysql':
             def _write_batches(connection):
-                transaction = connection.begin()
                 try:
                     mysql_affected = 0
                     for index in range(0, len(records), effective_batch_size):
@@ -173,10 +172,10 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
                             connection,
                             commit=False,
                         )
-                    transaction.commit()
+                    connection.commit()
                     return mysql_affected
                 except Exception:
-                    transaction.rollback()
+                    connection.rollback()
                     raise
 
             return _with_mysql_named_lock(db, exchange, series_type, _write_batches)
@@ -207,7 +206,6 @@ def upsert_series_records(exchange, series_type, records, session=None):
 
         if db.bind and db.bind.dialect.name == 'mysql':
             def _write_records(connection):
-                transaction = connection.begin()
                 try:
                     affected = _upsert_mysql_values(
                         model,
@@ -217,10 +215,10 @@ def upsert_series_records(exchange, series_type, records, session=None):
                         connection,
                         commit=False,
                     )
-                    transaction.commit()
+                    connection.commit()
                     return affected
                 except Exception:
-                    transaction.rollback()
+                    connection.rollback()
                     raise
 
             return _with_mysql_named_lock(db, exchange, series_type, _write_records)
