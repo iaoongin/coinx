@@ -25,6 +25,7 @@ MYSQL_LOCK_WAIT_TIMEOUT_ERROR_CODE = 1205
 MYSQL_DEADLOCK_MAX_RETRIES = 3
 MYSQL_DEADLOCK_RETRY_DELAY_SECONDS = 0.2
 MYSQL_NAMED_LOCK_TIMEOUT_SECONDS = 30
+MYSQL_NAMED_LOCK_MAX_RETRIES = 3
 
 
 def get_series_model(series_type):
@@ -53,18 +54,29 @@ def _series_lock_name(exchange, series_type):
 
 def _acquire_mysql_named_lock(db, exchange, series_type, timeout_seconds=MYSQL_NAMED_LOCK_TIMEOUT_SECONDS):
     lock_name = _series_lock_name(exchange, series_type)
-    result = db.execute(
-        text('SELECT GET_LOCK(:lock_name, :timeout_seconds)'),
-        {
-            'lock_name': lock_name,
-            'timeout_seconds': int(timeout_seconds),
-        },
-    ).scalar()
-    if result != 1:
-        raise TimeoutError(
-            f'failed to acquire MySQL named lock for exchange={exchange} series_type={series_type}'
+    for attempt in range(1, MYSQL_NAMED_LOCK_MAX_RETRIES + 1):
+        result = db.execute(
+            text('SELECT GET_LOCK(:lock_name, :timeout_seconds)'),
+            {
+                'lock_name': lock_name,
+                'timeout_seconds': int(timeout_seconds),
+            },
+        ).scalar()
+        if result == 1:
+            return lock_name
+        if attempt >= MYSQL_NAMED_LOCK_MAX_RETRIES:
+            break
+        logger.warning(
+            'MySQL named lock retry for series write exchange=%s series_type=%s attempt=%d/%d',
+            exchange,
+            series_type,
+            attempt,
+            MYSQL_NAMED_LOCK_MAX_RETRIES,
         )
-    return lock_name
+        time.sleep(MYSQL_DEADLOCK_RETRY_DELAY_SECONDS * attempt)
+    raise TimeoutError(
+        f'failed to acquire MySQL named lock for exchange={exchange} series_type={series_type}'
+    )
 
 
 def _release_mysql_named_lock(db, lock_name):

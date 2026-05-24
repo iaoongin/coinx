@@ -16,6 +16,7 @@ class _FakeMysqlSession:
         self.rollback_calls = 0
         self.closed = False
         self.executed_statements = []
+        self.get_lock_calls = 0
 
     class _ScalarResult:
         def __init__(self, value):
@@ -28,6 +29,10 @@ class _FakeMysqlSession:
         statement_text = str(statement)
         self.executed_statements.append((statement_text, params))
         if 'GET_LOCK' in statement_text:
+            self.get_lock_calls += 1
+            if isinstance(self.lock_result, (list, tuple)):
+                index = min(self.get_lock_calls - 1, len(self.lock_result) - 1)
+                return self._ScalarResult(self.lock_result[index])
             return self._ScalarResult(self.lock_result)
         if 'RELEASE_LOCK' in statement_text:
             return self._ScalarResult(1)
@@ -215,3 +220,35 @@ def test_upsert_series_records_in_batches_uses_mysql_named_lock_once():
     assert affected == 2
     assert len(get_lock_calls) == 1
     assert len(release_lock_calls) == 1
+
+
+def test_upsert_series_records_retries_mysql_named_lock_timeout(monkeypatch):
+    session = _FakeMysqlSession(lock_result=(0, 1))
+    sleep_calls = []
+    monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
+
+    affected = upsert_series_records(
+        'binance',
+        'klines',
+        [
+            {
+                'symbol': 'BTCUSDT',
+                'period': '5m',
+                'open_time': 1711526400000,
+                'close_time': 1711526699999,
+                'open_price': 68000.1,
+                'high_price': 68100.2,
+                'low_price': 67950.3,
+                'close_price': 68020.4,
+            }
+        ],
+        session=session,
+    )
+
+    get_lock_calls = [statement for statement, _ in session.executed_statements if 'GET_LOCK' in statement]
+    release_lock_calls = [statement for statement, _ in session.executed_statements if 'RELEASE_LOCK' in statement]
+
+    assert affected == 1
+    assert len(get_lock_calls) == 2
+    assert len(release_lock_calls) == 1
+    assert sleep_calls == [0.2]
