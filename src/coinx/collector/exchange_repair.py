@@ -371,6 +371,9 @@ def _log_repair_summary(summary):
     if summary.get('mode') == 'history':
         extra_parts.extend(
             [
+                f"预检已完整={summary.get('precheck_skipped_count', 0)}",
+                f"待修补任务={summary.get('pending_task_count', 0)}",
+                f"当天裁剪截止={summary.get('current_day_trimmed_end_time')}",
                 f"覆盖时长={summary.get('coverage_hours')}",
                 f"是否全量扫描={'是' if summary.get('full_scan') else '否'}",
                 f"修补窗口={summary.get('start_time')}~{summary.get('end_time')}",
@@ -1031,20 +1034,33 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
     tasks = []
     skipped_results = []
     exchange_task_counts = {}
+    precheck_skipped_count = 0
+    current_day_trimmed_end_time = None
+    exchange_progress = {}
     summary_end_time = latest_closed_5m_open_time(current_time_ms)
     summary_start_time = max(0, summary_end_time - effective_coverage_hours * 60 * 60 * 1000)
 
     for adapter in adapters:
+        exchange_stats = exchange_progress.setdefault(
+            adapter.exchange_id,
+            {'supported_symbols': 0, 'unsupported': 0, 'complete': 0, 'pending': 0},
+        )
         for series_type in _active_series_types(adapter, series_types):
             periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             for period in periods:
                 target_end_time = latest_closed_period_open_time(current_time_ms, period)
+                current_day_trimmed_end_time = (
+                    target_end_time
+                    if current_day_trimmed_end_time is None
+                    else max(current_day_trimmed_end_time, target_end_time)
+                )
                 target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
                 for symbol in target_symbols:
                     try:
                         with timed_category(precheck_breakdown, 'api_ms'):
                             is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
                     except Exception as exc:
+                        exchange_stats['unsupported'] += 1
                         skipped_results.append(
                             _supported_symbol_lookup_failed_result(
                                 adapter,
@@ -1062,6 +1078,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         )
                         continue
                     if not is_supported:
+                        exchange_stats['unsupported'] += 1
                         skipped_results.append(
                             _unsupported_symbol_result(
                                 adapter,
@@ -1077,8 +1094,10 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                             )
                         )
                         continue
+                    exchange_stats['supported_symbols'] += 1
                     window_precise = adapter.supports_time_window(series_type)
                     if not window_precise:
+                        exchange_stats['pending'] += 1
                         tasks.append(
                             {
                                 'adapter': adapter,
@@ -1103,6 +1122,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                             target_end_time,
                             session=db_session,
                         )
+                    if not gap_tasks:
+                        precheck_skipped_count += 1
+                        exchange_stats['complete'] += 1
                     for gap_task in gap_tasks:
                         tasks.append(
                             {
@@ -1110,9 +1132,21 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                                 **gap_task,
                             }
                         )
+                    exchange_stats['pending'] += len(gap_tasks)
                     exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + len(gap_tasks)
 
-    precheck_breakdown['precheck_ms'] += (time.perf_counter() - precheck_started_at) * 1000
+    precheck_duration_ms = (time.perf_counter() - precheck_started_at) * 1000
+    precheck_breakdown['precheck_ms'] += precheck_duration_ms
+    unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
+    logger.info(
+        '预检完成: 模式=history 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 当天裁剪截止=%s 耗时=%s',
+        _format_exchange_progress(exchange_progress) if exchange_progress else '无',
+        precheck_skipped_count,
+        len(tasks),
+        unsupported_count,
+        current_day_trimmed_end_time,
+        format_duration_ms(precheck_duration_ms),
+    )
 
     def worker(task, db_session=None):
         breakdown = empty_duration_breakdown()
@@ -1349,10 +1383,15 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         results=results,
         started_at=started_at,
         extra={
+            'precheck_skipped_count': precheck_skipped_count,
+            'precheck_duration_ms': precheck_duration_ms,
+            'pending_task_count': len(tasks),
+            'unsupported_count': unsupported_count,
             'coverage_hours': effective_coverage_hours,
             'start_time': summary_start_time,
             'end_time': summary_end_time,
             'full_scan': full_scan,
+            'current_day_trimmed_end_time': current_day_trimmed_end_time,
             'duration_breakdown_ms': total_breakdown,
             'duration_breakdown_by_exchange': _build_grouped_duration_breakdowns(results, 'exchange'),
             'duration_breakdown_by_series_type': _build_grouped_duration_breakdowns(results, 'series_type'),

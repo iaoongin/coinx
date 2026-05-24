@@ -1204,3 +1204,40 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
     assert calls == [
         (day_ms, latest_closed),
     ]
+
+
+def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+    calls = []
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append((args[0] % args[1:]) if len(args) > 1 else args[0]),
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BTCUSDT': set()},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=(24 * 60 * 60 * 1000) + (12 * 60 * 60 * 1000) + FIVE_MINUTES_MS,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 1
+    assert any('预检完成: 模式=history' in message for message in info_logs)
+    assert any(
+        '修补完成: 模式=history' in message
+        and '预检已完整=' in message
+        and '待修补任务=' in message
+        for message in info_logs
+    )
