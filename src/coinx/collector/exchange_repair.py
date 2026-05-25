@@ -39,6 +39,7 @@ from coinx.utils import logger
 
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
+LOCAL_DAY_OFFSET_MS = 8 * 60 * 60 * 1000
 _history_symbol_cursor = 0
 _RATE_LIMIT_EXCEPTIONS = (
     GateRateLimitUnavailable,
@@ -120,19 +121,73 @@ def _build_target_times_in_range(start_time, end_time, period='5m'):
     return list(range(start_time, end_time + 1, period_ms))
 
 
-def _split_history_window_by_day(start_time, end_time):
-    if start_time > end_time:
-        return []
-
+def _local_day_start_time(timestamp_ms):
     day_ms = _period_to_ms('1d')
+    return ((timestamp_ms + LOCAL_DAY_OFFSET_MS) // day_ms) * day_ms - LOCAL_DAY_OFFSET_MS
+
+
+def _build_history_day_segments(now_ms, period, coverage_hours):
+    latest_time = latest_closed_period_open_time(now_ms, period)
+    local_today_start = _local_day_start_time(now_ms)
+    day_ms = _period_to_ms('1d')
+    period_ms = _period_to_ms(period)
+    days_back = max(0, (int(coverage_hours or 0) + 23) // 24)
+
     segments = []
-    current_start = start_time
-    while current_start <= end_time:
-        day_start = (current_start // day_ms) * day_ms
-        current_end = min(end_time, day_start + day_ms - 1)
-        segments.append((current_start, current_end))
-        current_start = current_end + 1
+    for offset in range(days_back, 0, -1):
+        day_start = local_today_start - offset * day_ms
+        if day_start < 0:
+            day_start = 0
+        day_end = local_today_start - (offset - 1) * day_ms - period_ms
+        if day_start <= day_end:
+            segments.append((day_start, day_end))
+
+    if local_today_start <= latest_time:
+        segments.append((max(0, local_today_start), latest_time))
+
     return segments
+
+
+def _build_history_window_bounds(now_ms, period, coverage_hours):
+    segments = _build_history_day_segments(now_ms, period, coverage_hours)
+    if not segments:
+        return []
+    return [segments[0][0], segments[-1][1]]
+
+
+def _format_history_missing_day_stats(stats_by_exchange):
+    if not stats_by_exchange:
+        return '无'
+    parts = []
+    for exchange in sorted(stats_by_exchange):
+        stats = stats_by_exchange[exchange]
+        by_type_parts = []
+        for series_type in sorted(stats.get('by_type') or {}):
+            type_stats = stats['by_type'][series_type]
+            by_type_parts.append(
+                f"{series_type}(币种={len(type_stats.get('symbols') or set())},缺天={type_stats.get('days', 0)})"
+            )
+        parts.append(
+            f"{exchange}(币种={len(stats.get('symbols') or set())},"
+            f"类型={len(stats.get('by_type') or {})},"
+            f"缺天={stats.get('days', 0)},"
+            f"按类型={ '|'.join(by_type_parts) if by_type_parts else '无' })"
+        )
+    return '; '.join(parts)
+
+
+def _record_history_missing_day_stats(stats_by_exchange, exchange, symbol, series_type, day_count):
+    if day_count <= 0:
+        return
+    exchange_stats = stats_by_exchange.setdefault(
+        exchange,
+        {'symbols': set(), 'days': 0, 'by_type': {}},
+    )
+    exchange_stats['symbols'].add(symbol)
+    exchange_stats['days'] += day_count
+    type_stats = exchange_stats['by_type'].setdefault(series_type, {'symbols': set(), 'days': 0})
+    type_stats['symbols'].add(symbol)
+    type_stats['days'] += day_count
 
 
 def _result_with_breakdown(result, breakdown):
@@ -216,8 +271,10 @@ def _active_series_types(adapter, series_types):
     return [series_type for series_type in requested_types if series_type in adapter.supported_series_types]
 
 
-def _build_history_gap_tasks(exchange, symbol, series_type, period, start_time, end_time, session=None):
-    target_times = _build_target_times_in_range(start_time, end_time, period=period)
+def _build_history_gap_tasks(exchange, symbol, series_type, period, day_segments, session=None):
+    target_times = []
+    for segment_start, segment_end in day_segments:
+        target_times.extend(_build_target_times_in_range(segment_start, segment_end, period=period))
     if not target_times:
         return []
 
@@ -231,7 +288,7 @@ def _build_history_gap_tasks(exchange, symbol, series_type, period, start_time, 
     )
     existing_times = existing_by_symbol.get(symbol, set())
     gap_tasks = []
-    for segment_start, segment_end in _split_history_window_by_day(start_time, end_time):
+    for segment_start, segment_end in day_segments:
         segment_target_times = _build_target_times_in_range(segment_start, segment_end, period=period)
         if not segment_target_times:
             continue
@@ -374,6 +431,7 @@ def _log_repair_summary(summary):
                 f"预检已完整={summary.get('precheck_skipped_count', 0)}",
                 f"待修补任务={summary.get('pending_task_count', 0)}",
                 f"当天裁剪截止={summary.get('current_day_trimmed_end_time')}",
+                f"缺口分布={summary.get('history_missing_day_stats')}",
                 f"覆盖时长={summary.get('coverage_hours')}",
                 f"是否全量扫描={'是' if summary.get('full_scan') else '否'}",
                 f"修补窗口={summary.get('start_time')}~{summary.get('end_time')}",
@@ -426,18 +484,53 @@ def _log_repair_summary(summary):
         )
 
 
-def _run_tasks(tasks, worker_func, max_workers, db_session=None):
+def _task_progress_label(task):
+    return f"{task.get('symbol')}/{task.get('series_type')}/{task.get('period')}"
+
+
+def _should_log_task_progress(completed, total):
+    return completed <= 3 or completed == total or completed % 10 == 0
+
+
+def _log_task_progress(mode, exchange, completed, total, results, task, started_at):
+    if not _should_log_task_progress(completed, total):
+        return
+    stats = _summarize_results(results)
+    logger.info(
+        '任务进度: 模式=%s 交易所=%s 已完成=%d/%d 成功=%d 失败=%d 跳过=%d 当前=%s 耗时=%s',
+        mode,
+        exchange or task.get('exchange'),
+        completed,
+        total,
+        stats['success_count'],
+        stats['failure_count'],
+        stats['skipped_count'],
+        _task_progress_label(task),
+        format_duration_ms((time.perf_counter() - started_at) * 1000),
+    )
+
+
+def _run_tasks(tasks, worker_func, max_workers, db_session=None, mode=None, exchange=None):
     if not tasks:
         return []
     worker_count = max(1, int(max_workers or 1))
+    started_at = time.perf_counter()
+    total = len(tasks)
     if db_session is not None or worker_count <= 1:
-        return [worker_func(task, db_session=db_session) for task in tasks]
+        results = []
+        for task in tasks:
+            results.append(worker_func(task, db_session=db_session))
+            if mode:
+                _log_task_progress(mode, exchange, len(results), total, results, task, started_at)
+        return results
 
     results = []
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_task = {executor.submit(worker_func, task, db_session=None): task for task in tasks}
         for future in as_completed(future_to_task):
             results.append(future.result())
+            if mode:
+                _log_task_progress(mode, exchange, len(results), total, results, future_to_task[future], started_at)
     return results
 
 
@@ -949,7 +1042,14 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             _format_series_counts(series_counts),
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
-        group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
+        group_results = skipped_results + _run_tasks(
+            runnable_tasks,
+            group_worker,
+            1,
+            db_session=db_session,
+            mode='rolling',
+            exchange=exchange,
+        )
         group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='rolling')
         result_stats = _summarize_results(group_results)
         logger.info(
@@ -1037,8 +1137,10 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
     precheck_skipped_count = 0
     current_day_trimmed_end_time = None
     exchange_progress = {}
-    summary_end_time = latest_closed_5m_open_time(current_time_ms)
-    summary_start_time = max(0, summary_end_time - effective_coverage_hours * 60 * 60 * 1000)
+    summary_bounds = _build_history_window_bounds(current_time_ms, HOMEPAGE_SERIES_REPAIR_PERIOD, effective_coverage_hours)
+    summary_start_time = summary_bounds[0] if summary_bounds else 0
+    summary_end_time = summary_bounds[1] if summary_bounds else latest_closed_5m_open_time(current_time_ms)
+    history_missing_day_stats = {}
 
     for adapter in adapters:
         exchange_stats = exchange_progress.setdefault(
@@ -1048,13 +1150,16 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         for series_type in _active_series_types(adapter, series_types):
             periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             for period in periods:
-                target_end_time = latest_closed_period_open_time(current_time_ms, period)
+                day_segments = _build_history_day_segments(current_time_ms, period, effective_coverage_hours)
+                if not day_segments:
+                    continue
+                target_start_time = day_segments[0][0]
+                target_end_time = day_segments[-1][1]
                 current_day_trimmed_end_time = (
                     target_end_time
                     if current_day_trimmed_end_time is None
                     else max(current_day_trimmed_end_time, target_end_time)
                 )
-                target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
                 for symbol in target_symbols:
                     try:
                         with timed_category(precheck_breakdown, 'api_ms'):
@@ -1118,8 +1223,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                             symbol,
                             series_type,
                             period,
-                            target_start_time,
-                            target_end_time,
+                            day_segments,
                             session=db_session,
                         )
                     if not gap_tasks:
@@ -1132,6 +1236,13 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                                 **gap_task,
                             }
                         )
+                    _record_history_missing_day_stats(
+                        history_missing_day_stats,
+                        adapter.exchange_id,
+                        symbol,
+                        series_type,
+                        len(gap_tasks),
+                    )
                     exchange_stats['pending'] += len(gap_tasks)
                     exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + len(gap_tasks)
 
@@ -1139,12 +1250,13 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
     precheck_breakdown['precheck_ms'] += precheck_duration_ms
     unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
     logger.info(
-        '预检完成: 模式=history 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 当天裁剪截止=%s 耗时=%s',
+        '预检完成: 模式=history 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 当天裁剪截止=%s 缺口分布=%s 耗时=%s',
         _format_exchange_progress(exchange_progress) if exchange_progress else '无',
         precheck_skipped_count,
         len(tasks),
         unsupported_count,
         current_day_trimmed_end_time,
+        _format_history_missing_day_stats(history_missing_day_stats),
         format_duration_ms(precheck_duration_ms),
     )
 
@@ -1335,7 +1447,14 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             len(group_tasks),
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='history')
-        group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
+        group_results = skipped_results + _run_tasks(
+            runnable_tasks,
+            group_worker,
+            1,
+            db_session=db_session,
+            mode='history',
+            exchange=exchange,
+        )
         group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='history')
         result_stats = _summarize_results(group_results)
         logger.info(
@@ -1387,6 +1506,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             'precheck_duration_ms': precheck_duration_ms,
             'pending_task_count': len(tasks),
             'unsupported_count': unsupported_count,
+            'history_missing_day_stats': _format_history_missing_day_stats(history_missing_day_stats),
             'coverage_hours': effective_coverage_hours,
             'start_time': summary_start_time,
             'end_time': summary_end_time,

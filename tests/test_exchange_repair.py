@@ -473,9 +473,9 @@ def test_exchange_history_repair_collects_adapter_series_periods(db_session, mon
     assert summary['mode'] == 'history'
     assert summary['success_count'] == 2
     assert [call[3] for call in calls] == [500, 500]
-    assert [call[4] for call in calls] == [3_600_000, 0]
+    assert [call[4] for call in calls] == [0, 0]
     assert [call[5] for call in calls] == [7_200_000, 3_600_000]
-    assert [(row.period, row.event_time) for row in rows] == [('1H', 900000), ('5m', 3600000)]
+    assert [(row.period, row.event_time) for row in rows] == [('1H', 900000), ('5m', 900000)]
 
 
 def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monkeypatch):
@@ -801,6 +801,49 @@ def test_exchange_group_logs_duration_breakdown(db_session, monkeypatch):
     )
 
 
+def test_exchange_rolling_repair_logs_task_progress(monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+    calls = []
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_existing_series_timestamps', lambda **kwargs: {})
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: len(records),
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append((args[0] % args[1:]) if len(args) > 1 else args[0]),
+    )
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT', 'ETHUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=None,
+    )
+
+    assert summary['success_count'] == 2
+    assert any(
+        '任务进度: 模式=rolling' in message
+        and '交易所=binance' in message
+        and '已完成=1/2' in message
+        and '当前=BTCUSDT/klines/5m' in message
+        for message in info_logs
+    )
+    assert any(
+        '任务进度: 模式=rolling' in message
+        and '已完成=2/2' in message
+        and '成功=2' in message
+        for message in info_logs
+    )
+
+
 def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
     _clear_rate_limit_states()
     calls = []
@@ -1067,7 +1110,16 @@ def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkey
     _clear_rate_limit_states()
     calls = []
     day_ms = 24 * 60 * 60 * 1000
+    local_offset_ms = 8 * 60 * 60 * 1000
     now_ms = (4 * day_ms) + (12 * 60 * 60 * 1000)
+    local_today_start = ((now_ms + local_offset_ms) // day_ms) * day_ms - local_offset_ms
+    expected_segments = [
+        (max(0, local_today_start - 4 * day_ms), local_today_start - 3 * day_ms - FIVE_MINUTES_MS),
+        (local_today_start - 3 * day_ms, local_today_start - 2 * day_ms - FIVE_MINUTES_MS),
+        (local_today_start - 2 * day_ms, local_today_start - day_ms - FIVE_MINUTES_MS),
+        (local_today_start - day_ms, local_today_start - FIVE_MINUTES_MS),
+        (local_today_start, now_ms - FIVE_MINUTES_MS),
+    ]
 
     class DailyHistoryAdapter:
         exchange_id = 'binance'
@@ -1100,17 +1152,12 @@ def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkey
         def parse_series_payload(self, series_type, payload, symbol, period):
             return payload
 
-    existing_times = {}
-    for day_index in (1, 3):
-        day_start = day_index * day_ms
-        existing_times['BTCUSDT'] = existing_times.get('BTCUSDT', set()) | {
+    existing_times = {'BTCUSDT': set()}
+    for segment_start, segment_end in (expected_segments[1], expected_segments[3], expected_segments[4]):
+        existing_times['BTCUSDT'].update(
             timestamp
-            for timestamp in range(day_start, day_start + day_ms, FIVE_MINUTES_MS)
-        }
-    existing_times['BTCUSDT'].update(
-        timestamp
-        for timestamp in range(4 * day_ms, 4 * day_ms + 12 * 60 * 60 * 1000, FIVE_MINUTES_MS)
-    )
+            for timestamp in range(segment_start, segment_end + 1, FIVE_MINUTES_MS)
+        )
 
     monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [DailyHistoryAdapter()])
     monkeypatch.setattr(
@@ -1131,8 +1178,8 @@ def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkey
 
     assert summary['success_count'] == 2
     assert calls == [
-        (12 * 60 * 60 * 1000 - FIVE_MINUTES_MS, day_ms - FIVE_MINUTES_MS),
-        (2 * day_ms, (3 * day_ms) - FIVE_MINUTES_MS),
+        expected_segments[0],
+        expected_segments[2],
     ]
 
 
@@ -1140,7 +1187,9 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
     _clear_rate_limit_states()
     calls = []
     day_ms = 24 * 60 * 60 * 1000
+    local_offset_ms = 8 * 60 * 60 * 1000
     now_ms = day_ms + (10 * 60 * 60 * 1000) + FIVE_MINUTES_MS
+    local_today_start = ((now_ms + local_offset_ms) // day_ms) * day_ms - local_offset_ms
 
     class PartialDayHistoryAdapter:
         exchange_id = 'binance'
@@ -1202,7 +1251,7 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
 
     assert summary['success_count'] == 1
     assert calls == [
-        (day_ms, latest_closed),
+        (local_today_start, latest_closed),
     ]
 
 
@@ -1210,6 +1259,11 @@ def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeyp
     _clear_rate_limit_states()
     info_logs = []
     calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    local_offset_ms = 8 * 60 * 60 * 1000
+    now_ms = day_ms + (12 * 60 * 60 * 1000) + FIVE_MINUTES_MS
+    local_today_start = ((now_ms + local_offset_ms) // day_ms) * day_ms - local_offset_ms
+    previous_day_start = local_today_start - day_ms
     adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
 
     monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
@@ -1219,14 +1273,19 @@ def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeyp
     )
     monkeypatch.setattr(
         'coinx.collector.exchange_repair.get_existing_series_timestamps',
-        lambda *args, **kwargs: {'BTCUSDT': set()},
+        lambda *args, **kwargs: {
+            'BTCUSDT': {
+                timestamp
+                for timestamp in range(previous_day_start, local_today_start, FIVE_MINUTES_MS)
+            }
+        },
     )
 
     summary = repair_history_symbols(
         symbols=['BTCUSDT'],
         series_types=['klines'],
         exchanges=['binance'],
-        now_ms=(24 * 60 * 60 * 1000) + (12 * 60 * 60 * 1000) + FIVE_MINUTES_MS,
+        now_ms=now_ms,
         full_scan=True,
         max_workers=1,
         coverage_hours=1,
