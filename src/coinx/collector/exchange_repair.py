@@ -319,6 +319,9 @@ def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precis
         'window_precise': window_precise,
         'affected': 0,
         'records': 0,
+        'expected_records': 0,
+        'api_records': 0,
+        'written_records': 0,
         'pages': 0,
     }
     if extra:
@@ -338,6 +341,9 @@ def _supported_symbol_lookup_failed_result(adapter, symbol, series_type, mode, w
         'window_precise': window_precise,
         'affected': 0,
         'records': 0,
+        'expected_records': 0,
+        'api_records': 0,
+        'written_records': 0,
         'pages': 0,
         'error': str(error),
     }
@@ -358,6 +364,16 @@ def _summarize_results(results):
         'success_count': sum(1 for item in results if item.get('status') == 'success'),
         'failure_count': sum(1 for item in results if item.get('status') == 'error'),
         'skipped_count': sum(1 for item in results if item.get('status') == 'skipped'),
+        'expected_records': sum(item.get('expected_records') or 0 for item in results),
+        'api_records': sum(item.get('api_records') or 0 for item in results),
+        'records': sum(item.get('records') or 0 for item in results),
+        'missing_records': sum(
+            max((item.get('expected_records') or 0) - (item.get('records') or 0), 0)
+            for item in results
+        ),
+        'no_data_records': sum(item.get('no_data_records') or 0 for item in results),
+        'written_records': sum(item.get('written_records') or 0 for item in results),
+        'affected': sum(item.get('affected') or 0 for item in results),
     }
 
 
@@ -400,6 +416,59 @@ def _format_exchange_result_summary(results, exchanges):
             f"跳过={sum(1 for item in exchange_results if item.get('status') == 'skipped')})"
         )
     return '; '.join(parts) if parts else '无'
+
+
+def _log_result_volume_stats(mode, exchange, stats):
+    logger.info(
+        '数据量统计: 模式=%s 交易所=%s 缺口记录=%d 目标命中=%d 未命中缺口=%d 无数据缺口=%d 写库记录=%d 影响行=%d API返回=%d',
+        mode,
+        exchange or 'all',
+        stats.get('expected_records', 0),
+        stats.get('records', 0),
+        stats.get('missing_records', 0),
+        stats.get('no_data_records', 0),
+        stats.get('written_records', 0),
+        stats.get('affected', 0),
+        stats.get('api_records', 0),
+    )
+
+
+def _log_result_volume_stats_by_series(mode, results):
+    grouped = {}
+    for item in results or []:
+        key = (item.get('exchange') or 'unknown', item.get('series_type') or 'unknown')
+        stats = grouped.setdefault(
+            key,
+            {
+                'expected_records': 0,
+                'records': 0,
+                'missing_records': 0,
+                'no_data_records': 0,
+                'written_records': 0,
+                'affected': 0,
+                'api_records': 0,
+            },
+        )
+        for field in stats:
+            if field == 'missing_records':
+                stats[field] += max((item.get('expected_records') or 0) - (item.get('records') or 0), 0)
+            else:
+                stats[field] += item.get(field) or 0
+
+    for (exchange, series_type), stats in sorted(grouped.items()):
+        logger.info(
+            '数据量统计明细: 模式=%s 交易所=%s 序列类型=%s 缺口记录=%d 目标命中=%d 未命中缺口=%d 无数据缺口=%d 写库记录=%d 影响行=%d API返回=%d',
+            mode,
+            exchange,
+            series_type,
+            stats['expected_records'],
+            stats['records'],
+            stats['missing_records'],
+            stats['no_data_records'],
+            stats['written_records'],
+            stats['affected'],
+            stats['api_records'],
+        )
 
 
 def _format_exchange_progress(stats_by_exchange):
@@ -446,6 +515,13 @@ def _log_repair_summary(summary):
         f"成功={summary['success_count']} "
         f"失败={summary['failure_count']} "
         f"跳过={summary['skipped_count']} "
+        f"缺口记录={summary.get('expected_records', 0)} "
+        f"目标命中={summary.get('records', 0)} "
+        f"未命中缺口={summary.get('missing_records', 0)} "
+        f"无数据缺口={summary.get('no_data_records', 0)} "
+        f"写库记录={summary.get('written_records', 0)} "
+        f"影响行={summary.get('affected', 0)} "
+        f"API返回={summary.get('api_records', 0)} "
         f"跳过原因={_format_reason_counts(summary.get('results') or [])} "
         f"各交易所={_format_exchange_result_summary(summary.get('results') or [], summary.get('exchanges') or [])} "
         f"耗时={format_duration_ms(summary.get('duration_ms'))} "
@@ -454,6 +530,8 @@ def _log_repair_summary(summary):
     if extra_parts:
         message = f"{message} {' '.join(extra_parts)}"
     logger.info(message)
+    _log_result_volume_stats(summary.get('mode'), 'all', _summarize_results(summary.get('results') or []))
+    _log_result_volume_stats_by_series(summary.get('mode'), summary.get('results') or [])
 
     unsupported_groups = {}
     supported_lookup_failed_groups = {}
@@ -559,6 +637,9 @@ def _filter_budget_unavailable_rolling_tasks(tasks):
                     'window_precise': task['adapter'].supports_time_window(task['series_type']),
                     'affected': 0,
                     'records': 0,
+                    'expected_records': len(task.get('target_times') or []),
+                    'api_records': 0,
+                    'written_records': 0,
                     'pages': 0,
                     'target_times': sorted(task.get('target_times') or []),
                     'cooldown_skip_ms': cooldown_seconds * 1000,
@@ -609,6 +690,9 @@ def _filter_budget_unavailable_tasks(tasks, mode):
                     'window_precise': task['adapter'].supports_time_window(task['series_type']),
                     'affected': 0,
                     'records': 0,
+                    'expected_records': len(_build_target_times_in_range(task.get('start_time'), task.get('end_time'), period=task.get('period'))),
+                    'api_records': 0,
+                    'written_records': 0,
                     'pages': 0,
                     'start_time': task.get('start_time'),
                     'end_time': task.get('end_time'),
@@ -690,6 +774,7 @@ def _flush_group_records(exchange, group_results, db_session=None, mode='rolling
                 allocated_affected += result_affected
                 allocated_write_ms += result_write_ms
             result['affected'] = result_affected
+            result['written_records'] = record_count
             breakdown = result.get('duration_breakdown_ms') or empty_duration_breakdown()
             add_duration_breakdown(breakdown, {'db_write_ms': result_write_ms})
             result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
@@ -735,6 +820,8 @@ def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_sessi
 def _repair_rolling_series(adapter, symbol, series_type, period, target_times, now_ms, http_session=None, db_session=None):
     breakdown = empty_duration_breakdown()
     time_field = _get_time_field(series_type)
+    expected_records = len(set(target_times or []))
+    api_records = 0
     repaired_records = 0
     pages = 0
     window_precise = adapter.supports_time_window(series_type)
@@ -765,6 +852,7 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
                 )
             with timed_category(breakdown, 'parse_ms'):
                 records = adapter.parse_series_payload(series_type, payload, symbol, period)
+                api_records += len(records)
                 records = _trim_unclosed_records(series_type, records, now_ms, period=period)
                 for record in records:
                     record_time = record.get(time_field)
@@ -795,6 +883,9 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
                 'target_times': sorted(target_times),
                 'affected': 0,
                 'records': 0,
+                'expected_records': expected_records,
+                'api_records': api_records,
+                'written_records': 0,
                 'pages': 0,
                 'latest_event_time': latest_event_time,
             },
@@ -813,6 +904,9 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
             'target_times': sorted(target_times),
             'affected': 0,
             'records': repaired_records,
+            'expected_records': expected_records,
+            'api_records': api_records,
+            'written_records': 0,
             'pages': pages,
             'latest_event_time': latest_event_time,
             'pending_records': pending_records,
@@ -978,6 +1072,12 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'status': 'skipped',
                     'mode': 'rolling',
                     'reason': _budget_unavailable_reason(task['exchange']),
+                    'affected': 0,
+                    'records': 0,
+                    'expected_records': len(task.get('target_times') or []),
+                    'api_records': 0,
+                    'written_records': 0,
+                    'pages': 0,
                     'cooldown_skip_ms': cooldown_skip_ms,
                     'error': str(exc),
                 },
@@ -1271,10 +1371,12 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             period = task['period']
             target_start_time = task['start_time']
             target_end_time = task['end_time']
+            expected_records = len(_build_target_times_in_range(target_start_time, target_end_time, period=period))
             cursor_time = target_start_time
             backward_cursor_end_time = target_end_time
             pending_records = []
             affected = 0
+            api_records = 0
             record_count = 0
             pages = 0
 
@@ -1309,6 +1411,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     )
                 with timed_category(breakdown, 'parse_ms'):
                     records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
+                    api_records += len(records)
                     records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
                     current_end_time = (
                         target_end_time
@@ -1350,6 +1453,30 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     continue
                 cursor_time = page_end_time + _period_to_ms(period)
 
+            if record_count == 0:
+                return _result_with_breakdown(
+                    {
+                        'exchange': task['exchange'],
+                        'symbol': task['symbol'],
+                        'series_type': task['series_type'],
+                        'period': period,
+                        'status': 'skipped',
+                        'mode': 'history',
+                        'reason': 'no_data',
+                        'window_precise': window_precise,
+                        'start_time': target_start_time,
+                        'end_time': target_end_time,
+                        'affected': 0,
+                        'records': 0,
+                        'expected_records': expected_records,
+                        'no_data_records': expected_records,
+                        'api_records': api_records,
+                        'written_records': 0,
+                        'pages': pages,
+                    },
+                    breakdown,
+                )
+
             return _result_with_breakdown(
                 {
                     'exchange': task['exchange'],
@@ -1363,6 +1490,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'end_time': target_end_time,
                     'affected': affected,
                     'records': record_count,
+                    'expected_records': expected_records,
+                    'api_records': api_records,
+                    'written_records': 0,
                     'pages': pages,
                     'pending_records': pending_records,
                 },
@@ -1407,6 +1537,12 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'mode': 'history',
                     'window_precise': window_precise,
                     'reason': _budget_unavailable_reason(task['exchange']),
+                    'affected': 0,
+                    'records': 0,
+                    'expected_records': len(_build_target_times_in_range(task.get('start_time'), task.get('end_time'), period=task.get('period'))),
+                    'api_records': 0,
+                    'written_records': 0,
+                    'pages': 0,
                     'cooldown_skip_ms': cooldown_skip_ms,
                     'error': str(exc),
                 },
@@ -1550,6 +1686,16 @@ def _build_summary(mode, symbols, series_types, exchanges, results, started_at, 
         'duration_ms': duration_ms,
         'exchange_summaries': exchange_summaries,
         'results': results,
+        'expected_records': sum(item.get('expected_records') or 0 for item in results),
+        'api_records': sum(item.get('api_records') or 0 for item in results),
+        'records': sum(item.get('records') or 0 for item in results),
+        'missing_records': sum(
+            max((item.get('expected_records') or 0) - (item.get('records') or 0), 0)
+            for item in results
+        ),
+        'written_records': sum(item.get('written_records') or 0 for item in results),
+        'no_data_records': sum(item.get('no_data_records') or 0 for item in results),
+        'affected': sum(item.get('affected') or 0 for item in results),
     }
     if extra:
         summary.update(extra)

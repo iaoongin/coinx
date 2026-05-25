@@ -127,6 +127,7 @@ def _build_okx_adapter():
         supported_symbols_fetcher=okx_series.get_supported_symbols,
         page_limits={
             'open_interest_hist': 100,
+            'taker_buy_sell_vol': 100,
         },
         series_periods={
             'taker_buy_sell_vol': ('5m', '1H'),

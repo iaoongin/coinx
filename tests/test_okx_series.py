@@ -263,6 +263,8 @@ def test_okx_adapter_marks_homepage_series_as_precise_windows():
     assert adapter.supports_time_window('klines') is True
     assert adapter.supports_time_window('open_interest_hist') is True
     assert adapter.supports_time_window('taker_buy_sell_vol') is True
+    assert adapter.page_limit('open_interest_hist') == 100
+    assert adapter.page_limit('taker_buy_sell_vol') == 100
     assert adapter.periods_for_series('taker_buy_sell_vol') == ('5m', '1H')
     assert adapter.taker_period_for_interval('24h') == '5m'
     assert adapter.taker_period_for_interval('48h') == '1H'

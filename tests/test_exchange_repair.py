@@ -967,6 +967,8 @@ def test_exchange_repair_grouped_flush_uses_history_batch_size_and_logs(monkeypa
 
     assert upsert_calls == [('gate', 'klines', 3, 2)]
     assert any('批量写入开始: 模式=history 交易所=gate 序列类型=klines 记录数=3 batch_size=2' in line for line in info_logs)
+    assert flushed[0]['written_records'] == 3
+    assert flushed[0]['affected'] == 3
     assert all('pending_records' not in item for item in flushed)
 
 
@@ -1177,6 +1179,12 @@ def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkey
     )
 
     assert summary['success_count'] == 2
+    assert summary['expected_records'] == 480
+    assert summary['api_records'] == 2
+    assert summary['records'] == 2
+    assert summary['missing_records'] == 478
+    assert summary['written_records'] == 2
+    assert summary['affected'] == 2
     assert calls == [
         expected_segments[0],
         expected_segments[2],
@@ -1255,6 +1263,126 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
     ]
 
 
+def test_exchange_history_repair_marks_empty_api_response_as_no_data(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    now_ms = day_ms + (12 * 60 * 60 * 1000)
+
+    class EmptyHistoryAdapter:
+        exchange_id = 'okx'
+        supported_series_types = ('open_interest_hist',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time))
+            return []
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [EmptyHistoryAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BSBUSDT': set()},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BSBUSDT'],
+        series_types=['open_interest_hist'],
+        exchanges=['okx'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=24,
+        db_session=db_session,
+    )
+
+    result = summary['results'][0]
+    assert summary['success_count'] == 0
+    assert summary['skipped_count'] == 2
+    assert result['status'] == 'skipped'
+    assert result['reason'] == 'no_data'
+    assert result['expected_records'] > 0
+    assert result['records'] == 0
+    assert result['api_records'] == 0
+    assert summary['missing_records'] == 432
+    assert summary['no_data_records'] == 432
+    assert calls
+
+
+def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+
+    class LimitedTakerAdapter:
+        exchange_id = 'okx'
+        supported_series_types = ('taker_buy_sell_vol',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def page_limit(self, series_type):
+            return 100
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time, limit))
+            start_index = int(start_time / FIVE_MINUTES_MS)
+            end_index = int(end_time / FIVE_MINUTES_MS)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'event_time': index * FIVE_MINUTES_MS,
+                    'buy_vol': 10,
+                    'sell_vol': 4,
+                }
+                for index in range(start_index, end_index + 1)
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [LimitedTakerAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BSBUSDT': set()},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BSBUSDT'],
+        series_types=['taker_buy_sell_vol'],
+        exchanges=['okx'],
+        now_ms=300 * FIVE_MINUTES_MS,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=25,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 2
+    assert summary['expected_records'] == 300
+    assert summary['records'] == 300
+    assert summary['missing_records'] == 0
+    assert summary['written_records'] == 300
+    assert calls
+    assert all(call[2] == 100 for call in calls)
+
+
 def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeypatch):
     _clear_rate_limit_states()
     info_logs = []
@@ -1298,5 +1426,13 @@ def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeyp
         '修补完成: 模式=history' in message
         and '预检已完整=' in message
         and '待修补任务=' in message
+        and '未命中缺口=' in message
+        for message in info_logs
+    )
+    assert any(
+        '数据量统计明细: 模式=history' in message
+        and '交易所=binance'
+        and '序列类型=klines'
+        and '未命中缺口=' in message
         for message in info_logs
     )
