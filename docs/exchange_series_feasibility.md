@@ -113,11 +113,12 @@
 | `GET /api/v5/market/history-candles` | 拉 K 线历史 | `instId`, `bar`, `before`, `after`, `limit` | `20次/2s` | `IP` | `limit` 最大 `300`；实测需按 `before=start_time`、`after=end_time` 传参 |
 | `GET /api/v5/rubik/stat/contracts/open-interest-history` | 拉持仓历史 `open_interest_hist` | `instId`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前实测默认仅返回 `100` 条，分页方式仍需继续确认 |
 | `GET /api/v5/rubik/stat/contracts/open-interest-volume` | 合约持仓统计量 | `ccy`, `period`, `begin`, `end` | `5次/2s` | `IP` | 不再作为 `open_interest_hist` 主接口候选 |
-| `GET /api/v5/rubik/stat/taker-volume` | 拉主动买卖量 `taker_buy_sell_vol` | `ccy`, `instType=CONTRACTS`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前最容易触发 `429`，建议按 `400-500ms` 间隔串行 |
+| `GET /api/v5/rubik/stat/taker-volume-contract` | 拉合约维度主动买卖量 `taker_buy_sell_vol` | `instId`, `period`, `begin`, `end` | `5次/2s` | `IP` | 已切换到合约维度新接口，不再使用 `ccy + instType=CONTRACTS` 的聚合接口；仍建议按 `400-500ms` 间隔串行 |
 | `GET /api/v5/public/funding-rate` | 拉单币/全量资金费率 | `instId` | `10次/2s` | `IP + Instrument ID` | 建议按 `200ms+` 间隔控制，全量加载避免频繁触发 |
 
 项目中的 OKX 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/okx/series.py)。
 其中 `/api/v5/rubik/` 路径已在代码里归为单独的节流组，建议把这组接口视为高敏接口处理。
+OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修补任务会保留调用方传入的 `begin`/`end`，以支持 `168h` 等长窗口补齐。
 
 ### Bybit
 

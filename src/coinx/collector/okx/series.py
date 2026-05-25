@@ -272,15 +272,14 @@ def fetch_taker_buy_sell_vol(symbol, period, limit, session=None, start_time=Non
         return []
 
     params = {
-        'ccy': _base_asset(symbol),
-        'instType': 'CONTRACTS',
+        'instId': to_exchange_symbol(symbol),
         'period': _okx_bar(period),
     }
     if start_time is not None:
         params['begin'] = str(start_time)
     if end_time is not None:
         params['end'] = str(end_time)
-    payload = _request_okx('/api/v5/rubik/stat/taker-volume', params, session=session)
+    payload = _request_okx('/api/v5/rubik/stat/taker-volume-contract', params, session=session)
     if limit:
         return payload[:limit]
     return payload

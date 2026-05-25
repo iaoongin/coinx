@@ -108,10 +108,9 @@ def test_okx_rubik_fetchers_pass_begin_and_end(monkeypatch):
         },
     )
     assert calls[1] == (
-        '/api/v5/rubik/stat/taker-volume',
+        '/api/v5/rubik/stat/taker-volume-contract',
         {
-            'ccy': 'BTC',
-            'instType': 'CONTRACTS',
+            'instId': 'BTC-USDT-SWAP',
             'period': '5m',
             'begin': '1000',
             'end': '2000',
@@ -230,10 +229,9 @@ def test_okx_rubik_fetchers_keep_old_windows(monkeypatch):
             },
         ),
         (
-            '/api/v5/rubik/stat/taker-volume',
+            '/api/v5/rubik/stat/taker-volume-contract',
             {
-                'ccy': 'BTC',
-                'instType': 'CONTRACTS',
+                'instId': 'BTC-USDT-SWAP',
                 'period': '5m',
                 'begin': '0',
                 'end': '1000',
