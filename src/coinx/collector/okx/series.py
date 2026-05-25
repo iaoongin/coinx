@@ -16,13 +16,6 @@ from coinx.utils import logger
 
 OKX_EXCHANGE_ID = 'okx'
 SUPPORTED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
-RUBIK_HISTORY_LIMIT_MS = {
-    '5m': 2 * 24 * 60 * 60 * 1000,
-    '1H': 30 * 24 * 60 * 60 * 1000,
-    '1h': 30 * 24 * 60 * 60 * 1000,
-    '1D': 180 * 24 * 60 * 60 * 1000,
-    '1d': 180 * 24 * 60 * 60 * 1000,
-}
 _SUPPORTED_SYMBOLS_TTL_SECONDS = 60 * 60
 _supported_symbols_cache = {
     'loaded_at': 0,
@@ -236,20 +229,9 @@ def _okx_bar(period):
 
 
 def _rubik_time_window(period, start_time=None, end_time=None, now_ms=None):
-    history_limit_ms = RUBIK_HISTORY_LIMIT_MS.get(period)
-    if history_limit_ms is None:
-        return start_time, end_time
-
-    current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    earliest_time = current_time_ms - history_limit_ms
-    effective_start = max(start_time, earliest_time) if start_time is not None else earliest_time
-    effective_end = end_time
-
-    if effective_end is not None and effective_end < earliest_time:
+    if start_time is not None and end_time is not None and start_time > end_time:
         return None, None
-    if effective_end is not None and effective_start is not None and effective_start > effective_end:
-        return None, None
-    return effective_start, effective_end
+    return start_time, end_time
 
 
 def fetch_klines(symbol, period, limit, session=None, start_time=None, end_time=None):
