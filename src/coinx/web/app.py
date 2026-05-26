@@ -62,20 +62,20 @@ def create_app():
 
     @app.before_request
     def log_request_info():
-        logger.info('请求: %s %s', request.method, request.url)
+        logger.debug('请求: %s %s', request.method, request.url)
         if request.data:
             try:
                 json_data = request.get_json(force=True, silent=True)
                 if json_data:
-                    logger.info('请求数据: %s', json_data)
+                    logger.debug('请求数据: %s', json_data)
                 else:
-                    logger.info('请求数据: %s', request.data)
+                    logger.debug('请求数据: %s', request.data)
             except Exception:
-                logger.info('请求数据: %s', request.data)
+                logger.debug('请求数据: %s', request.data)
 
     @app.after_request
     def log_response_info(response):
-        logger.info('响应状态: %s', response.status)
+        logger.debug('响应状态: %s', response.status)
         return response
 
     return app

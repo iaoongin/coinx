@@ -108,7 +108,7 @@ def request_with_retry(session, url, params=None, timeout=10, max_retries=3, bas
             delay = base_delay * (2 ** (attempt - 1))
             if delay > 1.5:
                 delay = 1.5
-            logger.warning(
+            logger.debug(
                 "请求失败，将在 %.2fs 后重试（第%d/%d次）: %s, proxy=%s, 错误: %s",
                 delay,
                 attempt,

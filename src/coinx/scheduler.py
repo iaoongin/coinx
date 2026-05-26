@@ -116,17 +116,20 @@ def scheduled_market_rank_refresh():
         _mark_job_finished('market_rank_refresh_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
         if summary.get('status') == 'success':
             logger.info(
-                f"行情榜快照定时刷新完成: 状态={summary.get('status')}, "
-                f"保存={summary.get('saved_count', 0)}, 快照时间={summary.get('snapshot_time')}"
+                '行情榜快照定时刷新完成: 状态=%s, 保存=%s, 快照时间=%s',
+                summary.get('status'),
+                summary.get('saved_count', 0),
+                summary.get('snapshot_time'),
             )
         else:
             logger.warning(
-                f"行情榜快照定时刷新未成功: 状态={summary.get('status')}, "
-                f"消息={summary.get('message')}"
+                '行情榜快照定时刷新未成功: 状态=%s, 消息=%s',
+                summary.get('status'),
+                summary.get('message'),
             )
     except Exception as e:
         _mark_job_finished('market_rank_refresh_job', status='error', error=e, started_at=started_at)
-        logger.error(f'行情榜快照定时刷新任务失败: {e}')
+        logger.error('行情榜快照定时刷新任务失败: %s', e)
         logger.exception(e)
 
 
@@ -227,7 +230,7 @@ def scheduled_repair_market_rolling():
         )
     except Exception as e:
         _mark_job_finished('repair_market_rolling_job', status='error', error=e, started_at=started_at)
-        logger.error(f'滚动修补市场币种最新点失败: {e}')
+        logger.error('滚动修补市场币种最新点失败: %s', e)
         logger.exception(e)
 
 
@@ -323,7 +326,7 @@ if REPAIR_HISTORY_ENABLED:
             )
         except Exception as e:
             _mark_job_finished('repair_market_history_job', status='error', error=e, started_at=started_at)
-            logger.error(f'低频历史补齐任务失败: {e}')
+            logger.error('低频历史补齐任务失败: %s', e)
             logger.exception(e)
 
 
@@ -344,7 +347,7 @@ def scheduled_coins_config_update():
         logger.info('定时币种配置刷新任务完成')
     except Exception as e:
         _mark_job_finished('update_coins_config_job', status='error', error=e, started_at=started_at)
-        logger.error(f'定时币种配置刷新任务失败: {e}')
+        logger.error('定时币种配置刷新任务失败: %s', e)
         logger.exception(e)
 
 
@@ -355,5 +358,5 @@ def start_scheduler():
         scheduler.start()
         logger.info('调度器启动成功')
     except Exception as e:
-        logger.error(f'调度器启动失败: {e}')
+        logger.error('调度器启动失败: %s', e)
         logger.exception(e)

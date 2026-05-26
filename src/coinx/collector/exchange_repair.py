@@ -1056,13 +1056,6 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             )
         except _RATE_LIMIT_EXCEPTIONS as exc:
             cooldown_skip_ms = max(0.0, float(getattr(exc, 'wait_seconds', 0.0) or 0.0) * 1000)
-            logger.warning(
-                '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=%s',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-                _reason_label(_budget_unavailable_reason(task['exchange'])),
-            )
             return _result_with_breakdown(
                 {
                     'exchange': task['exchange'],
@@ -1084,12 +1077,6 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                 {'cooldown_skip_ms': cooldown_skip_ms},
             )
         except GateUnsupportedContract as exc:
-            logger.warning(
-                '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-            )
             return _unsupported_symbol_result(
                 task['adapter'],
                 task['symbol'],
@@ -1499,12 +1486,6 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 breakdown,
             )
         except GateUnsupportedContract as exc:
-            logger.warning(
-                '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-            )
             return _unsupported_symbol_result(
                 task['adapter'],
                 task['symbol'],
@@ -1520,13 +1501,6 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             )
         except _RATE_LIMIT_EXCEPTIONS as exc:
             cooldown_skip_ms = max(0.0, float(getattr(exc, 'wait_seconds', 0.0) or 0.0) * 1000)
-            logger.warning(
-                '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=%s',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-                _reason_label(_budget_unavailable_reason(task['exchange'])),
-            )
             return _result_with_breakdown(
                 {
                     'exchange': task['exchange'],

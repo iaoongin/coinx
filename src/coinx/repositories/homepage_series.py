@@ -286,8 +286,7 @@ def _log_homepage_exchange_rejection(symbol, exchange, anchor_time, stage, reaso
     logger.warning(
         '首页交易所门禁否决: '
         f'symbol={symbol} exchange={exchange} stage={stage} anchor_time={anchor_time} '
-        f'reason={summary_reason} summary="{summary}" '
-        f'details={_format_homepage_log_details(_compact_homepage_rejection_reasons(reasons))}'
+        f'reason={summary_reason} summary="{summary}"'
     )
 
 
@@ -1036,7 +1035,7 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         taker_periods = ['5m']
 
     start_time = __import__('time').perf_counter()
-    logger.info('首页映射加载开始: exchange=%s symbols=%d', exchange, len(symbols))
+    logger.debug('首页映射加载开始: exchange=%s symbols=%d', exchange, len(symbols))
 
     oi_start = __import__('time').perf_counter()
     oi_map = _load_open_interest_model_map(
@@ -1046,12 +1045,14 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         upper_bound=upper_bound,
         exchange=exchange,
     )
-    logger.info(
-        '首页映射 OI 完成: exchange=%s symbols=%d 耗时=%.2fs',
-        exchange,
-        len(symbols),
-        __import__('time').perf_counter() - oi_start,
-    )
+    oi_elapsed = __import__('time').perf_counter() - oi_start
+    if oi_elapsed >= 0.1:
+        logger.info(
+            '首页映射 OI 完成: exchange=%s symbols=%d 耗时=%.2fs',
+            exchange,
+            len(symbols),
+            oi_elapsed,
+        )
 
     kline_start = __import__('time').perf_counter()
     kline_map = _load_kline_model_map(
@@ -1061,12 +1062,14 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         upper_bound=upper_bound,
         exchange=exchange,
     )
-    logger.info(
-        '首页映射 Kline 完成: exchange=%s symbols=%d 耗时=%.2fs',
-        exchange,
-        len(symbols),
-        __import__('time').perf_counter() - kline_start,
-    )
+    kline_elapsed = __import__('time').perf_counter() - kline_start
+    if kline_elapsed >= 0.1:
+        logger.info(
+            '首页映射 Kline 完成: exchange=%s symbols=%d 耗时=%.2fs',
+            exchange,
+            len(symbols),
+            kline_elapsed,
+        )
 
     taker_start = __import__('time').perf_counter()
     taker_maps_by_period = {
@@ -1080,13 +1083,15 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         )
         for period in taker_periods
         }
-    logger.info(
-        '首页映射 Taker 完成: exchange=%s periods=%d symbols=%d 耗时=%.2fs',
-        exchange,
-        len(taker_maps_by_period),
-        len(symbols),
-        __import__('time').perf_counter() - taker_start,
-    )
+    taker_elapsed = __import__('time').perf_counter() - taker_start
+    if taker_elapsed >= 0.1:
+        logger.info(
+            '首页映射 Taker 完成: exchange=%s periods=%d symbols=%d 耗时=%.2fs',
+            exchange,
+            len(taker_maps_by_period),
+            len(symbols),
+            taker_elapsed,
+        )
 
     logger.info('首页映射加载完成: exchange=%s 耗时=%.2fs', exchange, __import__('time').perf_counter() - start_time)
     return oi_map, kline_map, taker_maps_by_period

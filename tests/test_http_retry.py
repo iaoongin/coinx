@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import requests
 
@@ -65,6 +67,7 @@ def test_request_with_binance_retry_marks_binance_cooldown_after_429(monkeypatch
 
 
 def test_request_with_retry_logs_proxy_context_on_retry(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
     session = _FakeSession([requests.exceptions.ConnectionError('boom'), _FakeResponse(200, 'OK')])
     session.proxies = {'https': 'http://proxy.example.com:2261'}
     sleep_calls = []
