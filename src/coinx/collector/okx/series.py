@@ -374,8 +374,8 @@ def parse_open_interest_hist(payload, symbol, period):
             )
         else:
             event_time = int(item[0])
-            open_interest = None
-            open_interest_value = _to_float(item[1]) if len(item) > 1 else None
+            open_interest = _to_float(item[2]) if len(item) > 2 else None
+            open_interest_value = _to_float(item[3] if len(item) > 3 else item[1]) if len(item) > 1 else None
 
         parsed.append(
             {

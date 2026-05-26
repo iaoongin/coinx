@@ -188,10 +188,21 @@ def _calc_net_inflow_from_taker_vol(window, price=None):
         return 0
     buy_vol = sum(float(item.buy_vol or 0) for item in window)
     sell_vol = sum(float(item.sell_vol or 0) for item in window)
-    return buy_vol - sell_vol
+    inflow = buy_vol - sell_vol
+    if price is not None:
+        return inflow * float(price)
+    return inflow
 
 
-def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time):
+def _format_usd_map(values):
+    return {
+        interval: format_usd_value(value)
+        for interval, value in (values or {}).items()
+        if value is not None
+    }
+
+
+def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time, price=None):
     inflow = {}
     for interval in TIME_INTERVALS:
         points = _interval_to_ms(interval) // FIVE_MINUTES_MS
@@ -199,7 +210,7 @@ def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time):
         if not window:
             continue
 
-        inflow[interval] = _calc_net_inflow_from_taker_vol(window)
+        inflow[interval] = _calc_net_inflow_from_taker_vol(window, price=price)
     return inflow
 
 
@@ -1107,6 +1118,7 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             'missing_exchanges': [],
             'open_interest_by_exchange': {},
             'net_inflow': {},
+            'net_inflow_value': {},
             'status': 'empty',
         }
         for symbol in symbols
@@ -1454,7 +1466,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     interval_values.append(inflow)
 
             if interval_values:
-                coverage_map[symbol]['net_inflow'][interval] = sum(interval_values)
+                net_inflow = sum(interval_values)
+                coverage_map[symbol]['net_inflow'][interval] = net_inflow
+                selected_kline = selected_kline_map[symbol].get(anchor_time)
+                if selected_kline is not None and selected_kline.close_price is not None:
+                    coverage_map[symbol]['net_inflow_value'][interval] = net_inflow * float(selected_kline.close_price)
 
         included_open_interest_rows = _build_exchange_open_interest_rows(
             coverage_map[symbol]['open_interest_by_exchange'].get(anchor_time, {}),
@@ -1505,12 +1521,15 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
             'price_change_percent': None,
             'price_change_formatted': 'N/A',
             'net_inflow': {},
+            'net_inflow_value': {},
+            'net_inflow_value_formatted': {},
             'changes': empty_changes,
             'current_time': None,
         }
 
     current_time = common_times[-1] if common_times else oi_times[-1]
     net_inflow = dict((coverage or {}).get('net_inflow') or {})
+    net_inflow_value = dict((coverage or {}).get('net_inflow_value') or {})
 
     if not net_inflow and taker_vol_by_time and any(taker_vol_by_time.values()):
         net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
@@ -1536,6 +1555,8 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
             'price_change_percent': None,
             'price_change_formatted': 'N/A',
             'net_inflow': net_inflow,
+            'net_inflow_value': net_inflow_value,
+            'net_inflow_value_formatted': _format_usd_map(net_inflow_value),
             'changes': empty_changes,
             'current_time': current_time,
         }
@@ -1545,6 +1566,8 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     current_open_interest = float(current_oi.sum_open_interest or 0)
     current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
     current_price = float(current_kline.close_price) if current_kline and current_kline.close_price is not None else None
+    if not net_inflow_value and net_inflow and current_price is not None:
+        net_inflow_value = {interval: value * current_price for interval, value in net_inflow.items()}
     exchange_open_interest = _build_exchange_open_interest_rows(
         ((coverage or {}).get('open_interest_by_exchange') or {}).get(current_time, {}),
         current_open_interest_value,
@@ -1572,7 +1595,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
             'open_interest': past_open_interest,
             'open_interest_formatted': format_number(past_open_interest),
             'open_interest_value': past_open_interest_value,
-            'open_interest_value_formatted': format_number(past_open_interest_value),
+            'open_interest_value_formatted': format_usd_value(past_open_interest_value),
             'price_change': price_change,
             'price_change_percent': _calc_percent_change(current_price, past_price),
             'price_change_formatted': format_price(price_change),
@@ -1592,13 +1615,15 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
         'current_open_interest': current_open_interest,
         'current_open_interest_formatted': format_number(current_open_interest),
         'current_open_interest_value': current_open_interest_value,
-        'current_open_interest_value_formatted': format_number(current_open_interest_value),
+        'current_open_interest_value_formatted': format_usd_value(current_open_interest_value),
         'current_price': current_price,
         'current_price_formatted': format_price(current_price),
         'price_change': day_change['price_change'],
         'price_change_percent': day_change['price_change_percent'],
         'price_change_formatted': day_change['price_change_formatted'],
         'net_inflow': net_inflow,
+        'net_inflow_value': net_inflow_value,
+        'net_inflow_value_formatted': _format_usd_map(net_inflow_value),
         'changes': changes,
         'current_time': current_time,
     }

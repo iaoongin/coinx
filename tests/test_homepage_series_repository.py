@@ -355,7 +355,8 @@ def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(d
     assert any('首页交易所聚合完成' in message for message in info_logs)
 
 
-def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session):
+def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -372,7 +373,8 @@ def test_get_homepage_series_data_formats_small_prices_without_scientific_notati
     assert coins[0]['current_price_formatted'] == '0.0000001'
 
 
-def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_digits_within_seven(db_session):
+def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_digits_within_seven(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -389,7 +391,8 @@ def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_
     assert coins[0]['current_price_formatted'] == '1234.567'
 
 
-def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db_session):
+def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -406,7 +409,8 @@ def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db
     assert coins[0]['current_price_formatted'] == '1234.57'
 
 
-def test_get_homepage_series_data_formats_tiny_prices_with_scientific_notation_after_seven_decimal_places(db_session):
+def test_get_homepage_series_data_formats_tiny_prices_with_scientific_notation_after_seven_decimal_places(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -628,6 +632,7 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['current_price'] == 2116.0
     assert coin['current_open_interest'] == 21160.0 + 42320.0
     assert coin['current_open_interest_value'] == 44774560.0 + 42320.0 * 2116.0
+    assert coin['current_open_interest_value_formatted'].startswith('$')
     assert coin['exchange_open_interest'][0]['exchange'] == 'okx'
     assert coin['exchange_open_interest'][0]['open_interest_value'] == 42320.0 * 2116.0
     assert round(coin['exchange_open_interest'][0]['share_percent'], 2) == 66.67
@@ -635,7 +640,10 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['exchange_open_interest'][1]['open_interest_value'] == 44774560.0
     assert round(coin['exchange_open_interest'][1]['quantity_share_percent'], 2) == 33.33
     assert coin['changes']['15m']['open_interest'] == 21130.0 + 42260.0
+    assert coin['changes']['15m']['open_interest_value_formatted'].startswith('$')
     assert coin['net_inflow']['5m'] == 10580.0
+    assert coin['net_inflow_value']['5m'] == 10580.0 * 2116.0
+    assert coin['net_inflow_value_formatted']['5m'].startswith('$')
 
 
 def test_get_homepage_series_data_includes_gate_without_taker_and_keeps_net_inflow_from_supported_subset(db_session, monkeypatch):

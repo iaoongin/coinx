@@ -436,8 +436,8 @@
 
             <template v-for="row in matrixRows(coin)" :key="coin.symbol + row.interval">
               <div class="cell window-cell">[[ row.interval ]]</div>
-              <div class="cell metric" :class="valueClass(row.net_inflow)">
-                [[ formatNetInflow(row.net_inflow) ]]
+              <div class="cell metric" :class="valueClass(row.net_inflow_value ?? row.net_inflow)">
+                [[ row.net_inflow_value_formatted || formatNetInflow(row.net_inflow_value) ]]
               </div>
               <div class="cell raw-value">[[ row.current_price_formatted || 'N/A' ]]</div>
               <div class="cell metric" :class="valueClass(row.price_change_percent)">
@@ -496,6 +496,8 @@
             interval,
             ...(changes[interval] || {}),
             net_inflow: coin.net_inflow?.[interval],
+            net_inflow_value: coin.net_inflow_value?.[interval],
+            net_inflow_value_formatted: coin.net_inflow_value_formatted?.[interval],
           }));
         };
 
@@ -514,10 +516,10 @@
         const formatNetInflow = (value) => {
           if (typeof value !== 'number') return 'N/A';
           const abs = Math.abs(value);
-          if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
-          if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
-          if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}K`;
-          return value.toFixed(0);
+          if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+          if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+          if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+          return `$${value.toFixed(2)}`;
         };
 
         const formatPercent = (value) => {

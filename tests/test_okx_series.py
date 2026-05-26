@@ -64,14 +64,14 @@ def test_parse_okx_open_interest_accepts_dict_payload():
     assert records[0]['sum_open_interest_value'] == 987654.32
 
 
-def test_parse_okx_open_interest_array_treats_value_as_open_interest_value():
-    payload = [['1711526400000', '987654.32', '12345.67']]
+def test_parse_okx_open_interest_array_maps_contract_quantity_and_usd_value():
+    payload = [['1711526400000', '3321905.11', '33219.0511', '2562461129.46']]
 
     records = parse_open_interest_hist(payload, symbol='BTCUSDT', period='5m')
 
     assert records[0]['event_time'] == 1711526400000
-    assert records[0]['sum_open_interest'] is None
-    assert records[0]['sum_open_interest_value'] == 987654.32
+    assert records[0]['sum_open_interest'] == 33219.0511
+    assert records[0]['sum_open_interest_value'] == 2562461129.46
 
 
 def test_parse_okx_taker_buy_sell_vol_calculates_ratio():

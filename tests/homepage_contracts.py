@@ -88,6 +88,7 @@ def assert_complete_interval_contract(coin):
 
     assert set(changes.keys()) == set(EXPECTED_INTERVALS)
     assert set(coin['net_inflow'].keys()) == set(EXPECTED_INTERVALS)
+    assert set(coin['net_inflow_value'].keys()) == set(EXPECTED_INTERVALS)
 
     for interval in EXPECTED_INTERVALS:
         change = changes[interval]
@@ -100,3 +101,5 @@ def assert_complete_interval_contract(coin):
         assert change['open_interest_formatted'] != 'N/A', f'{interval}: open_interest_formatted'
         assert change['open_interest_value_formatted'] != 'N/A', f'{interval}: open_interest_value_formatted'
         assert isinstance(coin['net_inflow'][interval], (int, float)), f'{interval}: net_inflow'
+        assert isinstance(coin['net_inflow_value'][interval], (int, float)), f'{interval}: net_inflow_value'
+        assert coin['net_inflow_value_formatted'][interval].startswith('$'), f'{interval}: net_inflow_value_formatted'
