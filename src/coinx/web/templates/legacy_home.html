@@ -481,9 +481,11 @@
               <tr class="coin-group coin-group-end">
                 <td class="type-cell">主力净流入</td>
                 <td><div :id="'chart-inflow-' + index" class="mini-chart"></div></td>
-                <td :class="getNetInflowClass(coin.net_inflow?.['5m'])">{{ formatNetInflow(coin.net_inflow?.['5m']) }}</td>
-                <td v-for="interval in intervals" :key="interval" :class="getNetInflowClass(coin.net_inflow?.[interval])">
-                  {{ formatNetInflow(coin.net_inflow?.[interval]) }}
+                <td :class="getNetInflowClass(coin.net_inflow_value?.['5m'] ?? coin.net_inflow?.['5m'])">
+                  {{ coin.net_inflow_value_formatted?.['5m'] || formatNetInflow(coin.net_inflow_value?.['5m']) }}
+                </td>
+                <td v-for="interval in intervals" :key="interval" :class="getNetInflowClass(coin.net_inflow_value?.[interval] ?? coin.net_inflow?.[interval])">
+                  {{ coin.net_inflow_value_formatted?.[interval] || formatNetInflow(coin.net_inflow_value?.[interval]) }}
                 </td>
               </tr>
             </template>
@@ -519,9 +521,10 @@
         const formatNetInflow = (value) => {
           if (typeof value !== 'number') return 'N/A';
           const abs = Math.abs(value);
-          if (abs >= 1e6) return (value / 1e6).toFixed(2) + 'M';
-          if (abs >= 1e3) return (value / 1e3).toFixed(2) + 'K';
-          return value.toFixed(0);
+          if (abs >= 1e9) return '$' + (value / 1e9).toFixed(2) + 'B';
+          if (abs >= 1e6) return '$' + (value / 1e6).toFixed(2) + 'M';
+          if (abs >= 1e3) return '$' + (value / 1e3).toFixed(2) + 'K';
+          return '$' + value.toFixed(2);
         };
 
         const getNetInflowClass = (value) => {
@@ -583,7 +586,7 @@
               change.current_price_formatted !== 'N/A' &&
               change.open_interest_formatted !== 'N/A' &&
               change.open_interest_value_formatted !== 'N/A' &&
-              typeof coin.net_inflow?.[interval] === 'number'
+              typeof (coin.net_inflow_value?.[interval] ?? coin.net_inflow?.[interval]) === 'number'
             );
           });
         };
@@ -722,7 +725,7 @@
             const valueData = coin.changes.map(c => c.value_ratio ?? 0);
             const priceData = coin.changes.map(c => c.price_change_percent ?? 0);
             const intervalsList = coin.changes.map(c => c.interval);
-            const inflowData = intervalsList.map(intv => coin.net_inflow?.[intv] ?? 0);
+            const inflowData = intervalsList.map(intv => coin.net_inflow_value?.[intv] ?? coin.net_inflow?.[intv] ?? 0);
 
             createChart(`chart-oi-${index}`, oiData);
             createChart(`chart-value-${index}`, valueData);

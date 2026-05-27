@@ -64,14 +64,14 @@ def test_parse_okx_open_interest_accepts_dict_payload():
     assert records[0]['sum_open_interest_value'] == 987654.32
 
 
-def test_parse_okx_open_interest_array_treats_value_as_open_interest_value():
-    payload = [['1711526400000', '987654.32', '12345.67']]
+def test_parse_okx_open_interest_array_maps_contract_quantity_and_usd_value():
+    payload = [['1711526400000', '3321905.11', '33219.0511', '2562461129.46']]
 
     records = parse_open_interest_hist(payload, symbol='BTCUSDT', period='5m')
 
     assert records[0]['event_time'] == 1711526400000
-    assert records[0]['sum_open_interest'] is None
-    assert records[0]['sum_open_interest_value'] == 987654.32
+    assert records[0]['sum_open_interest'] == 33219.0511
+    assert records[0]['sum_open_interest_value'] == 2562461129.46
 
 
 def test_parse_okx_taker_buy_sell_vol_calculates_ratio():
@@ -80,9 +80,22 @@ def test_parse_okx_taker_buy_sell_vol_calculates_ratio():
     records = parse_taker_buy_sell_vol(payload, symbol='BTCUSDT', period='5m')
 
     assert records[0]['event_time'] == 1711526400000
-    assert records[0]['buy_vol'] == 100.0
-    assert records[0]['sell_vol'] == 150.0
-    assert round(records[0]['buy_sell_ratio'], 4) == round(100.0 / 150.0, 4)
+    assert records[0]['buy_vol'] == 1.0
+    assert records[0]['sell_vol'] == 1.5
+    assert round(records[0]['buy_sell_ratio'], 4) == round(1.0 / 1.5, 4)
+
+
+def test_parse_okx_taker_buy_sell_vol_scales_contract_counts_with_ctval(monkeypatch):
+    payload = [['1711526400000', '150.0', '100.0']]
+
+    monkeypatch.setattr(okx_series, 'get_contract_value', lambda symbol, session=None, ttl_seconds=None: 0.01)
+
+    records = parse_taker_buy_sell_vol(payload, symbol='BTCUSDT', period='5m')
+
+    assert records[0]['event_time'] == 1711526400000
+    assert records[0]['buy_vol'] == 1.0
+    assert records[0]['sell_vol'] == 1.5
+    assert round(records[0]['buy_sell_ratio'], 4) == round(1.0 / 1.5, 4)
 
 
 def test_okx_rubik_fetchers_pass_begin_and_end(monkeypatch):
@@ -108,10 +121,9 @@ def test_okx_rubik_fetchers_pass_begin_and_end(monkeypatch):
         },
     )
     assert calls[1] == (
-        '/api/v5/rubik/stat/taker-volume',
+        '/api/v5/rubik/stat/taker-volume-contract',
         {
-            'ccy': 'BTC',
-            'instType': 'CONTRACTS',
+            'instId': 'BTC-USDT-SWAP',
             'period': '5m',
             'begin': '1000',
             'end': '2000',
@@ -164,7 +176,7 @@ def test_okx_rubik_5m_window_keeps_168h_requests(monkeypatch):
             {
                 'instId': 'BTC-USDT-SWAP',
                 'period': '5m',
-                'begin': str(6 * 24 * 60 * 60 * 1000),
+                'begin': str(start_time),
                 'end': str(end_time),
             },
         )
@@ -182,6 +194,7 @@ def test_okx_open_interest_history_uses_inst_id_and_returns_last_page_within_win
         ]
 
     monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
+    monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 1779556200000 / 1000)
 
     payload = fetch_open_interest_hist(
         'BTCUSDT',
@@ -197,7 +210,7 @@ def test_okx_open_interest_history_uses_inst_id_and_returns_last_page_within_win
             {
                 'instId': 'BTC-USDT-SWAP',
                 'period': '5m',
-                'begin': '1779383400000',
+                'begin': '1778951400000',
                 'end': '1779556200000',
             },
         )
@@ -206,7 +219,7 @@ def test_okx_open_interest_history_uses_inst_id_and_returns_last_page_within_win
     assert payload[-1][0] == '1779526500000'
 
 
-def test_okx_rubik_fetchers_skip_windows_older_than_retention(monkeypatch):
+def test_okx_rubik_fetchers_keep_old_windows(monkeypatch):
     calls = []
 
     def fake_request(path, params, session=None):
@@ -229,10 +242,9 @@ def test_okx_rubik_fetchers_skip_windows_older_than_retention(monkeypatch):
             },
         ),
         (
-            '/api/v5/rubik/stat/taker-volume',
+            '/api/v5/rubik/stat/taker-volume-contract',
             {
-                'ccy': 'BTC',
-                'instType': 'CONTRACTS',
+                'instId': 'BTC-USDT-SWAP',
                 'period': '5m',
                 'begin': '0',
                 'end': '1000',
@@ -241,7 +253,7 @@ def test_okx_rubik_fetchers_skip_windows_older_than_retention(monkeypatch):
     ]
 
 
-def test_okx_rubik_fetchers_clip_windows_to_retention(monkeypatch):
+def test_okx_rubik_fetchers_keep_requested_windows(monkeypatch):
     calls = []
 
     def fake_request(path, params, session=None):
@@ -251,11 +263,10 @@ def test_okx_rubik_fetchers_clip_windows_to_retention(monkeypatch):
     monkeypatch.setattr('coinx.collector.okx.series._request_okx', fake_request)
     monkeypatch.setattr('coinx.collector.okx.series.time.time', lambda: 40 * 24 * 60 * 60)
 
-    earliest_time = 10 * 24 * 60 * 60 * 1000
     end_time = 40 * 24 * 60 * 60 * 1000
     fetch_open_interest_hist('BTCUSDT', '1H', 500, start_time=0, end_time=end_time)
 
-    assert calls[0][1]['begin'] == str(earliest_time)
+    assert calls[0][1]['begin'] == '0'
     assert calls[0][1]['end'] == str(end_time)
 
 
@@ -265,6 +276,8 @@ def test_okx_adapter_marks_homepage_series_as_precise_windows():
     assert adapter.supports_time_window('klines') is True
     assert adapter.supports_time_window('open_interest_hist') is True
     assert adapter.supports_time_window('taker_buy_sell_vol') is True
+    assert adapter.page_limit('open_interest_hist') == 100
+    assert adapter.page_limit('taker_buy_sell_vol') == 100
     assert adapter.periods_for_series('taker_buy_sell_vol') == ('5m', '1H')
     assert adapter.taker_period_for_interval('24h') == '5m'
     assert adapter.taker_period_for_interval('48h') == '1H'

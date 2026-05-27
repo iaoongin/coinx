@@ -39,6 +39,7 @@ from coinx.utils import logger
 
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
+LOCAL_DAY_OFFSET_MS = 8 * 60 * 60 * 1000
 _history_symbol_cursor = 0
 _RATE_LIMIT_EXCEPTIONS = (
     GateRateLimitUnavailable,
@@ -111,6 +112,82 @@ def _build_rolling_target_times(now_ms, points, period='5m'):
         for offset in range(max(1, int(points or 1)))
         if latest_time - offset * period_ms >= 0
     ]
+
+
+def _build_target_times_in_range(start_time, end_time, period='5m'):
+    if start_time > end_time:
+        return []
+    period_ms = _period_to_ms(period)
+    return list(range(start_time, end_time + 1, period_ms))
+
+
+def _local_day_start_time(timestamp_ms):
+    day_ms = _period_to_ms('1d')
+    return ((timestamp_ms + LOCAL_DAY_OFFSET_MS) // day_ms) * day_ms - LOCAL_DAY_OFFSET_MS
+
+
+def _build_history_day_segments(now_ms, period, coverage_hours):
+    latest_time = latest_closed_period_open_time(now_ms, period)
+    local_today_start = _local_day_start_time(now_ms)
+    day_ms = _period_to_ms('1d')
+    period_ms = _period_to_ms(period)
+    days_back = max(0, (int(coverage_hours or 0) + 23) // 24)
+
+    segments = []
+    for offset in range(days_back, 0, -1):
+        day_start = local_today_start - offset * day_ms
+        if day_start < 0:
+            day_start = 0
+        day_end = local_today_start - (offset - 1) * day_ms - period_ms
+        if day_start <= day_end:
+            segments.append((day_start, day_end))
+
+    if local_today_start <= latest_time:
+        segments.append((max(0, local_today_start), latest_time))
+
+    return segments
+
+
+def _build_history_window_bounds(now_ms, period, coverage_hours):
+    segments = _build_history_day_segments(now_ms, period, coverage_hours)
+    if not segments:
+        return []
+    return [segments[0][0], segments[-1][1]]
+
+
+def _format_history_missing_day_stats(stats_by_exchange):
+    if not stats_by_exchange:
+        return '无'
+    parts = []
+    for exchange in sorted(stats_by_exchange):
+        stats = stats_by_exchange[exchange]
+        by_type_parts = []
+        for series_type in sorted(stats.get('by_type') or {}):
+            type_stats = stats['by_type'][series_type]
+            by_type_parts.append(
+                f"{series_type}(币种={len(type_stats.get('symbols') or set())},缺天={type_stats.get('days', 0)})"
+            )
+        parts.append(
+            f"{exchange}(币种={len(stats.get('symbols') or set())},"
+            f"类型={len(stats.get('by_type') or {})},"
+            f"缺天={stats.get('days', 0)},"
+            f"按类型={ '|'.join(by_type_parts) if by_type_parts else '无' })"
+        )
+    return '; '.join(parts)
+
+
+def _record_history_missing_day_stats(stats_by_exchange, exchange, symbol, series_type, day_count):
+    if day_count <= 0:
+        return
+    exchange_stats = stats_by_exchange.setdefault(
+        exchange,
+        {'symbols': set(), 'days': 0, 'by_type': {}},
+    )
+    exchange_stats['symbols'].add(symbol)
+    exchange_stats['days'] += day_count
+    type_stats = exchange_stats['by_type'].setdefault(series_type, {'symbols': set(), 'days': 0})
+    type_stats['symbols'].add(symbol)
+    type_stats['days'] += day_count
 
 
 def _result_with_breakdown(result, breakdown):
@@ -194,6 +271,42 @@ def _active_series_types(adapter, series_types):
     return [series_type for series_type in requested_types if series_type in adapter.supported_series_types]
 
 
+def _build_history_gap_tasks(exchange, symbol, series_type, period, day_segments, session=None):
+    target_times = []
+    for segment_start, segment_end in day_segments:
+        target_times.extend(_build_target_times_in_range(segment_start, segment_end, period=period))
+    if not target_times:
+        return []
+
+    existing_by_symbol = get_existing_series_timestamps(
+        exchange,
+        series_type,
+        [symbol],
+        target_times,
+        period=period,
+        session=session,
+    )
+    existing_times = existing_by_symbol.get(symbol, set())
+    gap_tasks = []
+    for segment_start, segment_end in day_segments:
+        segment_target_times = _build_target_times_in_range(segment_start, segment_end, period=period)
+        if not segment_target_times:
+            continue
+        if all(timestamp in existing_times for timestamp in segment_target_times):
+            continue
+        gap_tasks.append(
+            {
+                'exchange': exchange,
+                'symbol': symbol,
+                'series_type': series_type,
+                'period': period,
+                'start_time': segment_start,
+                'end_time': segment_target_times[-1],
+            }
+        )
+    return gap_tasks
+
+
 def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precise, extra=None):
     result = {
         'exchange': adapter.exchange_id,
@@ -206,6 +319,9 @@ def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precis
         'window_precise': window_precise,
         'affected': 0,
         'records': 0,
+        'expected_records': 0,
+        'api_records': 0,
+        'written_records': 0,
         'pages': 0,
     }
     if extra:
@@ -225,6 +341,9 @@ def _supported_symbol_lookup_failed_result(adapter, symbol, series_type, mode, w
         'window_precise': window_precise,
         'affected': 0,
         'records': 0,
+        'expected_records': 0,
+        'api_records': 0,
+        'written_records': 0,
         'pages': 0,
         'error': str(error),
     }
@@ -245,6 +364,16 @@ def _summarize_results(results):
         'success_count': sum(1 for item in results if item.get('status') == 'success'),
         'failure_count': sum(1 for item in results if item.get('status') == 'error'),
         'skipped_count': sum(1 for item in results if item.get('status') == 'skipped'),
+        'expected_records': sum(item.get('expected_records') or 0 for item in results),
+        'api_records': sum(item.get('api_records') or 0 for item in results),
+        'records': sum(item.get('records') or 0 for item in results),
+        'missing_records': sum(
+            max((item.get('expected_records') or 0) - (item.get('records') or 0), 0)
+            for item in results
+        ),
+        'no_data_records': sum(item.get('no_data_records') or 0 for item in results),
+        'written_records': sum(item.get('written_records') or 0 for item in results),
+        'affected': sum(item.get('affected') or 0 for item in results),
     }
 
 
@@ -289,6 +418,59 @@ def _format_exchange_result_summary(results, exchanges):
     return '; '.join(parts) if parts else '无'
 
 
+def _log_result_volume_stats(mode, exchange, stats):
+    logger.info(
+        '数据量统计: 模式=%s 交易所=%s 缺口记录=%d 目标命中=%d 未命中缺口=%d 无数据缺口=%d 写库记录=%d 影响行=%d API返回=%d',
+        mode,
+        exchange or 'all',
+        stats.get('expected_records', 0),
+        stats.get('records', 0),
+        stats.get('missing_records', 0),
+        stats.get('no_data_records', 0),
+        stats.get('written_records', 0),
+        stats.get('affected', 0),
+        stats.get('api_records', 0),
+    )
+
+
+def _log_result_volume_stats_by_series(mode, results):
+    grouped = {}
+    for item in results or []:
+        key = (item.get('exchange') or 'unknown', item.get('series_type') or 'unknown')
+        stats = grouped.setdefault(
+            key,
+            {
+                'expected_records': 0,
+                'records': 0,
+                'missing_records': 0,
+                'no_data_records': 0,
+                'written_records': 0,
+                'affected': 0,
+                'api_records': 0,
+            },
+        )
+        for field in stats:
+            if field == 'missing_records':
+                stats[field] += max((item.get('expected_records') or 0) - (item.get('records') or 0), 0)
+            else:
+                stats[field] += item.get(field) or 0
+
+    for (exchange, series_type), stats in sorted(grouped.items()):
+        logger.info(
+            '数据量统计明细: 模式=%s 交易所=%s 序列类型=%s 缺口记录=%d 目标命中=%d 未命中缺口=%d 无数据缺口=%d 写库记录=%d 影响行=%d API返回=%d',
+            mode,
+            exchange,
+            series_type,
+            stats['expected_records'],
+            stats['records'],
+            stats['missing_records'],
+            stats['no_data_records'],
+            stats['written_records'],
+            stats['affected'],
+            stats['api_records'],
+        )
+
+
 def _format_exchange_progress(stats_by_exchange):
     parts = []
     for exchange in sorted(stats_by_exchange):
@@ -315,6 +497,10 @@ def _log_repair_summary(summary):
     if summary.get('mode') == 'history':
         extra_parts.extend(
             [
+                f"预检已完整={summary.get('precheck_skipped_count', 0)}",
+                f"待修补任务={summary.get('pending_task_count', 0)}",
+                f"当天裁剪截止={summary.get('current_day_trimmed_end_time')}",
+                f"缺口分布={summary.get('history_missing_day_stats')}",
                 f"覆盖时长={summary.get('coverage_hours')}",
                 f"是否全量扫描={'是' if summary.get('full_scan') else '否'}",
                 f"修补窗口={summary.get('start_time')}~{summary.get('end_time')}",
@@ -329,6 +515,13 @@ def _log_repair_summary(summary):
         f"成功={summary['success_count']} "
         f"失败={summary['failure_count']} "
         f"跳过={summary['skipped_count']} "
+        f"缺口记录={summary.get('expected_records', 0)} "
+        f"目标命中={summary.get('records', 0)} "
+        f"未命中缺口={summary.get('missing_records', 0)} "
+        f"无数据缺口={summary.get('no_data_records', 0)} "
+        f"写库记录={summary.get('written_records', 0)} "
+        f"影响行={summary.get('affected', 0)} "
+        f"API返回={summary.get('api_records', 0)} "
         f"跳过原因={_format_reason_counts(summary.get('results') or [])} "
         f"各交易所={_format_exchange_result_summary(summary.get('results') or [], summary.get('exchanges') or [])} "
         f"耗时={format_duration_ms(summary.get('duration_ms'))} "
@@ -337,6 +530,8 @@ def _log_repair_summary(summary):
     if extra_parts:
         message = f"{message} {' '.join(extra_parts)}"
     logger.info(message)
+    _log_result_volume_stats(summary.get('mode'), 'all', _summarize_results(summary.get('results') or []))
+    _log_result_volume_stats_by_series(summary.get('mode'), summary.get('results') or [])
 
     unsupported_groups = {}
     supported_lookup_failed_groups = {}
@@ -367,18 +562,53 @@ def _log_repair_summary(summary):
         )
 
 
-def _run_tasks(tasks, worker_func, max_workers, db_session=None):
+def _task_progress_label(task):
+    return f"{task.get('symbol')}/{task.get('series_type')}/{task.get('period')}"
+
+
+def _should_log_task_progress(completed, total):
+    return completed <= 3 or completed == total or completed % 10 == 0
+
+
+def _log_task_progress(mode, exchange, completed, total, results, task, started_at):
+    if not _should_log_task_progress(completed, total):
+        return
+    stats = _summarize_results(results)
+    logger.info(
+        '任务进度: 模式=%s 交易所=%s 已完成=%d/%d 成功=%d 失败=%d 跳过=%d 当前=%s 耗时=%s',
+        mode,
+        exchange or task.get('exchange'),
+        completed,
+        total,
+        stats['success_count'],
+        stats['failure_count'],
+        stats['skipped_count'],
+        _task_progress_label(task),
+        format_duration_ms((time.perf_counter() - started_at) * 1000),
+    )
+
+
+def _run_tasks(tasks, worker_func, max_workers, db_session=None, mode=None, exchange=None):
     if not tasks:
         return []
     worker_count = max(1, int(max_workers or 1))
+    started_at = time.perf_counter()
+    total = len(tasks)
     if db_session is not None or worker_count <= 1:
-        return [worker_func(task, db_session=db_session) for task in tasks]
+        results = []
+        for task in tasks:
+            results.append(worker_func(task, db_session=db_session))
+            if mode:
+                _log_task_progress(mode, exchange, len(results), total, results, task, started_at)
+        return results
 
     results = []
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_to_task = {executor.submit(worker_func, task, db_session=None): task for task in tasks}
         for future in as_completed(future_to_task):
             results.append(future.result())
+            if mode:
+                _log_task_progress(mode, exchange, len(results), total, results, future_to_task[future], started_at)
     return results
 
 
@@ -407,6 +637,9 @@ def _filter_budget_unavailable_rolling_tasks(tasks):
                     'window_precise': task['adapter'].supports_time_window(task['series_type']),
                     'affected': 0,
                     'records': 0,
+                    'expected_records': len(task.get('target_times') or []),
+                    'api_records': 0,
+                    'written_records': 0,
                     'pages': 0,
                     'target_times': sorted(task.get('target_times') or []),
                     'cooldown_skip_ms': cooldown_seconds * 1000,
@@ -457,6 +690,9 @@ def _filter_budget_unavailable_tasks(tasks, mode):
                     'window_precise': task['adapter'].supports_time_window(task['series_type']),
                     'affected': 0,
                     'records': 0,
+                    'expected_records': len(_build_target_times_in_range(task.get('start_time'), task.get('end_time'), period=task.get('period'))),
+                    'api_records': 0,
+                    'written_records': 0,
                     'pages': 0,
                     'start_time': task.get('start_time'),
                     'end_time': task.get('end_time'),
@@ -538,6 +774,7 @@ def _flush_group_records(exchange, group_results, db_session=None, mode='rolling
                 allocated_affected += result_affected
                 allocated_write_ms += result_write_ms
             result['affected'] = result_affected
+            result['written_records'] = record_count
             breakdown = result.get('duration_breakdown_ms') or empty_duration_breakdown()
             add_duration_breakdown(breakdown, {'db_write_ms': result_write_ms})
             result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
@@ -583,6 +820,8 @@ def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_sessi
 def _repair_rolling_series(adapter, symbol, series_type, period, target_times, now_ms, http_session=None, db_session=None):
     breakdown = empty_duration_breakdown()
     time_field = _get_time_field(series_type)
+    expected_records = len(set(target_times or []))
+    api_records = 0
     repaired_records = 0
     pages = 0
     window_precise = adapter.supports_time_window(series_type)
@@ -613,6 +852,7 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
                 )
             with timed_category(breakdown, 'parse_ms'):
                 records = adapter.parse_series_payload(series_type, payload, symbol, period)
+                api_records += len(records)
                 records = _trim_unclosed_records(series_type, records, now_ms, period=period)
                 for record in records:
                     record_time = record.get(time_field)
@@ -643,6 +883,9 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
                 'target_times': sorted(target_times),
                 'affected': 0,
                 'records': 0,
+                'expected_records': expected_records,
+                'api_records': api_records,
+                'written_records': 0,
                 'pages': 0,
                 'latest_event_time': latest_event_time,
             },
@@ -661,6 +904,9 @@ def _repair_rolling_series(adapter, symbol, series_type, period, target_times, n
             'target_times': sorted(target_times),
             'affected': 0,
             'records': repaired_records,
+            'expected_records': expected_records,
+            'api_records': api_records,
+            'written_records': 0,
             'pages': pages,
             'latest_event_time': latest_event_time,
             'pending_records': pending_records,
@@ -810,13 +1056,6 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             )
         except _RATE_LIMIT_EXCEPTIONS as exc:
             cooldown_skip_ms = max(0.0, float(getattr(exc, 'wait_seconds', 0.0) or 0.0) * 1000)
-            logger.warning(
-                '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=%s',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-                _reason_label(_budget_unavailable_reason(task['exchange'])),
-            )
             return _result_with_breakdown(
                 {
                     'exchange': task['exchange'],
@@ -826,18 +1065,18 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'status': 'skipped',
                     'mode': 'rolling',
                     'reason': _budget_unavailable_reason(task['exchange']),
+                    'affected': 0,
+                    'records': 0,
+                    'expected_records': len(task.get('target_times') or []),
+                    'api_records': 0,
+                    'written_records': 0,
+                    'pages': 0,
                     'cooldown_skip_ms': cooldown_skip_ms,
                     'error': str(exc),
                 },
                 {'cooldown_skip_ms': cooldown_skip_ms},
             )
         except GateUnsupportedContract as exc:
-            logger.warning(
-                '修补跳过: 模式=rolling 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-            )
             return _unsupported_symbol_result(
                 task['adapter'],
                 task['symbol'],
@@ -890,7 +1129,14 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             _format_series_counts(series_counts),
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
-        group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
+        group_results = skipped_results + _run_tasks(
+            runnable_tasks,
+            group_worker,
+            1,
+            db_session=db_session,
+            mode='rolling',
+            exchange=exchange,
+        )
         group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='rolling')
         result_stats = _summarize_results(group_results)
         logger.info(
@@ -975,20 +1221,38 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
     tasks = []
     skipped_results = []
     exchange_task_counts = {}
-    summary_end_time = latest_closed_5m_open_time(current_time_ms)
-    summary_start_time = max(0, summary_end_time - effective_coverage_hours * 60 * 60 * 1000)
+    precheck_skipped_count = 0
+    current_day_trimmed_end_time = None
+    exchange_progress = {}
+    summary_bounds = _build_history_window_bounds(current_time_ms, HOMEPAGE_SERIES_REPAIR_PERIOD, effective_coverage_hours)
+    summary_start_time = summary_bounds[0] if summary_bounds else 0
+    summary_end_time = summary_bounds[1] if summary_bounds else latest_closed_5m_open_time(current_time_ms)
+    history_missing_day_stats = {}
 
     for adapter in adapters:
+        exchange_stats = exchange_progress.setdefault(
+            adapter.exchange_id,
+            {'supported_symbols': 0, 'unsupported': 0, 'complete': 0, 'pending': 0},
+        )
         for series_type in _active_series_types(adapter, series_types):
             periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             for period in periods:
-                target_end_time = latest_closed_period_open_time(current_time_ms, period)
-                target_start_time = max(0, target_end_time - effective_coverage_hours * 60 * 60 * 1000)
+                day_segments = _build_history_day_segments(current_time_ms, period, effective_coverage_hours)
+                if not day_segments:
+                    continue
+                target_start_time = day_segments[0][0]
+                target_end_time = day_segments[-1][1]
+                current_day_trimmed_end_time = (
+                    target_end_time
+                    if current_day_trimmed_end_time is None
+                    else max(current_day_trimmed_end_time, target_end_time)
+                )
                 for symbol in target_symbols:
                     try:
                         with timed_category(precheck_breakdown, 'api_ms'):
                             is_supported = adapter.supports_symbol(symbol, series_type=series_type, session=http_session)
                     except Exception as exc:
+                        exchange_stats['unsupported'] += 1
                         skipped_results.append(
                             _supported_symbol_lookup_failed_result(
                                 adapter,
@@ -1006,6 +1270,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         )
                         continue
                     if not is_supported:
+                        exchange_stats['unsupported'] += 1
                         skipped_results.append(
                             _unsupported_symbol_result(
                                 adapter,
@@ -1021,20 +1286,66 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                             )
                         )
                         continue
-                    tasks.append(
-                        {
-                            'adapter': adapter,
-                            'exchange': adapter.exchange_id,
-                            'symbol': symbol,
-                            'series_type': series_type,
-                            'period': period,
-                            'start_time': target_start_time,
-                            'end_time': target_end_time,
-                        }
-                    )
-                    exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + 1
+                    exchange_stats['supported_symbols'] += 1
+                    window_precise = adapter.supports_time_window(series_type)
+                    if not window_precise:
+                        exchange_stats['pending'] += 1
+                        tasks.append(
+                            {
+                                'adapter': adapter,
+                                'exchange': adapter.exchange_id,
+                                'symbol': symbol,
+                                'series_type': series_type,
+                                'period': period,
+                                'start_time': target_start_time,
+                                'end_time': target_end_time,
+                            }
+                        )
+                        exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + 1
+                        continue
 
-    precheck_breakdown['precheck_ms'] += (time.perf_counter() - precheck_started_at) * 1000
+                    with timed_category(precheck_breakdown, 'db_read_ms'):
+                        gap_tasks = _build_history_gap_tasks(
+                            adapter.exchange_id,
+                            symbol,
+                            series_type,
+                            period,
+                            day_segments,
+                            session=db_session,
+                        )
+                    if not gap_tasks:
+                        precheck_skipped_count += 1
+                        exchange_stats['complete'] += 1
+                    for gap_task in gap_tasks:
+                        tasks.append(
+                            {
+                                'adapter': adapter,
+                                **gap_task,
+                            }
+                        )
+                    _record_history_missing_day_stats(
+                        history_missing_day_stats,
+                        adapter.exchange_id,
+                        symbol,
+                        series_type,
+                        len(gap_tasks),
+                    )
+                    exchange_stats['pending'] += len(gap_tasks)
+                    exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + len(gap_tasks)
+
+    precheck_duration_ms = (time.perf_counter() - precheck_started_at) * 1000
+    precheck_breakdown['precheck_ms'] += precheck_duration_ms
+    unsupported_count = sum(stats['unsupported'] for stats in exchange_progress.values())
+    logger.info(
+        '预检完成: 模式=history 支持进度=%s 已完整=%s 待修补=%s 不支持=%s 当天裁剪截止=%s 缺口分布=%s 耗时=%s',
+        _format_exchange_progress(exchange_progress) if exchange_progress else '无',
+        precheck_skipped_count,
+        len(tasks),
+        unsupported_count,
+        current_day_trimmed_end_time,
+        _format_history_missing_day_stats(history_missing_day_stats),
+        format_duration_ms(precheck_duration_ms),
+    )
 
     def worker(task, db_session=None):
         breakdown = empty_duration_breakdown()
@@ -1047,10 +1358,12 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             period = task['period']
             target_start_time = task['start_time']
             target_end_time = task['end_time']
+            expected_records = len(_build_target_times_in_range(target_start_time, target_end_time, period=period))
             cursor_time = target_start_time
             backward_cursor_end_time = target_end_time
             pending_records = []
             affected = 0
+            api_records = 0
             record_count = 0
             pages = 0
 
@@ -1085,6 +1398,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     )
                 with timed_category(breakdown, 'parse_ms'):
                     records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
+                    api_records += len(records)
                     records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
                     current_end_time = (
                         target_end_time
@@ -1126,6 +1440,30 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     continue
                 cursor_time = page_end_time + _period_to_ms(period)
 
+            if record_count == 0:
+                return _result_with_breakdown(
+                    {
+                        'exchange': task['exchange'],
+                        'symbol': task['symbol'],
+                        'series_type': task['series_type'],
+                        'period': period,
+                        'status': 'skipped',
+                        'mode': 'history',
+                        'reason': 'no_data',
+                        'window_precise': window_precise,
+                        'start_time': target_start_time,
+                        'end_time': target_end_time,
+                        'affected': 0,
+                        'records': 0,
+                        'expected_records': expected_records,
+                        'no_data_records': expected_records,
+                        'api_records': api_records,
+                        'written_records': 0,
+                        'pages': pages,
+                    },
+                    breakdown,
+                )
+
             return _result_with_breakdown(
                 {
                     'exchange': task['exchange'],
@@ -1139,18 +1477,15 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'end_time': target_end_time,
                     'affected': affected,
                     'records': record_count,
+                    'expected_records': expected_records,
+                    'api_records': api_records,
+                    'written_records': 0,
                     'pages': pages,
                     'pending_records': pending_records,
                 },
                 breakdown,
             )
         except GateUnsupportedContract as exc:
-            logger.warning(
-                '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=Gate 合约不存在，按不支持币种跳过',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-            )
             return _unsupported_symbol_result(
                 task['adapter'],
                 task['symbol'],
@@ -1166,13 +1501,6 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             )
         except _RATE_LIMIT_EXCEPTIONS as exc:
             cooldown_skip_ms = max(0.0, float(getattr(exc, 'wait_seconds', 0.0) or 0.0) * 1000)
-            logger.warning(
-                '修补跳过: 模式=history 交易所=%s 币种=%s 序列类型=%s 原因=%s',
-                task['exchange'],
-                task['symbol'],
-                task['series_type'],
-                _reason_label(_budget_unavailable_reason(task['exchange'])),
-            )
             return _result_with_breakdown(
                 {
                     'exchange': task['exchange'],
@@ -1183,6 +1511,12 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'mode': 'history',
                     'window_precise': window_precise,
                     'reason': _budget_unavailable_reason(task['exchange']),
+                    'affected': 0,
+                    'records': 0,
+                    'expected_records': len(_build_target_times_in_range(task.get('start_time'), task.get('end_time'), period=task.get('period'))),
+                    'api_records': 0,
+                    'written_records': 0,
+                    'pages': 0,
                     'cooldown_skip_ms': cooldown_skip_ms,
                     'error': str(exc),
                 },
@@ -1223,7 +1557,14 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             len(group_tasks),
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='history')
-        group_results = skipped_results + _run_tasks(runnable_tasks, group_worker, 1, db_session=db_session)
+        group_results = skipped_results + _run_tasks(
+            runnable_tasks,
+            group_worker,
+            1,
+            db_session=db_session,
+            mode='history',
+            exchange=exchange,
+        )
         group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='history')
         result_stats = _summarize_results(group_results)
         logger.info(
@@ -1271,10 +1612,16 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         results=results,
         started_at=started_at,
         extra={
+            'precheck_skipped_count': precheck_skipped_count,
+            'precheck_duration_ms': precheck_duration_ms,
+            'pending_task_count': len(tasks),
+            'unsupported_count': unsupported_count,
+            'history_missing_day_stats': _format_history_missing_day_stats(history_missing_day_stats),
             'coverage_hours': effective_coverage_hours,
             'start_time': summary_start_time,
             'end_time': summary_end_time,
             'full_scan': full_scan,
+            'current_day_trimmed_end_time': current_day_trimmed_end_time,
             'duration_breakdown_ms': total_breakdown,
             'duration_breakdown_by_exchange': _build_grouped_duration_breakdowns(results, 'exchange'),
             'duration_breakdown_by_series_type': _build_grouped_duration_breakdowns(results, 'series_type'),
@@ -1313,6 +1660,16 @@ def _build_summary(mode, symbols, series_types, exchanges, results, started_at, 
         'duration_ms': duration_ms,
         'exchange_summaries': exchange_summaries,
         'results': results,
+        'expected_records': sum(item.get('expected_records') or 0 for item in results),
+        'api_records': sum(item.get('api_records') or 0 for item in results),
+        'records': sum(item.get('records') or 0 for item in results),
+        'missing_records': sum(
+            max((item.get('expected_records') or 0) - (item.get('records') or 0), 0)
+            for item in results
+        ),
+        'written_records': sum(item.get('written_records') or 0 for item in results),
+        'no_data_records': sum(item.get('no_data_records') or 0 for item in results),
+        'affected': sum(item.get('affected') or 0 for item in results),
     }
     if extra:
         summary.update(extra)

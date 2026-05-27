@@ -36,7 +36,7 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
                     'current_open_interest': 100.0,
                     'current_open_interest_formatted': '100.00',
                     'current_open_interest_value': 200.0,
-                    'current_open_interest_value_formatted': '200.00',
+                    'current_open_interest_value_formatted': '$200.00',
                     'exchange_open_interest': [
                         {
                             'exchange': 'binance',
@@ -54,6 +54,8 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
                     'price_change_percent': 100.0,
                     'price_change_formatted': '1.00',
                     'net_inflow': {'5m': 12.0},
+                    'net_inflow_value': {'5m': 24.0},
+                    'net_inflow_value_formatted': {'5m': '$24.00'},
                     'changes': {
                         '5m': {
                             'ratio': 5.0,
@@ -61,7 +63,7 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
                             'open_interest': 95.0,
                             'open_interest_formatted': '95.00',
                             'open_interest_value': 188.0,
-                            'open_interest_value_formatted': '188.00',
+                            'open_interest_value_formatted': '$188.00',
                             'price_change': 0.1,
                             'price_change_percent': 5.0,
                             'price_change_formatted': '0.10',
@@ -85,6 +87,8 @@ def test_get_coins_uses_homepage_series_repository(monkeypatch):
     assert payload['cache_update_time'] == 1234567890000
     assert payload['data'][0]['symbol'] == 'BTCUSDT'
     assert payload['data'][0]['exchange_open_interest'][0]['exchange'] == 'binance'
+    assert payload['data'][0]['net_inflow_value']['5m'] == 24.0
+    assert payload['data'][0]['net_inflow_value_formatted']['5m'] == '$24.00'
     assert payload['data'][0]['changes'][0]['interval'] == '5m'
 
 
@@ -497,13 +501,15 @@ def test_get_coins_deduplicates_market_structure_refresh_symbols_against_homepag
                     'current_open_interest': 100.0,
                     'current_open_interest_formatted': '100.00',
                     'current_open_interest_value': 200.0,
-                    'current_open_interest_value_formatted': '200.00',
+                    'current_open_interest_value_formatted': '$200.00',
                     'current_price': 10.0,
                     'current_price_formatted': '10.00',
                     'price_change': 1.0,
                     'price_change_percent': 1.0,
                     'price_change_formatted': '1.00',
                     'net_inflow': {'5m': 12.0},
+                    'net_inflow_value': {'5m': 24.0},
+                    'net_inflow_value_formatted': {'5m': '$24.00'},
                     'changes': {
                         '5m': {
                             'ratio': 1.0,

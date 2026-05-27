@@ -16,18 +16,12 @@ from coinx.utils import logger
 
 OKX_EXCHANGE_ID = 'okx'
 SUPPORTED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
-RUBIK_HISTORY_LIMIT_MS = {
-    '5m': 2 * 24 * 60 * 60 * 1000,
-    '1H': 30 * 24 * 60 * 60 * 1000,
-    '1h': 30 * 24 * 60 * 60 * 1000,
-    '1D': 180 * 24 * 60 * 60 * 1000,
-    '1d': 180 * 24 * 60 * 60 * 1000,
-}
 _SUPPORTED_SYMBOLS_TTL_SECONDS = 60 * 60
 _supported_symbols_cache = {
     'loaded_at': 0,
     'failed_at': 0,
     'symbols': None,
+    'contract_values': {},
 }
 _okx_rate_limits = RateLimitRegistry()
 
@@ -78,6 +72,7 @@ def clear_supported_symbols_cache():
     _supported_symbols_cache['loaded_at'] = 0
     _supported_symbols_cache['failed_at'] = 0
     _supported_symbols_cache['symbols'] = None
+    _supported_symbols_cache['contract_values'] = {}
 
 
 def clear_okx_rate_limit_state():
@@ -100,14 +95,28 @@ def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECON
         {'instType': 'SWAP'},
         session=session,
     )
-    symbols = {
-        to_internal_symbol(instrument['instId'])
-        for instrument in instruments
-        if _is_live_usdt_swap(instrument)
-    }
+    symbols = set()
+    contract_values = {}
+    for instrument in instruments:
+        if not _is_live_usdt_swap(instrument):
+            continue
+        symbol = to_internal_symbol(instrument['instId'])
+        symbols.add(symbol)
+        contract_value = _to_float(instrument.get('ctVal'))
+        if contract_value is not None and contract_value > 0:
+            contract_values[symbol] = contract_value
     _supported_symbols_cache['symbols'] = symbols
+    _supported_symbols_cache['contract_values'] = contract_values
     _supported_symbols_cache['loaded_at'] = now
     return symbols
+
+
+def get_contract_value(symbol, session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):
+    contract_values = _supported_symbols_cache.get('contract_values') or {}
+    if symbol in contract_values:
+        return contract_values[symbol]
+    get_supported_symbols(session=session, ttl_seconds=ttl_seconds)
+    return (_supported_symbols_cache.get('contract_values') or {}).get(symbol) or 1.0
 
 
 def is_symbol_supported(symbol, series_type=None, session=None):
@@ -236,21 +245,9 @@ def _okx_bar(period):
 
 
 def _rubik_time_window(period, start_time=None, end_time=None, now_ms=None):
-    history_limit_ms = RUBIK_HISTORY_LIMIT_MS.get(period)
-    if history_limit_ms is None:
-        return start_time, end_time
-
-    current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    reference_end_time = end_time if end_time is not None else current_time_ms
-    earliest_time = reference_end_time - history_limit_ms
-    effective_start = max(start_time, earliest_time) if start_time is not None else earliest_time
-    effective_end = end_time
-
-    if effective_end is not None and effective_end < earliest_time:
+    if start_time is not None and end_time is not None and start_time > end_time:
         return None, None
-    if effective_end is not None and effective_start is not None and effective_start > effective_end:
-        return None, None
-    return effective_start, effective_end
+    return start_time, end_time
 
 
 def fetch_klines(symbol, period, limit, session=None, start_time=None, end_time=None):
@@ -291,15 +288,14 @@ def fetch_taker_buy_sell_vol(symbol, period, limit, session=None, start_time=Non
         return []
 
     params = {
-        'ccy': _base_asset(symbol),
-        'instType': 'CONTRACTS',
+        'instId': to_exchange_symbol(symbol),
         'period': _okx_bar(period),
     }
     if start_time is not None:
         params['begin'] = str(start_time)
     if end_time is not None:
         params['end'] = str(end_time)
-    payload = _request_okx('/api/v5/rubik/stat/taker-volume', params, session=session)
+    payload = _request_okx('/api/v5/rubik/stat/taker-volume-contract', params, session=session)
     if limit:
         return payload[:limit]
     return payload
@@ -394,8 +390,8 @@ def parse_open_interest_hist(payload, symbol, period):
             )
         else:
             event_time = int(item[0])
-            open_interest = None
-            open_interest_value = _to_float(item[1]) if len(item) > 1 else None
+            open_interest = _to_float(item[2]) if len(item) > 2 else None
+            open_interest_value = _to_float(item[3] if len(item) > 3 else item[1]) if len(item) > 1 else None
 
         parsed.append(
             {
@@ -410,6 +406,7 @@ def parse_open_interest_hist(payload, symbol, period):
 
 
 def parse_taker_buy_sell_vol(payload, symbol, period):
+    contract_value = get_contract_value(symbol)
     parsed = []
     for item in payload:
         if isinstance(item, dict):
@@ -421,6 +418,10 @@ def parse_taker_buy_sell_vol(payload, symbol, period):
             sell_vol = _to_float(item[1]) if len(item) > 1 else None
             buy_vol = _to_float(item[2]) if len(item) > 2 else None
 
+        if buy_vol is not None:
+            buy_vol = buy_vol * contract_value
+        if sell_vol is not None:
+            sell_vol = sell_vol * contract_value
         ratio = None
         if sell_vol not in (None, 0):
             ratio = buy_vol / sell_vol if buy_vol is not None else None

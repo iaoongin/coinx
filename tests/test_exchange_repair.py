@@ -473,9 +473,9 @@ def test_exchange_history_repair_collects_adapter_series_periods(db_session, mon
     assert summary['mode'] == 'history'
     assert summary['success_count'] == 2
     assert [call[3] for call in calls] == [500, 500]
-    assert [call[4] for call in calls] == [3_600_000, 0]
+    assert [call[4] for call in calls] == [0, 0]
     assert [call[5] for call in calls] == [7_200_000, 3_600_000]
-    assert [(row.period, row.event_time) for row in rows] == [('1H', 900000), ('5m', 3600000)]
+    assert [(row.period, row.event_time) for row in rows] == [('1H', 900000), ('5m', 900000)]
 
 
 def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monkeypatch):
@@ -801,6 +801,49 @@ def test_exchange_group_logs_duration_breakdown(db_session, monkeypatch):
     )
 
 
+def test_exchange_rolling_repair_logs_task_progress(monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+    calls = []
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_existing_series_timestamps', lambda **kwargs: {})
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.upsert_series_records_in_batches',
+        lambda exchange, series_type, records, batch_size, session=None: len(records),
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append((args[0] % args[1:]) if len(args) > 1 else args[0]),
+    )
+
+    summary = repair_rolling_symbols(
+        symbols=['BTCUSDT', 'ETHUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=1500000,
+        points=1,
+        max_workers=1,
+        db_session=None,
+    )
+
+    assert summary['success_count'] == 2
+    assert any(
+        '任务进度: 模式=rolling' in message
+        and '交易所=binance' in message
+        and '已完成=1/2' in message
+        and '当前=BTCUSDT/klines/5m' in message
+        for message in info_logs
+    )
+    assert any(
+        '任务进度: 模式=rolling' in message
+        and '已完成=2/2' in message
+        and '成功=2' in message
+        for message in info_logs
+    )
+
+
 def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
     _clear_rate_limit_states()
     calls = []
@@ -924,6 +967,8 @@ def test_exchange_repair_grouped_flush_uses_history_batch_size_and_logs(monkeypa
 
     assert upsert_calls == [('gate', 'klines', 3, 2)]
     assert any('批量写入开始: 模式=history 交易所=gate 序列类型=klines 记录数=3 batch_size=2' in line for line in info_logs)
+    assert flushed[0]['written_records'] == 3
+    assert flushed[0]['affected'] == 3
     assert all('pending_records' not in item for item in flushed)
 
 
@@ -946,29 +991,20 @@ def test_gate_history_repair_paginates_open_interest_without_end_time(db_session
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             assert series_type == 'open_interest_hist'
             assert end_time is None
-            if start_time == 0:
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(1000)
-                ]
-            if start_time == 1000 * FIVE_MINUTES_MS:
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(1000, 1500)
-                ]
-            return []
+            start_index = int((start_time or 0) / FIVE_MINUTES_MS)
+            if start_index >= 1500:
+                return []
+            end_index = min(start_index + limit, 1500)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'event_time': index * FIVE_MINUTES_MS,
+                    'sum_open_interest': 10 + index,
+                    'sum_open_interest_value': 100 + index,
+                }
+                for index in range(start_index, end_index)
+            ]
 
         def parse_series_payload(self, series_type, payload, symbol, period):
             return payload
@@ -997,7 +1033,7 @@ def test_gate_history_repair_paginates_open_interest_without_end_time(db_session
         .all()
     )
 
-    assert summary['success_count'] == 1
+    assert summary['success_count'] == 6
     assert len(rows) == 1500
     assert rows[0].event_time == 0
     assert rows[-1].event_time == 1499 * FIVE_MINUTES_MS
@@ -1024,73 +1060,20 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
 
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             assert series_type == 'open_interest_hist'
-            if (start_time, end_time) == (500 * FIVE_MINUTES_MS, 599 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(599, 499, -1)
-                ]
-            if (start_time, end_time) == (400 * FIVE_MINUTES_MS, 499 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(499, 399, -1)
-                ]
-            if (start_time, end_time) == (300 * FIVE_MINUTES_MS, 399 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(399, 299, -1)
-                ]
-            if (start_time, end_time) == (200 * FIVE_MINUTES_MS, 299 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(299, 199, -1)
-                ]
-            if (start_time, end_time) == (100 * FIVE_MINUTES_MS, 199 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(199, 99, -1)
-                ]
-            if (start_time, end_time) == (0, 99 * FIVE_MINUTES_MS):
-                return [
-                    {
-                        'symbol': symbol,
-                        'period': period,
-                        'event_time': index * FIVE_MINUTES_MS,
-                        'sum_open_interest': 10 + index,
-                        'sum_open_interest_value': 100 + index,
-                    }
-                    for index in range(99, -1, -1)
-                ]
-            return []
+            assert start_time is not None
+            assert end_time is not None
+            start_index = int(start_time / FIVE_MINUTES_MS)
+            end_index = int(end_time / FIVE_MINUTES_MS)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'event_time': index * FIVE_MINUTES_MS,
+                    'sum_open_interest': 10 + index,
+                    'sum_open_interest_value': 100 + index,
+                }
+                for index in range(end_index, start_index - 1, -1)
+            ]
 
         def parse_series_payload(self, series_type, payload, symbol, period):
             return payload
@@ -1119,7 +1102,337 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
         .all()
     )
 
-    assert summary['success_count'] == 1
+    assert summary['success_count'] == 3
     assert len(rows) == 600
     assert rows[0].event_time == 0
     assert rows[-1].event_time == 599 * FIVE_MINUTES_MS
+
+
+def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    local_offset_ms = 8 * 60 * 60 * 1000
+    now_ms = (4 * day_ms) + (12 * 60 * 60 * 1000)
+    local_today_start = ((now_ms + local_offset_ms) // day_ms) * day_ms - local_offset_ms
+    expected_segments = [
+        (max(0, local_today_start - 4 * day_ms), local_today_start - 3 * day_ms - FIVE_MINUTES_MS),
+        (local_today_start - 3 * day_ms, local_today_start - 2 * day_ms - FIVE_MINUTES_MS),
+        (local_today_start - 2 * day_ms, local_today_start - day_ms - FIVE_MINUTES_MS),
+        (local_today_start - day_ms, local_today_start - FIVE_MINUTES_MS),
+        (local_today_start, now_ms - FIVE_MINUTES_MS),
+    ]
+
+    class DailyHistoryAdapter:
+        exchange_id = 'binance'
+        supported_series_types = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time))
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'open_time': start_time,
+                    'close_time': start_time + FIVE_MINUTES_MS - 1,
+                    'open_price': 1,
+                    'high_price': 2,
+                    'low_price': 1,
+                    'close_price': 1.5,
+                }
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    existing_times = {'BTCUSDT': set()}
+    for segment_start, segment_end in (expected_segments[1], expected_segments[3], expected_segments[4]):
+        existing_times['BTCUSDT'].update(
+            timestamp
+            for timestamp in range(segment_start, segment_end + 1, FIVE_MINUTES_MS)
+        )
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [DailyHistoryAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: existing_times,
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=96,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 2
+    assert summary['expected_records'] == 480
+    assert summary['api_records'] == 2
+    assert summary['records'] == 2
+    assert summary['missing_records'] == 478
+    assert summary['written_records'] == 2
+    assert summary['affected'] == 2
+    assert calls == [
+        expected_segments[0],
+        expected_segments[2],
+    ]
+
+
+def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    local_offset_ms = 8 * 60 * 60 * 1000
+    now_ms = day_ms + (10 * 60 * 60 * 1000) + FIVE_MINUTES_MS
+    local_today_start = ((now_ms + local_offset_ms) // day_ms) * day_ms - local_offset_ms
+
+    class PartialDayHistoryAdapter:
+        exchange_id = 'binance'
+        supported_series_types = ('klines',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time))
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'open_time': start_time,
+                    'close_time': start_time + FIVE_MINUTES_MS - 1,
+                    'open_price': 1,
+                    'high_price': 2,
+                    'low_price': 1,
+                    'close_price': 1.5,
+                }
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    full_previous_day = {
+        timestamp
+        for timestamp in range(0, day_ms, FIVE_MINUTES_MS)
+    }
+    latest_closed = day_ms + (10 * 60 * 60 * 1000)
+    current_day_existing = {
+        timestamp
+        for timestamp in range(day_ms, latest_closed, FIVE_MINUTES_MS)
+    }
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [PartialDayHistoryAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BTCUSDT': full_previous_day | current_day_existing},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=48,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 1
+    assert calls == [
+        (local_today_start, latest_closed),
+    ]
+
+
+def test_exchange_history_repair_marks_empty_api_response_as_no_data(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    now_ms = day_ms + (12 * 60 * 60 * 1000)
+
+    class EmptyHistoryAdapter:
+        exchange_id = 'okx'
+        supported_series_types = ('open_interest_hist',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time))
+            return []
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [EmptyHistoryAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BSBUSDT': set()},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BSBUSDT'],
+        series_types=['open_interest_hist'],
+        exchanges=['okx'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=24,
+        db_session=db_session,
+    )
+
+    result = summary['results'][0]
+    assert summary['success_count'] == 0
+    assert summary['skipped_count'] == 2
+    assert result['status'] == 'skipped'
+    assert result['reason'] == 'no_data'
+    assert result['expected_records'] > 0
+    assert result['records'] == 0
+    assert result['api_records'] == 0
+    assert summary['missing_records'] == 432
+    assert summary['no_data_records'] == 432
+    assert calls
+
+
+def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    calls = []
+
+    class LimitedTakerAdapter:
+        exchange_id = 'okx'
+        supported_series_types = ('taker_buy_sell_vol',)
+
+        def supports_time_window(self, series_type):
+            return True
+
+        def supports_symbol(self, symbol, series_type=None, session=None):
+            return True
+
+        def periods_for_series(self, series_type):
+            return ('5m',)
+
+        def page_limit(self, series_type):
+            return 100
+
+        def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+            calls.append((start_time, end_time, limit))
+            start_index = int(start_time / FIVE_MINUTES_MS)
+            end_index = int(end_time / FIVE_MINUTES_MS)
+            return [
+                {
+                    'symbol': symbol,
+                    'period': period,
+                    'event_time': index * FIVE_MINUTES_MS,
+                    'buy_vol': 10,
+                    'sell_vol': 4,
+                }
+                for index in range(start_index, end_index + 1)
+            ]
+
+        def parse_series_payload(self, series_type, payload, symbol, period):
+            return payload
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [LimitedTakerAdapter()])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {'BSBUSDT': set()},
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BSBUSDT'],
+        series_types=['taker_buy_sell_vol'],
+        exchanges=['okx'],
+        now_ms=300 * FIVE_MINUTES_MS,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=25,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 2
+    assert summary['expected_records'] == 300
+    assert summary['records'] == 300
+    assert summary['missing_records'] == 0
+    assert summary['written_records'] == 300
+    assert calls
+    assert all(call[2] == 100 for call in calls)
+
+
+def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeypatch):
+    _clear_rate_limit_states()
+    info_logs = []
+    calls = []
+    day_ms = 24 * 60 * 60 * 1000
+    local_offset_ms = 8 * 60 * 60 * 1000
+    now_ms = day_ms + (12 * 60 * 60 * 1000) + FIVE_MINUTES_MS
+    local_today_start = ((now_ms + local_offset_ms) // day_ms) * day_ms - local_offset_ms
+    previous_day_start = local_today_start - day_ms
+    adapter = FakeAdapter('binance', ('klines',), ('klines',), calls)
+
+    monkeypatch.setattr('coinx.collector.exchange_repair.get_exchange_adapters', lambda exchanges: [adapter])
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.logger.info',
+        lambda *args: info_logs.append((args[0] % args[1:]) if len(args) > 1 else args[0]),
+    )
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {
+            'BTCUSDT': {
+                timestamp
+                for timestamp in range(previous_day_start, local_today_start, FIVE_MINUTES_MS)
+            }
+        },
+    )
+
+    summary = repair_history_symbols(
+        symbols=['BTCUSDT'],
+        series_types=['klines'],
+        exchanges=['binance'],
+        now_ms=now_ms,
+        full_scan=True,
+        max_workers=1,
+        coverage_hours=1,
+        db_session=db_session,
+    )
+
+    assert summary['success_count'] == 1
+    assert any('预检完成: 模式=history' in message for message in info_logs)
+    assert any(
+        '修补完成: 模式=history' in message
+        and '预检已完整=' in message
+        and '待修补任务=' in message
+        and '未命中缺口=' in message
+        for message in info_logs
+    )
+    assert any(
+        '数据量统计明细: 模式=history' in message
+        and '交易所=binance'
+        and '序列类型=klines'
+        and '未命中缺口=' in message
+        for message in info_logs
+    )

@@ -422,6 +422,8 @@ def _format_homepage_coins_payload(coins_data):
             'price_change_percent': coin['price_change_percent'],
             'price_change_formatted': coin['price_change_formatted'],
             'net_inflow': coin.get('net_inflow', {}),
+            'net_inflow_value': coin.get('net_inflow_value', {}),
+            'net_inflow_value_formatted': coin.get('net_inflow_value_formatted', {}),
         }
 
         changes = []
@@ -812,4 +814,3 @@ def control_task_job(job_id):
         logger.error(f'执行任务操作失败: job_id={job_id} action={action} error={e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to {action} job: {str(e)}'}), 500
-

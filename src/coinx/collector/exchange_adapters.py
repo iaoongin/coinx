@@ -127,6 +127,7 @@ def _build_okx_adapter():
         supported_symbols_fetcher=okx_series.get_supported_symbols,
         page_limits={
             'open_interest_hist': 100,
+            'taker_buy_sell_vol': 100,
         },
         series_periods={
             'taker_buy_sell_vol': ('5m', '1H'),
@@ -167,7 +168,9 @@ def _build_gate_adapter():
         page_limits={
             'klines': 1000,
             'open_interest_hist': 1000,
+            'taker_buy_sell_vol': 1000,
         },
+        taker_period_by_interval=DEFAULT_TAKER_PERIOD_BY_INTERVAL,
     )
 
 

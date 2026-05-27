@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 
@@ -18,6 +19,8 @@ from coinx.utils import logger
 
 
 DEFAULT_PROXY_ID = 'direct'
+PROXY_CHECK_URL = 'https://www.okx.com/api/v5/public/time'
+PROXY_CHECK_TIMEOUT_SECONDS = 5
 
 
 def _build_session(proxy_url=None):
@@ -152,6 +155,58 @@ class ProxyPool:
         now = time.time()
         return [proxy for proxy in self._proxies if proxy['cooldown_until'] <= now]
 
+    @staticmethod
+    def check_proxies_concurrently(proxies):
+        available = []
+        unavailable = []
+        candidates = list(proxies or [])
+        if not candidates:
+            return {'available': available, 'unavailable': unavailable}
+
+        max_workers = min(len(candidates), 16)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(ProxyPool._check_proxy_once, candidates):
+                if result['available']:
+                    available.append(result)
+                else:
+                    unavailable.append(result)
+
+        return {'available': available, 'unavailable': unavailable}
+
+    @staticmethod
+    def _check_proxy_once(proxy):
+        proxy_url = proxy.get('url')
+        if not proxy_url:
+            return {
+                'id': proxy['id'],
+                'url': proxy_url,
+                'available': True,
+                'latency_ms': 0,
+                'reason': '',
+            }
+        session = _build_session(proxy_url)
+        started_at = time.perf_counter()
+        try:
+            response = session.get(PROXY_CHECK_URL, timeout=PROXY_CHECK_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            return {
+                'id': proxy['id'],
+                'url': proxy_url,
+                'available': True,
+                'latency_ms': latency_ms,
+                'reason': '',
+            }
+        except requests.RequestException as exc:
+            latency_ms = min(int((time.perf_counter() - started_at) * 1000), PROXY_CHECK_TIMEOUT_SECONDS * 1000)
+            return {
+                'id': proxy['id'],
+                'url': proxy_url,
+                'available': False,
+                'latency_ms': latency_ms,
+                'reason': str(exc),
+            }
+
 
 def build_okx_proxy_pool():
     proxies = parse_proxy_pool_urls(PROXY_POOL_URLS)
@@ -160,11 +215,41 @@ def build_okx_proxy_pool():
             proxies = [{'id': DEFAULT_PROXY_ID, 'url': HTTPS_PROXY_URL or PROXY_URL}]
         else:
             proxies = [{'id': DEFAULT_PROXY_ID, 'url': None}]
-    return ProxyPool(
-        proxies=proxies,
+    health_check_results = ProxyPool.check_proxies_concurrently(proxies)
+    available_proxies = [{'id': item['id'], 'url': item.get('url')} for item in health_check_results['available']]
+    unavailable_proxies = health_check_results['unavailable']
+    if unavailable_proxies:
+        logger.warning(
+            'Proxy pool health check: available=%s unavailable=%s',
+            _format_proxy_health_summary(health_check_results['available']),
+            _format_proxy_health_summary(unavailable_proxies, include_reason=True),
+        )
+    elif available_proxies:
+        logger.info(
+            'Proxy pool health check: available=%s unavailable=none',
+            _format_proxy_health_summary(health_check_results['available']),
+        )
+    pool = ProxyPool(
+        proxies=available_proxies,
         strategy=PROXY_POOL_STRATEGY,
         fail_cooldown_seconds=PROXY_POOL_FAIL_COOLDOWN_SECONDS,
     )
+    if proxies and not pool.enabled():
+        logger.warning('All configured proxies are unavailable during initialization, fallback to direct connection.')
+    return pool
+
+
+def _format_proxy_health_summary(items, include_reason=False):
+    if not items:
+        return 'none'
+    entries = []
+    for item in items:
+        text = f"{item['id']}({item['latency_ms']}ms"
+        if include_reason and item.get('reason'):
+            text += f", {item['reason']}"
+        text += ')'
+        entries.append(text)
+    return ', '.join(entries)
 
 
 _okx_proxy_pool = build_okx_proxy_pool()

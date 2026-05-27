@@ -355,7 +355,8 @@ def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(d
     assert any('首页交易所聚合完成' in message for message in info_logs)
 
 
-def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session):
+def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -372,7 +373,8 @@ def test_get_homepage_series_data_formats_small_prices_without_scientific_notati
     assert coins[0]['current_price_formatted'] == '0.0000001'
 
 
-def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_digits_within_seven(db_session):
+def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_digits_within_seven(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -389,7 +391,8 @@ def test_get_homepage_series_data_keeps_plain_price_without_rounding_when_total_
     assert coins[0]['current_price_formatted'] == '1234.567'
 
 
-def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db_session):
+def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -406,7 +409,8 @@ def test_get_homepage_series_data_formats_large_prices_without_compact_suffix(db
     assert coins[0]['current_price_formatted'] == '1234.57'
 
 
-def test_get_homepage_series_data_formats_tiny_prices_with_scientific_notation_after_seven_decimal_places(db_session):
+def test_get_homepage_series_data_formats_tiny_prices_with_scientific_notation_after_seven_decimal_places(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
         db_session,
@@ -533,6 +537,31 @@ def test_get_homepage_series_data_with_taker_vol_returns_net_inflow(db_session, 
     assert isinstance(coin['net_inflow']['5m'], (int, float))
 
 
+def test_get_homepage_series_data_prefers_quote_value_for_net_inflow_value(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        2017,
+        price_base=100.0,
+        price_step=0.0,
+        quote_volume_base=1000.0,
+        taker_buy_quote_base=700.0,
+        taker_vol_base=10.0,
+        taker_vol_step=0.0,
+        include_taker_vol=True,
+    )
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    coin = coins[0]
+    assert coin['net_inflow']['5m'] == 2.0
+    assert coin['net_inflow_value']['5m'] == 2416.0
+    assert coin['net_inflow_value_formatted']['5m'] == '$2.42K'
+
+
 def test_get_homepage_series_data_with_partial_taker_vol_returns_partial_net_inflow(db_session, monkeypatch):
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     import pytest
@@ -628,6 +657,7 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['current_price'] == 2116.0
     assert coin['current_open_interest'] == 21160.0 + 42320.0
     assert coin['current_open_interest_value'] == 44774560.0 + 42320.0 * 2116.0
+    assert coin['current_open_interest_value_formatted'].startswith('$')
     assert coin['exchange_open_interest'][0]['exchange'] == 'okx'
     assert coin['exchange_open_interest'][0]['open_interest_value'] == 42320.0 * 2116.0
     assert round(coin['exchange_open_interest'][0]['share_percent'], 2) == 66.67
@@ -635,7 +665,10 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['exchange_open_interest'][1]['open_interest_value'] == 44774560.0
     assert round(coin['exchange_open_interest'][1]['quantity_share_percent'], 2) == 33.33
     assert coin['changes']['15m']['open_interest'] == 21130.0 + 42260.0
+    assert coin['changes']['15m']['open_interest_value_formatted'].startswith('$')
     assert coin['net_inflow']['5m'] == 10580.0
+    assert coin['net_inflow_value']['5m'] == 2216.0 + 2216.0
+    assert coin['net_inflow_value_formatted']['5m'].startswith('$')
 
 
 def test_get_homepage_series_data_includes_gate_without_taker_and_keeps_net_inflow_from_supported_subset(db_session, monkeypatch):
@@ -881,6 +914,38 @@ def test_get_homepage_series_data_marks_exchange_status_unsupported_when_symbol_
     assert statuses['okx']['status'] == 'unsupported'
     assert statuses['okx']['open_interest_formatted'] == 'N/A'
     assert statuses['okx']['open_interest_value_formatted'] == 'N/A'
+    assert statuses['okx']['supports_taker'] is False
+
+
+def test_get_homepage_series_data_does_not_advertise_excluded_okx_as_taker_source(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    monkeypatch.setattr('coinx.collector.okx.series.get_supported_symbols', lambda session=None: {'DRIFTUSDT'})
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'DRIFTUSDT', start_time, 2017, include_taker_vol=True)
+
+    for index in range(2017):
+        event_time = start_time + index * FIVE_MINUTES_MS
+        db_session.add(
+            MarketTakerBuySellVol(
+                exchange='okx',
+                symbol='DRIFTUSDT',
+                period='5m',
+                event_time=event_time,
+                buy_sell_ratio=2.0,
+                buy_vol=500.0,
+                sell_vol=200.0,
+            )
+        )
+    db_session.commit()
+
+    coin = get_homepage_series_data(symbols=['DRIFTUSDT'], session=db_session)[0]
+    statuses = {item['exchange']: item for item in coin['exchange_statuses']}
+
+    assert coin['included_exchanges'] == ['binance']
+    assert coin['missing_exchanges'] == ['okx']
+    assert statuses['okx']['status'] == 'excluded'
+    assert statuses['okx']['supports_taker'] is False
+    assert statuses['okx']['taker_status'] == 'excluded'
 
 
 def test_get_homepage_series_data_marks_exchange_status_unknown_when_support_lookup_fails(db_session, monkeypatch):

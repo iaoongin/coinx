@@ -334,6 +334,45 @@
       text-overflow: ellipsis;
     }
 
+    .taker-exchanges {
+      display: inline-flex;
+      gap: 2px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .taker-tag {
+      font-size: 9px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      padding: 0 4px;
+      border-radius: 3px;
+      line-height: 16px;
+      color: var(--text-muted);
+      background: rgba(148, 163, 184, 0.1);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .taker-tag.taker-binance {
+      color: #f0b90b;
+      background: rgba(240, 185, 11, 0.08);
+      border-color: rgba(240, 185, 11, 0.2);
+    }
+
+    .taker-tag.taker-okx {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .taker-tag.taker-gate {
+      color: #23c97d;
+      background: rgba(35, 201, 125, 0.08);
+      border-color: rgba(35, 201, 125, 0.2);
+    }
+
     .raw-value {
       font-size: 11px;
       color: var(--text-secondary);
@@ -426,7 +465,12 @@
         <div class="matrix-wrap">
           <div class="matrix">
             <div class="cell matrix-head window-cell">窗口</div>
-            <div class="cell matrix-head">净流入</div>
+            <div class="cell matrix-head">
+              净流入
+              <span v-if="takerExchanges(coin).length > 0" class="taker-exchanges">
+                <span v-for="ex in takerExchanges(coin)" :key="ex" class="taker-tag" :class="'taker-' + ex">[[ ex ]]</span>
+              </span>
+            </div>
             <div class="cell matrix-head">价格</div>
             <div class="cell matrix-head">价格%</div>
             <div class="cell matrix-head">量</div>
@@ -436,8 +480,8 @@
 
             <template v-for="row in matrixRows(coin)" :key="coin.symbol + row.interval">
               <div class="cell window-cell">[[ row.interval ]]</div>
-              <div class="cell metric" :class="valueClass(row.net_inflow)">
-                [[ formatNetInflow(row.net_inflow) ]]
+              <div class="cell metric" :class="valueClass(row.net_inflow_value ?? row.net_inflow)">
+                [[ row.net_inflow_value_formatted || formatNetInflow(row.net_inflow_value ?? row.net_inflow) ]]
               </div>
               <div class="cell raw-value">[[ row.current_price_formatted || 'N/A' ]]</div>
               <div class="cell metric" :class="valueClass(row.price_change_percent)">
@@ -496,7 +540,15 @@
             interval,
             ...(changes[interval] || {}),
             net_inflow: coin.net_inflow?.[interval],
+            net_inflow_value: coin.net_inflow_value?.[interval],
+            net_inflow_value_formatted: coin.net_inflow_value_formatted?.[interval],
           }));
+        };
+
+        const takerExchanges = (coin) => {
+          return (coin.exchange_statuses || [])
+            .filter((item) => item.supports_taker)
+            .map((item) => item.exchange);
         };
 
         const shortSymbol = (symbol) => String(symbol || '').replace(/USDT$/, '');
@@ -514,10 +566,10 @@
         const formatNetInflow = (value) => {
           if (typeof value !== 'number') return 'N/A';
           const abs = Math.abs(value);
-          if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
-          if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
-          if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}K`;
-          return value.toFixed(0);
+          if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+          if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
+          if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
+          return `$${value.toFixed(2)}`;
         };
 
         const formatPercent = (value) => {
@@ -658,6 +710,7 @@
           lastUpdateTime,
           countdown,
           matrixRows,
+          takerExchanges,
           shortSymbol,
           valueClass,
           formatChange,
