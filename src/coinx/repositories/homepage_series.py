@@ -194,6 +194,37 @@ def _calc_net_inflow_from_taker_vol(window, price=None):
     return inflow
 
 
+def _calc_net_inflow_value_from_window(taker_window, kline_by_time):
+    if not taker_window or not kline_by_time:
+        return None
+
+    inflow_value = 0.0
+    has_value = False
+    for taker_point in taker_window:
+        kline_point = kline_by_time.get(taker_point.event_time)
+        if kline_point is None:
+            return None
+
+        if (
+            kline_point.quote_volume is not None
+            and kline_point.taker_buy_quote_volume is not None
+        ):
+            inflow_value += (2 * float(kline_point.taker_buy_quote_volume)) - float(kline_point.quote_volume)
+            has_value = True
+            continue
+
+        if kline_point.close_price is None:
+            return None
+        buy_vol = float(taker_point.buy_vol or 0)
+        sell_vol = float(taker_point.sell_vol or 0)
+        inflow_value += (buy_vol - sell_vol) * float(kline_point.close_price)
+        has_value = True
+
+    if not has_value:
+        return None
+    return inflow_value
+
+
 def _format_usd_map(values):
     return {
         interval: format_usd_value(value)
@@ -212,6 +243,19 @@ def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time, price=None
 
         inflow[interval] = _calc_net_inflow_from_taker_vol(window, price=price)
     return inflow
+
+
+def _build_net_inflow_value_from_taker_vol(taker_vol_by_time, kline_by_time, current_time):
+    inflow_value = {}
+    for interval in TIME_INTERVALS:
+        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
+        taker_window = _get_exact_window(taker_vol_by_time, current_time, points)
+        if not taker_window:
+            continue
+        value = _calc_net_inflow_value_from_window(taker_window, kline_by_time)
+        if value is not None:
+            inflow_value[interval] = value
+    return inflow_value
 
 
 def _format_homepage_log_details(details):
@@ -442,6 +486,32 @@ def _calc_net_inflow_for_period(taker_vol_by_time, current_time, interval, perio
     return _calc_net_inflow_from_taker_vol(window)
 
 
+def _calc_net_inflow_value_for_period(taker_vol_by_time, kline_by_time, current_time, interval, period):
+    if not taker_vol_by_time or not kline_by_time:
+        return None
+
+    period_ms = _period_to_ms(period)
+    interval_ms = _interval_to_ms(interval)
+    points = interval_ms // period_ms
+    if points <= 0:
+        return None
+
+    if period == '5m':
+        period_current_time = current_time
+        if points == 1 and period_current_time not in taker_vol_by_time:
+            return None
+    else:
+        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
+        if not available_times:
+            return None
+        period_current_time = max(available_times)
+
+    taker_window = _get_exact_window_by_step(taker_vol_by_time, period_current_time, points, period_ms)
+    if not taker_window:
+        return None
+    return _calc_net_inflow_value_from_window(taker_window, kline_by_time)
+
+
 def _has_required_change_coverage(oi_by_time, kline_by_time, current_time):
     for interval in TIME_INTERVALS:
         target_time = current_time - _interval_to_ms(interval)
@@ -611,6 +681,14 @@ def _build_exchange_open_interest_rows(exchange_points, total_value, total_open_
     return rows
 
 
+def _supports_taker(exchange):
+    try:
+        adapter = get_exchange_adapter(exchange)
+        return adapter is not None and adapter.taker_period_by_interval is not None
+    except Exception:
+        return False
+
+
 def _build_exchange_status_rows(
     exchanges,
     supported_exchanges,
@@ -622,11 +700,13 @@ def _build_exchange_status_rows(
     for exchange in exchanges:
         snapshot = symbol_exchange_snapshots.get(exchange) or {}
         support_state = snapshot.get('support_state') or {'state': 'supported'}
+        supports_taker = _supports_taker(exchange)
         if exchange not in supported_exchanges:
             rows.append(
                 {
                     'exchange': exchange,
                     'status': 'unsupported',
+                    'supports_taker': supports_taker,
                     'open_interest': None,
                     'open_interest_formatted': 'N/A',
                     'open_interest_value': None,
@@ -642,6 +722,7 @@ def _build_exchange_status_rows(
                 {
                     'exchange': exchange,
                     'status': 'unsupported',
+                    'supports_taker': supports_taker,
                     'open_interest': None,
                     'open_interest_formatted': 'N/A',
                     'open_interest_value': None,
@@ -657,6 +738,7 @@ def _build_exchange_status_rows(
             row = dict(included_row)
             row['exchange'] = exchange
             row['status'] = 'included'
+            row['supports_taker'] = supports_taker
             taker_rejection = snapshot.get('taker_rejection') or {}
             if taker_rejection.get('reasons'):
                 row['taker_status'] = 'missing'
@@ -682,6 +764,7 @@ def _build_exchange_status_rows(
         row = {
             'exchange': exchange,
             'status': row_status,
+            'supports_taker': supports_taker,
             'open_interest': open_interest,
             'open_interest_formatted': format_number(open_interest) if open_interest is not None else 'N/A',
             'open_interest_value': open_interest_value,
@@ -1457,6 +1540,7 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
 
         for interval in TIME_INTERVALS:
             interval_values = []
+            interval_value_values = []
             for exchange in included_exchanges:
                 snapshot = symbol_exchange_snapshots[exchange]
                 adapter = exchange_adapters.get(exchange)
@@ -1469,13 +1553,21 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
                 if inflow is not None:
                     interval_values.append(inflow)
+                inflow_value = _calc_net_inflow_value_for_period(
+                    taker_by_time,
+                    selected_kline_map[symbol],
+                    anchor_time,
+                    interval,
+                    period,
+                )
+                if inflow_value is not None:
+                    interval_value_values.append(inflow_value)
 
             if interval_values:
                 net_inflow = sum(interval_values)
                 coverage_map[symbol]['net_inflow'][interval] = net_inflow
-                selected_kline = selected_kline_map[symbol].get(anchor_time)
-                if selected_kline is not None and selected_kline.close_price is not None:
-                    coverage_map[symbol]['net_inflow_value'][interval] = net_inflow * float(selected_kline.close_price)
+            if interval_value_values:
+                coverage_map[symbol]['net_inflow_value'][interval] = sum(interval_value_values)
 
         included_open_interest_rows = _build_exchange_open_interest_rows(
             coverage_map[symbol]['open_interest_by_exchange'].get(anchor_time, {}),
@@ -1538,6 +1630,8 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
 
     if not net_inflow and taker_vol_by_time and any(taker_vol_by_time.values()):
         net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
+    if not net_inflow_value and taker_vol_by_time and any(taker_vol_by_time.values()):
+        net_inflow_value = _build_net_inflow_value_from_taker_vol(taker_vol_by_time, kline_by_time, current_time)
 
     current_oi = oi_by_time.get(current_time)
     if current_oi is None:

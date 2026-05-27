@@ -537,6 +537,31 @@ def test_get_homepage_series_data_with_taker_vol_returns_net_inflow(db_session, 
     assert isinstance(coin['net_inflow']['5m'], (int, float))
 
 
+def test_get_homepage_series_data_prefers_quote_value_for_net_inflow_value(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
+    start_time = 1_700_000_000_000
+    seed_series(
+        db_session,
+        'BTCUSDT',
+        start_time,
+        2017,
+        price_base=100.0,
+        price_step=0.0,
+        quote_volume_base=1000.0,
+        taker_buy_quote_base=700.0,
+        taker_vol_base=10.0,
+        taker_vol_step=0.0,
+        include_taker_vol=True,
+    )
+
+    coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
+
+    coin = coins[0]
+    assert coin['net_inflow']['5m'] == 2.0
+    assert coin['net_inflow_value']['5m'] == 2416.0
+    assert coin['net_inflow_value_formatted']['5m'] == '$2.42K'
+
+
 def test_get_homepage_series_data_with_partial_taker_vol_returns_partial_net_inflow(db_session, monkeypatch):
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     import pytest
@@ -642,7 +667,7 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert coin['changes']['15m']['open_interest'] == 21130.0 + 42260.0
     assert coin['changes']['15m']['open_interest_value_formatted'].startswith('$')
     assert coin['net_inflow']['5m'] == 10580.0
-    assert coin['net_inflow_value']['5m'] == 10580.0 * 2116.0
+    assert coin['net_inflow_value']['5m'] == 2216.0 + 2216.0
     assert coin['net_inflow_value_formatted']['5m'].startswith('$')
 
 

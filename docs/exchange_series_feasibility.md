@@ -120,6 +120,52 @@
 其中 `/api/v5/rubik/` 路径已在代码里归为单独的节流组，建议把这组接口视为高敏接口处理。
 OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修补任务会保留调用方传入的 `begin`/`end`，以支持 `168h` 等长窗口补齐。
 
+### Gate
+
+- `klines`（历史 K 线）：已实现，但只包含基础字段
+  - 支持 `volume`（成交量）
+  - 支持 `quote_volume`（成交额）
+  - 不支持 `taker_buy_base_volume`
+  - 不支持 `taker_buy_quote_volume`
+- `open_interest_hist`（历史持仓量）：已实现
+  - 支持 `sum_open_interest`（持仓量）
+  - 支持 `sum_open_interest_value`（持仓价值，通过 `open_interest_usd` 字段）
+- `taker_buy_sell_vol`（主动买卖成交量）：已实现
+  - 支持 `buy_vol`（主动买量）
+  - 支持 `sell_vol`（主动卖量）
+  - 支持 `buy_sell_ratio`（买卖比）
+- `funding_rate`（资金费率）：已实现，支持全量加载
+
+#### Gate 主动买卖数据可行性（2026-05 调研）
+
+Gate 当前已调用的 `GET /api/v4/futures/{settle}/contract_stats` 接口，返回数据中已包含以下主动买卖相关字段，当前代码在 `parse_open_interest_hist` 中未提取：
+
+| 响应字段 | 说明 | 对应标准字段 |
+|---|---|---|
+| `long_taker_size` | 主动买入成交量（合约张数） | `buy_vol` |
+| `short_taker_size` | 主动卖出成交量（合约张数） | `sell_vol` |
+| `lsr_taker` | 主动买卖比 | `buy_sell_ratio` |
+| `time` | Unix 时间戳（秒），需转毫秒 | `event_time` |
+
+支持周期：`5m 15m 30m 1h 4h 8h 1d 7d 30d`
+
+关键优势：
+
+- 该接口为公开接口，无需 API Key 认证
+- 项目已经在调用该接口获取持仓历史数据，可复用同一请求
+- 限流规则与 `open_interest_hist` 相同（`200次/10s/endpoint`），不会产生额外限流压力
+
+可选方案（未采用）：
+
+- Gate 另有 `GET /api/v4/futures/{settle}/taker_buy_sell_vol` 专用接口，但需要私有认证（KEY + SIGN + Timestamp），增加复杂度，且与 `contract_stats` 数据语义一致，无额外收益
+
+实施路径：
+
+1. 在 `gate/series.py` 的 `SUPPORTED_SERIES_TYPES` 中添加 `'taker_buy_sell_vol'`
+2. 新增 `fetch_taker_buy_sell_vol`（复用 `contract_stats` 端点）和 `parse_taker_buy_sell_vol`（提取 `long_taker_size` / `short_taker_size` / `lsr_taker`）
+3. 在 `exchange_adapters.py` 的 Gate 适配器中配置 `taker_period_by_interval`
+4. 注意 `time` 字段为秒级 Unix 时间戳，需转换为毫秒
+
 ### Bybit
 
 - `klines`（历史 K 线）：已实现，但只包含基础字段
@@ -130,13 +176,27 @@ OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修
 - `open_interest_hist`（历史持仓量）：已实现
   - 支持 `sum_open_interest`（持仓量）
   - 当前不支持 `sum_open_interest_value`（持仓价值）
-- `taker_buy_sell_vol`（主动买卖成交量）：未实现
+- `taker_buy_sell_vol`（主动买卖成交量）：未实现，且官方接口不具备能力
 - `funding_rate`（资金费率）：已实现，支持全量加载
+
+#### Bybit 主动买卖数据可行性（2026-05 调研）
+
+Bybit V5 API **没有**提供合约维度的 taker buy/sell volume 接口。调研结果：
+
+| 接口 | 返回内容 | 能否替代 taker volume |
+|---|---|---|
+| `/v5/market/account-ratio` | 多空**账户数**比例（`buyRatio` / `sellRatio`） | 不能。语义是账户数量比，非成交量比 |
+| `/v5/market/tickers` | spot 分类下可能含 `takerBuyVolume` / `takerSellVolume` | 不能。仅 24h 聚合值，非历史时序；linear/inverse 分类未确认 |
+| `/v5/market/recent-trade` | 逐笔成交含 `side` 字段 | 理论上可手动聚合，但开销极大，不实际 |
+| K 线 `/v5/market/kline` | 仅 7 字段（OHLCV + turnover），无 taker 字段 | 不能 |
+
+支持周期（`account-ratio`，非 taker volume）：`5min 15min 30min 1h 4h 1d`
 
 结论：
 
-- Bybit 当前只支持基础 K 线和持仓量能力
-- 目前没有独立主动买卖成交量数据接入
+- Bybit V5 API 当前不提供合约 taker buy/sell volume 数据
+- `/v5/market/account-ratio` 返回的是账户数多空比，与主动买卖成交量语义不同，不应作为替代
+- 如果未来需要 Bybit 主动买卖数据，只能依赖第三方数据服务（如 Coinalyze、Laevitas）或等待官方新增接口
 
 ## 四家交易所对照表
 
@@ -144,8 +204,8 @@ OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Binance | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | OKX | 支持 | 支持 | 不支持 | 不支持 | 支持 | 支持 | 支持 | 支持 |
-| Bybit | 支持 | 支持 | 不支持 | 不支持 | 不支持 | 支持 | 不支持 | 支持 |
-| Gate | 支持 | 支持 | 不支持 | 不支持 | 不支持 | 支持 | 不支持 | 支持 |
+| Bybit | 支持 | 支持 | 不支持 | 不支持 | 不支持（官方不具备） | 支持 | 不支持 | 支持 |
+| Gate | 支持 | 支持 | 不支持 | 不支持 | 支持 | 支持 | 支持 | 支持 |
 
 ## 对首页的影响
 
@@ -157,8 +217,10 @@ OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修
   - 首页数据支持最完整
 - 对 OKX：
   - 首页净流入和主动买卖压力应主要依赖 `taker_buy_sell_vol`
+- 对 Gate：
+  - `contract_stats` 接口已包含主动买卖字段，接入后可与 Binance/OKX 同等使用
 - 对 Bybit：
-  - 当前不具备主动买卖成交量能力，因此首页相关指标能力较弱
+  - 官方不提供 taker volume 接口，首页相关指标能力较弱，短期内无法改善
 
 ## 对评分页的影响
 
@@ -184,10 +246,17 @@ OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修
 - 资金费率可用
 - 主动买卖需要依赖单独接口，不能只靠 K 线
 
-### 结论 3：Bybit 当前更适合作为补充源
+### 结论 3：Gate 可通过现有接口补充主动买卖数据
+
+- `contract_stats` 接口已返回 `long_taker_size` / `short_taker_size` / `lsr_taker`，项目当前在获取 OI 时已调用该接口但未提取 taker 字段
+- 接入成本低：复用同一端点，新增解析逻辑即可，无限流增量
+- 建议优先实施，实现四家中三家支持主动买卖数据
+
+### 结论 4：Bybit 当前更适合作为补充源
 
 - 可补充价格和持仓量
-- 暂不适合作为主动买卖结构分析主源
+- 官方 V5 API 不提供合约 taker volume 接口，不具备主动买卖数据采集能力
+- `/v5/market/account-ratio` 返回账户数多空比，与主动买卖成交量语义不同，不建议作为替代
 
 ## 后续讨论建议
 

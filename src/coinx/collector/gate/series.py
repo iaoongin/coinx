@@ -14,7 +14,7 @@ from coinx.utils import logger
 
 
 GATE_EXCHANGE_ID = 'gate'
-SUPPORTED_SERIES_TYPES = ('klines', 'open_interest_hist')
+SUPPORTED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
 _SUPPORTED_SYMBOLS_TTL_SECONDS = 60 * 60
 _supported_symbols_cache = {
     'loaded_at': 0,
@@ -22,6 +22,7 @@ _supported_symbols_cache = {
     'fallback_logged': False,
     'symbols': None,
     'unsupported_symbols': set(),
+    'quanto_multipliers': {},
 }
 _gate_rate_limits = RateLimitRegistry()
 _GATE_REQUEST_HEADERS = {
@@ -325,6 +326,7 @@ def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECON
 
     rows = _request_gate(f'/api/v4/futures/{GATE_SETTLE}/contracts', {}, session=session)
     symbols = set()
+    multipliers = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -333,11 +335,21 @@ def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECON
         contract = row.get('name') or row.get('contract')
         if not contract or not str(contract).endswith('_USDT'):
             continue
-        symbols.add(to_internal_symbol(contract))
+        symbol = to_internal_symbol(contract)
+        symbols.add(symbol)
+        quanto = _to_float(row.get('quanto_multiplier'))
+        if quanto is not None and quanto > 0:
+            multipliers[symbol] = quanto
 
     _supported_symbols_cache['symbols'] = symbols
+    _supported_symbols_cache['quanto_multipliers'] = multipliers
     _supported_symbols_cache['loaded_at'] = now
     return symbols
+
+
+def get_quanto_multiplier(symbol):
+    multipliers = _supported_symbols_cache.get('quanto_multipliers') or {}
+    return multipliers.get(symbol) or 1.0
 
 
 def is_symbol_supported(symbol, series_type=None, session=None):
@@ -468,10 +480,53 @@ def parse_open_interest_hist(payload, symbol, period):
     return parsed
 
 
+def fetch_taker_buy_sell_vol(symbol, period, limit, session=None, start_time=None, end_time=None):
+    params = {
+        'contract': to_exchange_symbol(symbol),
+        'interval': _gate_interval(period),
+    }
+    if start_time is not None:
+        params['from'] = str(int(start_time) // 1000)
+    params['limit'] = str(min(int(limit), 1000))
+    return _request_gate(f'/api/v4/futures/{GATE_SETTLE}/contract_stats', params, session=session)
+
+
+def parse_taker_buy_sell_vol(payload, symbol, period):
+    multiplier = get_quanto_multiplier(symbol)
+    parsed = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        event_time_seconds = item.get('time')
+        if event_time_seconds in (None, ''):
+            continue
+        buy_vol = _to_float(item.get('long_taker_size'))
+        sell_vol = _to_float(item.get('short_taker_size'))
+        if buy_vol is not None:
+            buy_vol = buy_vol * multiplier
+        if sell_vol is not None:
+            sell_vol = sell_vol * multiplier
+        ratio = _to_float(item.get('lsr_taker'))
+        if ratio is None and sell_vol not in (None, 0) and buy_vol is not None:
+            ratio = buy_vol / sell_vol
+        parsed.append(
+            {
+                'symbol': symbol,
+                'period': period,
+                'event_time': int(float(event_time_seconds) * 1000),
+                'buy_sell_ratio': ratio,
+                'buy_vol': buy_vol,
+                'sell_vol': sell_vol,
+            }
+        )
+    return parsed
+
+
 def fetch_series_payload(series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
     fetchers = {
         'klines': fetch_klines,
         'open_interest_hist': fetch_open_interest_hist,
+        'taker_buy_sell_vol': fetch_taker_buy_sell_vol,
     }
     try:
         fetcher = fetchers[series_type]
@@ -484,6 +539,7 @@ def parse_series_payload(series_type, payload, symbol, period):
     parsers = {
         'klines': parse_klines,
         'open_interest_hist': parse_open_interest_hist,
+        'taker_buy_sell_vol': parse_taker_buy_sell_vol,
     }
     try:
         parser = parsers[series_type]

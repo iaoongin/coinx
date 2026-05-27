@@ -21,6 +21,7 @@ _supported_symbols_cache = {
     'loaded_at': 0,
     'failed_at': 0,
     'symbols': None,
+    'contract_values': {},
 }
 _okx_rate_limits = RateLimitRegistry()
 
@@ -71,6 +72,7 @@ def clear_supported_symbols_cache():
     _supported_symbols_cache['loaded_at'] = 0
     _supported_symbols_cache['failed_at'] = 0
     _supported_symbols_cache['symbols'] = None
+    _supported_symbols_cache['contract_values'] = {}
 
 
 def clear_okx_rate_limit_state():
@@ -93,14 +95,28 @@ def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECON
         {'instType': 'SWAP'},
         session=session,
     )
-    symbols = {
-        to_internal_symbol(instrument['instId'])
-        for instrument in instruments
-        if _is_live_usdt_swap(instrument)
-    }
+    symbols = set()
+    contract_values = {}
+    for instrument in instruments:
+        if not _is_live_usdt_swap(instrument):
+            continue
+        symbol = to_internal_symbol(instrument['instId'])
+        symbols.add(symbol)
+        contract_value = _to_float(instrument.get('ctVal'))
+        if contract_value is not None and contract_value > 0:
+            contract_values[symbol] = contract_value
     _supported_symbols_cache['symbols'] = symbols
+    _supported_symbols_cache['contract_values'] = contract_values
     _supported_symbols_cache['loaded_at'] = now
     return symbols
+
+
+def get_contract_value(symbol, session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECONDS):
+    contract_values = _supported_symbols_cache.get('contract_values') or {}
+    if symbol in contract_values:
+        return contract_values[symbol]
+    get_supported_symbols(session=session, ttl_seconds=ttl_seconds)
+    return (_supported_symbols_cache.get('contract_values') or {}).get(symbol) or 1.0
 
 
 def is_symbol_supported(symbol, series_type=None, session=None):
@@ -390,6 +406,7 @@ def parse_open_interest_hist(payload, symbol, period):
 
 
 def parse_taker_buy_sell_vol(payload, symbol, period):
+    contract_value = get_contract_value(symbol)
     parsed = []
     for item in payload:
         if isinstance(item, dict):
@@ -401,6 +418,10 @@ def parse_taker_buy_sell_vol(payload, symbol, period):
             sell_vol = _to_float(item[1]) if len(item) > 1 else None
             buy_vol = _to_float(item[2]) if len(item) > 2 else None
 
+        if buy_vol is not None:
+            buy_vol = buy_vol * contract_value
+        if sell_vol is not None:
+            sell_vol = sell_vol * contract_value
         ratio = None
         if sell_vol not in (None, 0):
             ratio = buy_vol / sell_vol if buy_vol is not None else None

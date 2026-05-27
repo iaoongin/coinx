@@ -80,9 +80,22 @@ def test_parse_okx_taker_buy_sell_vol_calculates_ratio():
     records = parse_taker_buy_sell_vol(payload, symbol='BTCUSDT', period='5m')
 
     assert records[0]['event_time'] == 1711526400000
-    assert records[0]['buy_vol'] == 100.0
-    assert records[0]['sell_vol'] == 150.0
-    assert round(records[0]['buy_sell_ratio'], 4) == round(100.0 / 150.0, 4)
+    assert records[0]['buy_vol'] == 1.0
+    assert records[0]['sell_vol'] == 1.5
+    assert round(records[0]['buy_sell_ratio'], 4) == round(1.0 / 1.5, 4)
+
+
+def test_parse_okx_taker_buy_sell_vol_scales_contract_counts_with_ctval(monkeypatch):
+    payload = [['1711526400000', '150.0', '100.0']]
+
+    monkeypatch.setattr(okx_series, 'get_contract_value', lambda symbol, session=None, ttl_seconds=None: 0.01)
+
+    records = parse_taker_buy_sell_vol(payload, symbol='BTCUSDT', period='5m')
+
+    assert records[0]['event_time'] == 1711526400000
+    assert records[0]['buy_vol'] == 1.0
+    assert records[0]['sell_vol'] == 1.5
+    assert round(records[0]['buy_sell_ratio'], 4) == round(1.0 / 1.5, 4)
 
 
 def test_okx_rubik_fetchers_pass_begin_and_end(monkeypatch):
