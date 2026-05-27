@@ -689,6 +689,16 @@ def _supports_taker(exchange):
         return False
 
 
+def _has_available_taker_source(exchange, status, support_state=None, taker_rejection=None):
+    if status != 'included':
+        return False
+    if (support_state or {}).get('state') == 'unsupported':
+        return False
+    if not _supports_taker(exchange):
+        return False
+    return not bool((taker_rejection or {}).get('reasons'))
+
+
 def _build_exchange_status_rows(
     exchanges,
     supported_exchanges,
@@ -700,13 +710,14 @@ def _build_exchange_status_rows(
     for exchange in exchanges:
         snapshot = symbol_exchange_snapshots.get(exchange) or {}
         support_state = snapshot.get('support_state') or {'state': 'supported'}
-        supports_taker = _supports_taker(exchange)
+        exchange_supports_taker = _supports_taker(exchange)
         if exchange not in supported_exchanges:
             rows.append(
                 {
                     'exchange': exchange,
                     'status': 'unsupported',
-                    'supports_taker': supports_taker,
+                    'supports_taker': False,
+                    'taker_status': 'unsupported',
                     'open_interest': None,
                     'open_interest_formatted': 'N/A',
                     'open_interest_value': None,
@@ -722,7 +733,8 @@ def _build_exchange_status_rows(
                 {
                     'exchange': exchange,
                     'status': 'unsupported',
-                    'supports_taker': supports_taker,
+                    'supports_taker': False,
+                    'taker_status': 'unsupported',
                     'open_interest': None,
                     'open_interest_formatted': 'N/A',
                     'open_interest_value': None,
@@ -738,11 +750,18 @@ def _build_exchange_status_rows(
             row = dict(included_row)
             row['exchange'] = exchange
             row['status'] = 'included'
-            row['supports_taker'] = supports_taker
             taker_rejection = snapshot.get('taker_rejection') or {}
+            row['supports_taker'] = _has_available_taker_source(
+                exchange,
+                row['status'],
+                support_state=support_state,
+                taker_rejection=taker_rejection,
+            )
             if taker_rejection.get('reasons'):
                 row['taker_status'] = 'missing'
                 row['taker_reason'] = taker_rejection.get('reasons')
+            elif not exchange_supports_taker:
+                row['taker_status'] = 'unsupported'
             else:
                 row['taker_status'] = 'available'
             rows.append(row)
@@ -764,7 +783,7 @@ def _build_exchange_status_rows(
         row = {
             'exchange': exchange,
             'status': row_status,
-            'supports_taker': supports_taker,
+            'supports_taker': False,
             'open_interest': open_interest,
             'open_interest_formatted': format_number(open_interest) if open_interest is not None else 'N/A',
             'open_interest_value': open_interest_value,
@@ -777,7 +796,11 @@ def _build_exchange_status_rows(
             row['reason'] = rejection.get('reasons') or []
             row['stage'] = rejection.get('stage')
         taker_rejection = snapshot.get('taker_rejection') or {}
-        if taker_rejection.get('reasons'):
+        if row_status != 'included':
+            row['taker_status'] = row_status
+        elif not exchange_supports_taker:
+            row['taker_status'] = 'unsupported'
+        elif taker_rejection.get('reasons'):
             row['taker_status'] = 'missing'
             row['taker_reason'] = taker_rejection.get('reasons')
         else:

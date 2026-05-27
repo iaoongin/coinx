@@ -467,7 +467,7 @@
             <div class="cell matrix-head window-cell">窗口</div>
             <div class="cell matrix-head">
               净流入
-              <span v-if="takerExchanges(coin).length > 1" class="taker-exchanges">
+              <span v-if="takerExchanges(coin).length > 0" class="taker-exchanges">
                 <span v-for="ex in takerExchanges(coin)" :key="ex" class="taker-tag" :class="'taker-' + ex">[[ ex ]]</span>
               </span>
             </div>

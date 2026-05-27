@@ -914,6 +914,38 @@ def test_get_homepage_series_data_marks_exchange_status_unsupported_when_symbol_
     assert statuses['okx']['status'] == 'unsupported'
     assert statuses['okx']['open_interest_formatted'] == 'N/A'
     assert statuses['okx']['open_interest_value_formatted'] == 'N/A'
+    assert statuses['okx']['supports_taker'] is False
+
+
+def test_get_homepage_series_data_does_not_advertise_excluded_okx_as_taker_source(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx'])
+    monkeypatch.setattr('coinx.collector.okx.series.get_supported_symbols', lambda session=None: {'DRIFTUSDT'})
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'DRIFTUSDT', start_time, 2017, include_taker_vol=True)
+
+    for index in range(2017):
+        event_time = start_time + index * FIVE_MINUTES_MS
+        db_session.add(
+            MarketTakerBuySellVol(
+                exchange='okx',
+                symbol='DRIFTUSDT',
+                period='5m',
+                event_time=event_time,
+                buy_sell_ratio=2.0,
+                buy_vol=500.0,
+                sell_vol=200.0,
+            )
+        )
+    db_session.commit()
+
+    coin = get_homepage_series_data(symbols=['DRIFTUSDT'], session=db_session)[0]
+    statuses = {item['exchange']: item for item in coin['exchange_statuses']}
+
+    assert coin['included_exchanges'] == ['binance']
+    assert coin['missing_exchanges'] == ['okx']
+    assert statuses['okx']['status'] == 'excluded'
+    assert statuses['okx']['supports_taker'] is False
+    assert statuses['okx']['taker_status'] == 'excluded'
 
 
 def test_get_homepage_series_data_marks_exchange_status_unknown_when_support_lookup_fails(db_session, monkeypatch):
