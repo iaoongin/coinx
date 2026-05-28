@@ -472,9 +472,11 @@ def _calc_net_inflow_for_period(taker_vol_by_time, current_time, interval, perio
         return None
 
     if period == '5m':
-        period_current_time = current_time
-        if points == 1 and period_current_time not in taker_vol_by_time:
+        # 对于 5m 周期，使用最近的可用数据（允许时间偏差）
+        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
+        if not available_times:
             return None
+        period_current_time = max(available_times)
     else:
         available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
         if not available_times:
@@ -497,9 +499,11 @@ def _calc_net_inflow_value_for_period(taker_vol_by_time, kline_by_time, current_
         return None
 
     if period == '5m':
-        period_current_time = current_time
-        if points == 1 and period_current_time not in taker_vol_by_time:
+        # 对于 5m 周期，使用最近的可用数据（允许时间偏差）
+        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
+        if not available_times:
             return None
+        period_current_time = max(available_times)
     else:
         available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
         if not available_times:
@@ -1514,6 +1518,9 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             )
             continue
 
+        # 追踪每个交易所每个周期的 taker 数据可用性
+        exchange_taker_availability = {exchange: {} for exchange in included_exchanges}
+
         missing_exchanges = [exchange for exchange in exchanges if exchange not in included_exchanges]
         coverage_map[symbol]['included_exchanges'] = included_exchanges
         coverage_map[symbol]['source_exchanges'] = included_exchanges
@@ -1561,17 +1568,45 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 coverage_map[symbol]['open_interest_by_exchange'][event_time] = exchange_points
                 aggregate_oi_map[symbol][event_time] = merged_point
 
+        # 第一遍：检查每个交易所每个周期的 taker 数据可用性
         for interval in TIME_INTERVALS:
-            interval_values = []
-            interval_value_values = []
             for exchange in included_exchanges:
                 snapshot = symbol_exchange_snapshots[exchange]
                 adapter = exchange_adapters.get(exchange)
                 if adapter is None:
+                    exchange_taker_availability[exchange][interval] = False
                     continue
                 period = adapter.taker_period_for_interval(interval)
                 if not period:
+                    exchange_taker_availability[exchange][interval] = False
                     continue
+                taker_by_time = (snapshot['taker_maps_by_period'] or {}).get(period, {})
+                inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
+                exchange_taker_availability[exchange][interval] = inflow is not None
+
+        # 只有所有周期都有数据的交易所才算贡献交易所
+        exchange_taker_contributed = {
+            exchange: all(exchange_taker_availability[exchange].get(interval) for interval in TIME_INTERVALS)
+            for exchange in included_exchanges
+        }
+
+        # 调试：记录 taker 数据可用性
+        if symbol in ('BTCUSDT', 'ETHUSDT'):
+            for exchange in included_exchanges:
+                missing_intervals = [i for i in TIME_INTERVALS if not exchange_taker_availability[exchange].get(i)]
+                logger.info('Taker 可用性: symbol=%s exchange=%s 缺失周期数=%d 贡献=%s',
+                            symbol, exchange, len(missing_intervals), exchange_taker_contributed.get(exchange))
+
+        # 第二遍：只用贡献交易所的数据累计净流入
+        for interval in TIME_INTERVALS:
+            interval_values = []
+            interval_value_values = []
+            for exchange in included_exchanges:
+                if not exchange_taker_contributed.get(exchange):
+                    continue
+                snapshot = symbol_exchange_snapshots[exchange]
+                adapter = exchange_adapters.get(exchange)
+                period = adapter.taker_period_for_interval(interval)
                 taker_by_time = (snapshot['taker_maps_by_period'] or {}).get(period, {})
                 inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
                 if inflow is not None:
@@ -1587,10 +1622,19 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     interval_value_values.append(inflow_value)
 
             if interval_values:
-                net_inflow = sum(interval_values)
-                coverage_map[symbol]['net_inflow'][interval] = net_inflow
+                coverage_map[symbol]['net_inflow'][interval] = sum(interval_values)
             if interval_value_values:
                 coverage_map[symbol]['net_inflow_value'][interval] = sum(interval_value_values)
+
+        # 根据实际贡献结果更新 included 交易所的 taker_rejection
+        for exchange in included_exchanges:
+            if exchange_taker_contributed.get(exchange):
+                snapshot = symbol_exchange_snapshots[exchange]
+                snapshot['taker_rejection'] = {
+                    'stage': 'taker_validation',
+                    'anchor_time': anchor_time,
+                    'reasons': [],
+                }
 
         included_open_interest_rows = _build_exchange_open_interest_rows(
             coverage_map[symbol]['open_interest_by_exchange'].get(anchor_time, {}),
