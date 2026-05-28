@@ -169,17 +169,13 @@ def _get_exact_window(records_by_time, current_time, points, tolerance=10):
     return window
 
 
-def _get_exact_window_by_step(records_by_time, current_time, points, step_ms, tolerance=10):
+def _get_exact_window_by_step(records_by_time, current_time, points, step_ms):
     window = []
-    missing = 0
     for offset in range(points):
         record = records_by_time.get(current_time - offset * step_ms)
         if record is None:
-            missing += 1
-            if missing > tolerance:
-                return None
-        else:
-            window.append(record)
+            return None
+        window.append(record)
     return window
 
 
