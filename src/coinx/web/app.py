@@ -2,6 +2,7 @@ import os
 import sys
 
 from flask import Flask, request
+from flask_jwt_extended import JWTManager
 
 # 添加项目根目录到路径
 # 添加项目根目录到路径（兼容直接运行当前模块）
@@ -40,6 +41,7 @@ def create_app():
     app.config['TEMPLATES_AUTO_RELOAD'] = True
     
     configure_app(app)
+    JWTManager(app)
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(pages_bp)
@@ -54,7 +56,7 @@ def create_app():
     def require_login():
         # 登录页、退出接口和静态资源不需要登录，其余请求统一拦截
         endpoint = request.endpoint or ''
-        if endpoint in {'auth.login', 'auth.logout', 'static'}:
+        if endpoint in {'auth.login', 'auth.logout', 'auth.refresh', 'static'}:
             return None
         if is_authenticated():
             return None

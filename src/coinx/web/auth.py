@@ -1,22 +1,54 @@
 import secrets
+from datetime import timedelta
 from urllib.parse import urlsplit
 
-from flask import jsonify, redirect, render_template, request, session, url_for
+from flask import jsonify, redirect, render_template, request, url_for
+from flask_jwt_extended import (
+    create_access_token,
+    create_refresh_token,
+    get_jwt_identity,
+    unset_jwt_cookies,
+    verify_jwt_in_request,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from coinx.config import WEB_PASSWORD, WEB_SESSION_SECRET, WEB_USERNAME
+from coinx.config import (
+    WEB_JWT_ACCESS_TOKEN_EXPIRES_MINUTES,
+    WEB_JWT_COOKIE_DOMAIN,
+    WEB_JWT_COOKIE_SECURE,
+    WEB_JWT_REFRESH_TOKEN_EXPIRES_DAYS,
+    WEB_JWT_SECRET_KEY,
+    WEB_PASSWORD,
+    WEB_USERNAME,
+)
 from coinx.utils import logger
 
 
 _resolved_password = WEB_PASSWORD or secrets.token_urlsafe(12)
 _password_source = '环境变量' if WEB_PASSWORD else '自动生成'
 _password_hash = generate_password_hash(_resolved_password)
-_session_secret = WEB_SESSION_SECRET or secrets.token_urlsafe(32)
+
+# JWT 密钥：优先使用配置，未配置时自动生成
+_jwt_secret_key = WEB_JWT_SECRET_KEY or secrets.token_urlsafe(64)
 
 
 def configure_app(app):
-    """配置网页服务的会话密钥"""
-    app.secret_key = _session_secret
+    """配置网页服务的 JWT 和会话密钥"""
+    # 保留 secret_key 作为安全网（其他 Flask 扩展可能需要）
+    app.secret_key = _jwt_secret_key
+
+    # JWT 配置
+    app.config['JWT_SECRET_KEY'] = _jwt_secret_key
+    app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=WEB_JWT_ACCESS_TOKEN_EXPIRES_MINUTES)
+    app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=WEB_JWT_REFRESH_TOKEN_EXPIRES_DAYS)
+    app.config['JWT_COOKIE_SECURE'] = WEB_JWT_COOKIE_SECURE
+    app.config['JWT_COOKIE_HTTPONLY'] = True
+    app.config['JWT_COOKIE_SAMESITE'] = 'Lax'
+    # 单用户内部仪表盘，SameSite=Lax 已提供 CSRF 防护，无需额外 CSRF token
+    app.config['JWT_COOKIE_CSRF_PROTECT'] = False
+    if WEB_JWT_COOKIE_DOMAIN:
+        app.config['JWT_COOKIE_DOMAIN'] = WEB_JWT_COOKIE_DOMAIN
 
 
 def get_auth_context():
@@ -35,17 +67,24 @@ def log_startup_credentials():
 
 
 def is_authenticated():
-    return session.get('authenticated') is True
+    try:
+        verify_jwt_in_request(optional=True)
+        return get_jwt_identity() is not None
+    except Exception:
+        return False
 
 
-def login_user():
-    session.clear()
-    session['authenticated'] = True
-    session['username'] = WEB_USERNAME
+def create_auth_tokens():
+    """创建 JWT access 和 refresh token"""
+    access_token = create_access_token(identity=WEB_USERNAME)
+    refresh_token = create_refresh_token(identity=WEB_USERNAME)
+    return access_token, refresh_token
 
 
-def logout_user():
-    session.clear()
+def clear_auth_cookies(response):
+    """清除 JWT Cookie"""
+    unset_jwt_cookies(response)
+    return response
 
 
 def verify_password(password):
