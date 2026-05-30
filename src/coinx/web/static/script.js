@@ -27,8 +27,49 @@ function fetchJsonWithTimeout(url, options = {}, timeoutMs = REFRESH_TIMEOUT_MS)
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   return fetch(url, { ...options, signal: controller.signal })
+    .then((response) => {
+      // Token过期时自动刷新
+      if (response.status === 401) {
+        return refreshToken().then((refreshSuccess) => {
+          if (refreshSuccess) {
+            // 刷新成功，重试原请求
+            return fetch(url, { ...options, signal: controller.signal });
+          }
+          // 刷新失败，跳转登录页
+          window.location.href = '/login';
+          throw new Error('Token已过期，请重新登录');
+        });
+      }
+      return response;
+    })
     .then((response) => response.json())
     .finally(() => clearTimeout(timer));
+}
+
+// Token刷新状态（防止并发刷新）
+let isRefreshing = false;
+let refreshPromise = null;
+
+function refreshToken() {
+  if (isRefreshing) {
+    return refreshPromise;
+  }
+
+  isRefreshing = true;
+  refreshPromise = fetch('/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+  })
+    .then((response) => {
+      isRefreshing = false;
+      return response.ok;
+    })
+    .catch(() => {
+      isRefreshing = false;
+      return false;
+    });
+
+  return refreshPromise;
 }
 
 // 获取币种数据

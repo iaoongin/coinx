@@ -9,7 +9,7 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 
-from coinx.config import WEB_USERNAME
+from coinx.config import WEB_JWT_ACCESS_TOKEN_EXPIRES_MINUTES, WEB_JWT_REFRESH_TOKEN_EXPIRES_DAYS, WEB_USERNAME
 from coinx.utils import logger
 from coinx.web.auth import (
     create_auth_tokens,
@@ -58,8 +58,11 @@ def login():
     access_token, refresh_token = create_auth_tokens()
     logger.info('Web 登录成功，用户: %s', WEB_USERNAME)
     response = make_response(redirect(next_target))
-    set_access_cookies(response, access_token)
-    set_refresh_cookies(response, refresh_token)
+    # 显式传递max_age，确保cookie持久化（不随浏览器关闭删除）
+    access_max_age = WEB_JWT_ACCESS_TOKEN_EXPIRES_MINUTES * 60  # 转换为秒
+    refresh_max_age = WEB_JWT_REFRESH_TOKEN_EXPIRES_DAYS * 86400  # 转换为秒
+    set_access_cookies(response, access_token, max_age=access_max_age)
+    set_refresh_cookies(response, refresh_token, max_age=refresh_max_age)
     return response
 
 

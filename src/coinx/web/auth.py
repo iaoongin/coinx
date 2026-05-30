@@ -42,6 +42,7 @@ def configure_app(app):
     app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
     app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=WEB_JWT_ACCESS_TOKEN_EXPIRES_MINUTES)
     app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=WEB_JWT_REFRESH_TOKEN_EXPIRES_DAYS)
+    app.config['JWT_SESSION_COOKIE'] = False  # 关闭浏览器后cookie仍保留
     app.config['JWT_COOKIE_SECURE'] = WEB_JWT_COOKIE_SECURE
     app.config['JWT_COOKIE_HTTPONLY'] = True
     app.config['JWT_COOKIE_SAMESITE'] = 'Lax'
