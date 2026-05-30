@@ -52,6 +52,8 @@ HOMEPAGE_SERIES_REPAIR_PAGE_LIMIT = get_env(
     500,
     int
 )
+HOMEPAGE_WINDOW_HEALTH_THRESHOLD = get_env('HOMEPAGE_WINDOW_HEALTH_THRESHOLD', 95, int)
+
 HOMEPAGE_SERIES_TYPES = get_env(
     'HOMEPAGE_SERIES_TYPES',
     'klines,open_interest_hist,taker_buy_sell_vol',

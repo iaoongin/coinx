@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
-from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS
+from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS, HOMEPAGE_WINDOW_HEALTH_THRESHOLD
 from coinx.database import get_session
 from coinx.utils import logger
 from coinx.models import (
@@ -155,28 +155,32 @@ def _calc_share_percent(value, total):
     return float(value or 0) / float(total) * 100
 
 
-def _get_exact_window(records_by_time, current_time, points, tolerance=10):
+def _get_exact_window(records_by_time, current_time, points):
     window = []
-    missing = 0
     for offset in range(points):
         record = records_by_time.get(current_time - offset * FIVE_MINUTES_MS)
-        if record is None:
-            missing += 1
-            if missing > tolerance:
-                return None
-        else:
+        if record is not None:
             window.append(record)
-    return window
+    return window or None
+
+
+def _check_overall_window_health(records_by_time, current_time):
+    max_points = _interval_to_ms(TIME_INTERVALS[-1]) // FIVE_MINUTES_MS
+    min_present = -(-max_points * HOMEPAGE_WINDOW_HEALTH_THRESHOLD // 100)
+    present = sum(
+        1 for offset in range(max_points)
+        if records_by_time.get(current_time - offset * FIVE_MINUTES_MS) is not None
+    )
+    return present >= min_present
 
 
 def _get_exact_window_by_step(records_by_time, current_time, points, step_ms):
     window = []
     for offset in range(points):
         record = records_by_time.get(current_time - offset * step_ms)
-        if record is None:
-            return None
-        window.append(record)
-    return window
+        if record is not None:
+            window.append(record)
+    return window or None
 
 
 def _calc_net_inflow_from_taker_vol(window, price=None):
@@ -199,7 +203,7 @@ def _calc_net_inflow_value_from_window(taker_window, kline_by_time):
     for taker_point in taker_window:
         kline_point = kline_by_time.get(taker_point.event_time)
         if kline_point is None:
-            return None
+            continue
 
         if (
             kline_point.quote_volume is not None
@@ -210,7 +214,7 @@ def _calc_net_inflow_value_from_window(taker_window, kline_by_time):
             continue
 
         if kline_point.close_price is None:
-            return None
+            continue
         buy_vol = float(taker_point.buy_vol or 0)
         sell_vol = float(taker_point.sell_vol or 0)
         inflow_value += (buy_vol - sell_vol) * float(kline_point.close_price)
@@ -408,43 +412,26 @@ def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_
 
 
 def _collect_exchange_homepage_taker_reasons(exchange, taker_maps_by_period, anchor_time):
-    reasons = []
     if anchor_time is None:
-        return reasons
+        return []
 
     has_any_taker_history = any(bool(period_map) for period_map in (taker_maps_by_period or {}).values())
     if not has_any_taker_history:
-        reasons.append(
-            {
-                'reason': 'missing_taker_history',
-                'details': {'missing': 'taker_buy_sell_vol'},
-            }
-        )
-        return reasons
+        return [{'reason': 'missing_taker_history', 'details': {'health_pct': 0}}]
 
-    for interval in TIME_INTERVALS:
-        period = None
-        try:
-            adapter = get_exchange_adapter(exchange)
-            period = adapter.taker_period_for_interval(interval) if adapter is not None else None
-        except Exception:
-            period = None
-        if not period:
-            continue
-
-        taker_by_time = (taker_maps_by_period or {}).get(period, {})
-        inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
-        if inflow is None:
-            reasons.append(
-                {
-                    'reason': 'missing_taker_target',
-                    'details': {
-                        'interval': interval,
-                        'period': period,
-                    },
-                }
-            )
-    return reasons
+    best_map = max(
+        (period_map for period_map in (taker_maps_by_period or {}).values()),
+        key=len,
+    )
+    total = _interval_to_ms(TIME_INTERVALS[-1]) // FIVE_MINUTES_MS
+    present = sum(
+        1 for offset in range(total)
+        if best_map.get(anchor_time - offset * FIVE_MINUTES_MS) is not None
+    )
+    health_pct = round(present / total * 100, 1)
+    if health_pct >= HOMEPAGE_WINDOW_HEALTH_THRESHOLD:
+        return []
+    return [{'reason': 'taker_health_low', 'details': {'health_pct': health_pct}}]
 
 
 def _period_to_ms(period):
@@ -513,27 +500,18 @@ def _calc_net_inflow_value_for_period(taker_vol_by_time, kline_by_time, current_
 
 
 def _has_required_change_coverage(oi_by_time, kline_by_time, current_time):
-    for interval in TIME_INTERVALS:
-        target_time = current_time - _interval_to_ms(interval)
-        if target_time not in oi_by_time or target_time not in kline_by_time:
-            return False
-    return True
+    return (
+        _check_overall_window_health(oi_by_time, current_time)
+        and _check_overall_window_health(kline_by_time, current_time)
+    )
 
 
 def _has_required_net_inflow_coverage(kline_by_time, current_time):
-    for interval in TIME_INTERVALS:
-        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
-        if _get_exact_window(kline_by_time, current_time, points) is None:
-            return False
-    return True
+    return _check_overall_window_health(kline_by_time, current_time)
 
 
 def _has_required_net_inflow_coverage_vol(taker_vol_by_time, current_time):
-    for interval in TIME_INTERVALS:
-        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
-        if _get_exact_window(taker_vol_by_time, current_time, points) is None:
-            return False
-    return True
+    return _check_overall_window_health(taker_vol_by_time, current_time)
 
 
 def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
@@ -1514,9 +1492,6 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             )
             continue
 
-        # 追踪每个交易所每个周期的 taker 数据可用性
-        exchange_taker_availability = {exchange: {} for exchange in included_exchanges}
-
         missing_exchanges = [exchange for exchange in exchanges if exchange not in included_exchanges]
         coverage_map[symbol]['included_exchanges'] = included_exchanges
         coverage_map[symbol]['source_exchanges'] = included_exchanges
@@ -1564,36 +1539,13 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 coverage_map[symbol]['open_interest_by_exchange'][event_time] = exchange_points
                 aggregate_oi_map[symbol][event_time] = merged_point
 
-        # 第一遍：检查每个交易所每个周期的 taker 数据可用性
-        for interval in TIME_INTERVALS:
-            for exchange in included_exchanges:
-                snapshot = symbol_exchange_snapshots[exchange]
-                adapter = exchange_adapters.get(exchange)
-                if adapter is None:
-                    exchange_taker_availability[exchange][interval] = False
-                    continue
-                period = adapter.taker_period_for_interval(interval)
-                if not period:
-                    exchange_taker_availability[exchange][interval] = False
-                    continue
-                taker_by_time = (snapshot['taker_maps_by_period'] or {}).get(period, {})
-                inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
-                exchange_taker_availability[exchange][interval] = inflow is not None
-
-        # 只有所有周期都有数据的交易所才算贡献交易所
+        # 按整体健康度判断交易所是否贡献 taker 数据
         exchange_taker_contributed = {
-            exchange: all(exchange_taker_availability[exchange].get(interval) for interval in TIME_INTERVALS)
+            exchange: not symbol_exchange_snapshots[exchange].get('taker_rejection', {}).get('reasons')
             for exchange in included_exchanges
         }
 
-        # 调试：记录 taker 数据可用性
-        if symbol in ('BTCUSDT', 'ETHUSDT'):
-            for exchange in included_exchanges:
-                missing_intervals = [i for i in TIME_INTERVALS if not exchange_taker_availability[exchange].get(i)]
-                logger.info('Taker 可用性: symbol=%s exchange=%s 缺失周期数=%d 贡献=%s',
-                            symbol, exchange, len(missing_intervals), exchange_taker_contributed.get(exchange))
-
-        # 第二遍：只用贡献交易所的数据累计净流入
+        # 累计净流入
         for interval in TIME_INTERVALS:
             interval_values = []
             interval_value_values = []

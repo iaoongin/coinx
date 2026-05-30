@@ -582,12 +582,12 @@
         };
 
         const formatChange = (value) => {
-          if (typeof value !== 'number') return 'N/A';
+          if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A';
           return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
         };
 
         const formatNetInflow = (value) => {
-          if (typeof value !== 'number') return 'N/A';
+          if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A';
           const abs = Math.abs(value);
           if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
           if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
@@ -628,16 +628,11 @@
         const formatTakerRejectReason = (item) => {
           const reasons = Array.isArray(item?.taker_reason) ? item.taker_reason : [];
           if (reasons.length === 0) return '';
-          const hasHistory = reasons.some((r) => r.reason === 'missing_taker_history');
-          if (hasHistory) return '缺Taker数据';
-          const intervals = reasons
-            .filter((r) => r.reason === 'missing_taker_target' && r.details?.interval)
-            .map((r) => r.details.interval);
-          if (intervals.length === 0) return '数据不完整';
-          const unique = [...new Set(intervals)];
-          const shown = unique.slice(0, 4);
-          const suffix = unique.length > 4 ? '...' : '';
-          return `缺${shown.join('/')}${suffix}`;
+          const first = reasons[0];
+          const pct = first?.details?.health_pct;
+          if (first.reason === 'missing_taker_history') return '无Taker数据';
+          if (typeof pct === 'number') return `数据完整度${pct}%`;
+          return '数据不完整';
         };
 
         const formatExchangeRejectReason = (item) => {
