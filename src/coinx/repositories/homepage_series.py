@@ -1,9 +1,11 @@
 import json
+import random
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import lru_cache
 from typing import Optional
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
@@ -20,7 +22,6 @@ from coinx.collector.exchange_repair import latest_closed_5m_open_time
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
 HOMEPAGE_REQUIRED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
-HOMEPAGE_BULK_QUERY_THRESHOLD = 8
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class HomepageTakerBuySellVolPoint:
     sell_vol: Optional[float]
 
 
+@lru_cache(maxsize=10000)
 def format_number(num):
     if num is None:
         return "N/A"
@@ -68,6 +70,7 @@ def format_number(num):
     return f"{value:.5e}"
 
 
+@lru_cache(maxsize=10000)
 def format_price(num):
     if num is None:
         return "N/A"
@@ -164,14 +167,20 @@ def _get_exact_window(records_by_time, current_time, points):
     return window or None
 
 
-def _check_overall_window_health(records_by_time, current_time):
+def _check_overall_window_health(records_by_time, current_time, sample_size=100):
     max_points = _interval_to_ms(TIME_INTERVALS[-1]) // FIVE_MINUTES_MS
     min_present = -(-max_points * HOMEPAGE_WINDOW_HEALTH_THRESHOLD // 100)
+
+    # 使用采样检查，避免遍历全部 2016 个时间点
+    actual_sample_size = min(sample_size, max_points)
+    sample_offsets = random.sample(range(max_points), actual_sample_size)
     present = sum(
-        1 for offset in range(max_points)
+        1 for offset in sample_offsets
         if records_by_time.get(current_time - offset * FIVE_MINUTES_MS) is not None
     )
-    return present >= min_present
+    # 按比例估算总覆盖率
+    estimated_present = present * (max_points / actual_sample_size)
+    return estimated_present >= min_present
 
 
 def _get_exact_window_by_step(records_by_time, current_time, points, step_ms):
@@ -857,96 +866,44 @@ def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, taker
     }
 
 
-def _get_recent_lower_bound(session, model, symbols, time_field_name, upper_bound=None, exchange=None, period='5m'):
-    time_field = getattr(model, time_field_name)
-    query = session.query(func.max(time_field)).filter(
-        model.symbol.in_(symbols),
-        model.period == period,
-    )
-    if hasattr(model, 'exchange') and exchange is not None:
-        query = query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        query = query.filter(time_field <= upper_bound)
-
-    latest_time = query.scalar()
-    if latest_time is None:
-        return None
-    return max(0, int(latest_time) - _MAX_INTERVAL_MS)
-
-
-def _build_change_target_times(current_times):
-    target_times = set()
-    for current_time in current_times:
-        if current_time is None:
-            continue
-        current_time = int(current_time)
-        target_times.add(current_time)
-        for interval in TIME_INTERVALS:
-            target_times.add(current_time - _interval_to_ms(interval))
-    return {timestamp for timestamp in target_times if timestamp >= 0}
-
-
-def _get_recent_time_candidates(session, model, symbol, time_field_name, upper_bound=None, exchange=None, limit=12):
-    time_field = getattr(model, time_field_name)
-    query = session.query(time_field).filter(
-        model.symbol == symbol,
-        model.period == '5m',
-    )
-    if hasattr(model, 'exchange') and exchange is not None:
-        query = query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        query = query.filter(time_field <= upper_bound)
-    return [int(row[0]) for row in query.order_by(time_field.desc()).limit(limit).all() if row[0] is not None]
-
-
 def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exchange=None):
+    """加载 OI 数据 - 只需要变化的端点，使用精确时间点过滤"""
+    import time as _time
+    func_start = _time.time()
     if not symbols:
         return {}
 
-    if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
-        records_by_symbol = {symbol: {} for symbol in symbols}
-        for symbol in symbols:
-            target_times = _build_change_target_times(
-                _get_recent_time_candidates(
-                    session,
-                    model,
-                    symbol,
-                    'event_time',
-                    upper_bound=upper_bound,
-                    exchange=exchange,
-                )
-            )
-            if not target_times:
-                continue
-            query = session.query(
-                model.symbol,
-                model.event_time,
-                model.sum_open_interest,
-                model.sum_open_interest_value,
-            ).filter(
-                model.symbol == symbol,
-                model.period == '5m',
-            )
-            if hasattr(model, 'exchange') and exchange is not None:
-                query = query.filter(model.exchange == exchange)
-            if upper_bound is not None:
-                query = query.filter(model.event_time <= upper_bound)
-            query = query.filter(model.event_time.in_(target_times))
-
-            rows = query.all()
-            for row in rows:
-                point = _build_open_interest_point(row)
-                records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
-        return records_by_symbol
-
-    lower_bound = _get_recent_lower_bound(
-        session=session,
-        model=model,
-        symbols=symbols,
-        time_field_name='event_time',
-        upper_bound=upper_bound,
-        exchange=exchange,
+    # 先查询每个 symbol 的最新时间点
+    time_field = model.event_time
+    latest_query = session.query(
+        model.symbol,
+        func.max(time_field).label('latest_time')
+    ).filter(
+        model.symbol.in_(symbols),
+        model.period == '5m'
     )
+    if hasattr(model, 'exchange') and exchange is not None:
+        latest_query = latest_query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        latest_query = latest_query.filter(time_field <= upper_bound)
+    latest_query = latest_query.group_by(model.symbol)
+
+    # 构建时间点集合
+    time_points = set()
+    symbol_latest = {}
+    for row in latest_query.all():
+        symbol_latest[row.symbol] = int(row.latest_time)
+        time_points.add(int(row.latest_time))
+        for interval in TIME_INTERVALS:
+            time_points.add(int(row.latest_time) - _interval_to_ms(interval))
+
+    if not time_points:
+        return {}
+
+    latest_ms = (_time.time() - func_start) * 1000
+    logger.info(f'OI查询: symbol数={len(symbols)}, 时间点数={len(time_points)}, 最新时间查询耗时={latest_ms:.0f}ms')
+
+    # 查询所有需要的时间点
     query = session.query(
         model.symbol,
         model.event_time,
@@ -955,67 +912,55 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
     ).filter(model.symbol.in_(symbols), model.period == '5m')
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        query = query.filter(model.event_time <= upper_bound)
-    if lower_bound is not None:
-        query = query.filter(model.event_time >= lower_bound)
+    query = query.filter(model.event_time.in_(time_points))
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
         point = _build_open_interest_point(row)
         records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+
+    total_ms = (_time.time() - func_start) * 1000
+    logger.info(f'OI查询完成: 符号数={len(symbols)}, 返回记录数={sum(len(v) for v in records_by_symbol.values())}, 总耗时={total_ms:.0f}ms')
     return records_by_symbol
 
 
 def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=None):
+    """加载 Kline 数据 - 需要完整范围用于计算净流入价值"""
+    import time as _time
+    func_start = _time.time()
     if not symbols:
         return {}
 
-    if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
-        records_by_symbol = {symbol: {} for symbol in symbols}
-        for symbol in symbols:
-            target_times = _build_change_target_times(
-                _get_recent_time_candidates(
-                    session,
-                    model,
-                    symbol,
-                    'open_time',
-                    upper_bound=upper_bound,
-                    exchange=exchange,
-                )
-            )
-            if not target_times:
-                continue
-            query = session.query(
-                model.symbol,
-                model.open_time,
-                model.close_price,
-                model.quote_volume,
-                model.taker_buy_quote_volume,
-            ).filter(
-                model.symbol == symbol,
-                model.period == '5m',
-            )
-            if hasattr(model, 'exchange') and exchange is not None:
-                query = query.filter(model.exchange == exchange)
-            if upper_bound is not None:
-                query = query.filter(model.open_time <= upper_bound)
-            query = query.filter(model.open_time.in_(target_times))
-
-            rows = query.all()
-            for row in rows:
-                point = _build_kline_point(row)
-                records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
-        return records_by_symbol
-
-    lower_bound = _get_recent_lower_bound(
-        session=session,
-        model=model,
-        symbols=symbols,
-        time_field_name='open_time',
-        upper_bound=upper_bound,
-        exchange=exchange,
+    # 先查询每个 symbol 的最新时间点，确保数据范围正确
+    time_field = model.open_time
+    latest_query = session.query(
+        model.symbol,
+        func.max(time_field).label('latest_time')
+    ).filter(
+        model.symbol.in_(symbols),
+        model.period == '5m'
     )
+    if hasattr(model, 'exchange') and exchange is not None:
+        latest_query = latest_query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        latest_query = latest_query.filter(time_field <= upper_bound)
+    latest_query = latest_query.group_by(model.symbol)
+
+    # 计算基于实际最新时间的下界
+    actual_lower_bound = None
+    for row in latest_query.all():
+        latest_time = int(row.latest_time)
+        candidate = latest_time - _MAX_INTERVAL_MS
+        if actual_lower_bound is None or candidate < actual_lower_bound:
+            actual_lower_bound = candidate
+
+    if actual_lower_bound is None:
+        return {}
+
+    latest_ms = (_time.time() - func_start) * 1000
+    logger.info(f'Kline查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
+
+    # 查询完整范围的数据
     query = session.query(
         model.symbol,
         model.open_time,
@@ -1029,59 +974,55 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
         query = query.filter(model.exchange == exchange)
     if upper_bound is not None:
         query = query.filter(model.open_time <= upper_bound)
-    if lower_bound is not None:
-        query = query.filter(model.open_time >= lower_bound)
+    query = query.filter(model.open_time >= actual_lower_bound)
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
         point = _build_kline_point(row)
         records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
+
+    total_ms = (_time.time() - func_start) * 1000
+    logger.info(f'Kline查询完成: 符号数={len(symbols)}, 返回记录数={sum(len(v) for v in records_by_symbol.values())}, 总耗时={total_ms:.0f}ms')
     return records_by_symbol
 
 
 def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchange=None, period='5m'):
+    """加载 Taker 数据 - 需要完整范围用于累计净流入"""
+    import time as _time
+    func_start = _time.time()
     if not symbols:
         return {}
 
-    if len(symbols) <= HOMEPAGE_BULK_QUERY_THRESHOLD:
-        lower_bound = _get_recent_lower_bound(
-            session=session,
-            model=model,
-            symbols=symbols,
-            time_field_name='event_time',
-            upper_bound=upper_bound,
-            exchange=exchange,
-            period=period,
-        )
-        query = session.query(
-            model.symbol,
-            model.event_time,
-            model.buy_sell_ratio,
-            model.buy_vol,
-            model.sell_vol,
-        ).filter(model.symbol.in_(symbols), model.period == period)
-        if hasattr(model, 'exchange') and exchange is not None:
-            query = query.filter(model.exchange == exchange)
-        if upper_bound is not None:
-            query = query.filter(model.event_time <= upper_bound)
-        if lower_bound is not None:
-            query = query.filter(model.event_time >= lower_bound)
-
-        records_by_symbol = {symbol: {} for symbol in symbols}
-        for row in query.all():
-            point = _build_taker_buy_sell_vol_point(row)
-            records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
-        return records_by_symbol
-
-    lower_bound = _get_recent_lower_bound(
-        session=session,
-        model=model,
-        symbols=symbols,
-        time_field_name='event_time',
-        upper_bound=upper_bound,
-        exchange=exchange,
-        period=period,
+    # 先查询每个 symbol 的最新时间点，确保数据范围正确
+    time_field = model.event_time
+    latest_query = session.query(
+        model.symbol,
+        func.max(time_field).label('latest_time')
+    ).filter(
+        model.symbol.in_(symbols),
+        model.period == period
     )
+    if hasattr(model, 'exchange') and exchange is not None:
+        latest_query = latest_query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        latest_query = latest_query.filter(time_field <= upper_bound)
+    latest_query = latest_query.group_by(model.symbol)
+
+    # 计算基于实际最新时间的下界
+    actual_lower_bound = None
+    for row in latest_query.all():
+        latest_time = int(row.latest_time)
+        candidate = latest_time - _MAX_INTERVAL_MS
+        if actual_lower_bound is None or candidate < actual_lower_bound:
+            actual_lower_bound = candidate
+
+    if actual_lower_bound is None:
+        return {}
+
+    latest_ms = (_time.time() - func_start) * 1000
+    logger.info(f'Taker查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
+
+    # 查询完整范围的数据
     query = session.query(
         model.symbol,
         model.event_time,
@@ -1093,13 +1034,15 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         query = query.filter(model.exchange == exchange)
     if upper_bound is not None:
         query = query.filter(model.event_time <= upper_bound)
-    if lower_bound is not None:
-        query = query.filter(model.event_time >= lower_bound)
+    query = query.filter(model.event_time >= actual_lower_bound)
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
         point = _build_taker_buy_sell_vol_point(row)
         records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+
+    total_ms = (_time.time() - func_start) * 1000
+    logger.info(f'Taker查询完成: 符号数={len(symbols)}, 返回记录数={sum(len(v) for v in records_by_symbol.values())}, 总耗时={total_ms:.0f}ms')
     return records_by_symbol
 
 
@@ -1182,20 +1125,61 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
 
 
 def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time as _time
+
     exchanges = _get_enabled_exchanges()
     supported_exchanges = set(_normalize_exchange_list(get_supported_exchange_ids()))
     exchange_maps = {}
     exchange_adapters = {}
-    for exchange in exchanges:
-        if exchange not in supported_exchanges:
-            exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
-            exchange_adapters[exchange] = None
-            continue
-        exchange_maps[exchange] = _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=upper_bound)
+
+    # 分离支持和不支持的交易所
+    supported_list = [e for e in exchanges if e in supported_exchanges]
+    unsupported_list = [e for e in exchanges if e not in supported_exchanges]
+
+    # 不支持的交易所直接填充空数据
+    for exchange in unsupported_list:
+        exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
+        exchange_adapters[exchange] = None
+
+    # 并行查询支持的交易所
+    def load_exchange(exchange):
+        """加载单个交易所的数据（在线程中运行）"""
+        from coinx.database import get_session
+        thread_session = get_session()
         try:
-            exchange_adapters[exchange] = get_exchange_adapter(exchange)
-        except Exception:
-            exchange_adapters[exchange] = None
+            logger.info(f'线程开始加载交易所: {exchange}')
+            result = _load_exchange_homepage_maps(thread_session, exchange, symbols, upper_bound=upper_bound)
+            logger.info(f'线程完成加载交易所: {exchange}')
+            return exchange, result, None
+        except Exception as e:
+            logger.error(f'线程加载交易所失败: {exchange}, error={e}')
+            return exchange, None, e
+        finally:
+            thread_session.close()
+
+    start_time = _time.perf_counter()
+
+    # 使用线程池并行查询（最多4个并发，避免数据库连接池耗尽）
+    logger.info(f'开始并行加载 {len(supported_list)} 个交易所: {supported_list}')
+    with ThreadPoolExecutor(max_workers=min(4, len(supported_list))) as executor:
+        futures = {executor.submit(load_exchange, exchange): exchange for exchange in supported_list}
+
+        for future in as_completed(futures):
+            exchange, result, error = future.result()
+            if error:
+                logger.error(f'交易所 {exchange} 加载失败: {error}')
+                exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
+            else:
+                exchange_maps[exchange] = result
+
+            try:
+                exchange_adapters[exchange] = get_exchange_adapter(exchange)
+            except Exception:
+                exchange_adapters[exchange] = None
+
+    elapsed = _time.perf_counter() - start_time
+    logger.info(f'首页映射并行加载完成: 交易所数={len(exchanges)}, 耗时={elapsed:.2f}s')
 
     primary_exchange = PRIMARY_PRICE_EXCHANGE.lower()
 
@@ -1815,7 +1799,7 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         target_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, recent_taker_vol_map, _coverage_map = _load_homepage_series_maps(
+        recent_open_interest_map, recent_klines_map, _, _coverage_map = _load_homepage_series_maps(
             db,
             target_symbols,
             upper_bound=target_time,
@@ -1827,24 +1811,7 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
         for symbol in target_symbols:
             oi_by_time = recent_open_interest_map.get(symbol, {})
             kline_by_time = recent_klines_map.get(symbol, {})
-            taker_vol_by_time = recent_taker_vol_map.get(symbol, {})
-            raw_common_times = sorted(set(oi_by_time).intersection(kline_by_time))
-
-            if not raw_common_times:
-                return True
-
-            if raw_common_times[-1] > target_time:
-                return True
-
-            filtered_open_interest_map, filtered_klines_map, filtered_taker_vol_map, _filtered_coverage_map = _load_homepage_series_maps(
-                db,
-                [symbol],
-                upper_bound=target_time,
-            )
-            filtered_oi_by_time = filtered_open_interest_map.get(symbol, {})
-            filtered_kline_by_time = filtered_klines_map.get(symbol, {})
-            filtered_taker_vol_by_time = filtered_taker_vol_map.get(symbol, {})
-            common_times = sorted(set(filtered_oi_by_time).intersection(filtered_kline_by_time))
+            common_times = sorted(set(oi_by_time).intersection(kline_by_time))
 
             if not common_times:
                 return True
@@ -1853,7 +1820,7 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
             if current_symbol_time < target_time:
                 return True
 
-            if not _has_complete_homepage_coverage(filtered_oi_by_time, filtered_kline_by_time):
+            if not _has_complete_homepage_coverage(oi_by_time, kline_by_time):
                 return True
 
         return False

@@ -554,11 +554,17 @@ def get_coins():
         active_coins = get_active_coins()
         cache_anchor = _get_homepage_cache_anchor()
         cache_key = _get_homepage_cache_key(active_coins, cache_anchor)
-        cached_payload = _get_cached_homepage_payload(cache_key)
-        if cached_payload is not None:
-            elapsed_ms = (time.perf_counter() - request_start) * 1000
-            logger.info(f'首页数据命中缓存: 币种数={len(active_coins)}, 锚点={cache_anchor}, 耗时={elapsed_ms:.2f}ms')
-            return jsonify(cached_payload)
+
+        # 检查是否强制跳过缓存
+        force_refresh = request.args.get('nocache', '').lower() == '1'
+        if not force_refresh:
+            cached_payload = _get_cached_homepage_payload(cache_key)
+            if cached_payload is not None:
+                elapsed_ms = (time.perf_counter() - request_start) * 1000
+                logger.info(f'首页数据命中缓存: 币种数={len(active_coins)}, 锚点={cache_anchor}, 耗时={elapsed_ms:.2f}ms')
+                return jsonify(cached_payload)
+        else:
+            logger.info('强制跳过缓存')
 
         snapshot_start = time.perf_counter()
         snapshot = get_homepage_series_snapshot(active_coins)
