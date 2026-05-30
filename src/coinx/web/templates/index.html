@@ -373,6 +373,14 @@
       border-color: rgba(35, 201, 125, 0.2);
     }
 
+    .taker-tag-excluded {
+      color: rgba(239, 68, 68, 0.7);
+      background: rgba(239, 68, 68, 0.06);
+      border-color: rgba(239, 68, 68, 0.18);
+      opacity: 0.75;
+      text-decoration: line-through;
+    }
+
     .raw-value {
       font-size: 11px;
       color: var(--text-secondary);
@@ -467,8 +475,14 @@
             <div class="cell matrix-head window-cell">窗口</div>
             <div class="cell matrix-head">
               净流入
-              <span v-if="takerExchanges(coin).length > 0" class="taker-exchanges">
+              <span v-if="takerExchanges(coin).length > 0 || takerExchangesExcluded(coin).length > 0" class="taker-exchanges">
                 <span v-for="ex in takerExchanges(coin)" :key="ex" class="taker-tag" :class="'taker-' + ex">[[ ex ]]</span>
+                <span
+                  v-for="item in takerExchangesExcluded(coin)"
+                  :key="'ex-' + item.exchange"
+                  class="taker-tag taker-tag-excluded"
+                  :title="formatExchangeName(item.exchange) + ': ' + item.reason"
+                >[[ item.exchange ]]</span>
               </span>
             </div>
             <div class="cell matrix-head">价格</div>
@@ -551,6 +565,15 @@
             .map((item) => item.exchange);
         };
 
+        const takerExchangesExcluded = (coin) => {
+          return (coin.exchange_statuses || [])
+            .filter((item) => item.taker_status === 'missing')
+            .map((item) => ({
+              exchange: item.exchange,
+              reason: formatTakerRejectReason(item),
+            }));
+        };
+
         const shortSymbol = (symbol) => String(symbol || '').replace(/USDT$/, '');
 
         const valueClass = (value) => {
@@ -595,9 +618,26 @@
             missing_exchange_anchor: '无可用时间点',
             unsupported_symbol: '不支持币种',
             unsupported_exchange: '未启用',
+            missing_taker_history: '缺Taker数据',
+            missing_taker_target: 'Taker未对齐',
           };
           const label = labels[reasonKey] || reasonKey || '';
           return interval && label ? `${label}(${interval})` : label;
+        };
+
+        const formatTakerRejectReason = (item) => {
+          const reasons = Array.isArray(item?.taker_reason) ? item.taker_reason : [];
+          if (reasons.length === 0) return '';
+          const hasHistory = reasons.some((r) => r.reason === 'missing_taker_history');
+          if (hasHistory) return '缺Taker数据';
+          const intervals = reasons
+            .filter((r) => r.reason === 'missing_taker_target' && r.details?.interval)
+            .map((r) => r.details.interval);
+          if (intervals.length === 0) return '数据不完整';
+          const unique = [...new Set(intervals)];
+          const shown = unique.slice(0, 4);
+          const suffix = unique.length > 4 ? '...' : '';
+          return `缺${shown.join('/')}${suffix}`;
         };
 
         const formatExchangeRejectReason = (item) => {
@@ -711,6 +751,7 @@
           countdown,
           matrixRows,
           takerExchanges,
+          takerExchangesExcluded,
           shortSymbol,
           valueClass,
           formatChange,
