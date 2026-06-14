@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/fab-button.css') }}">
   <style>
     :root {
       --matrix-col-window: 56px;
@@ -514,9 +515,18 @@
         </div>
       </article>
     </section>
+    <!-- 币种配置悬浮按钮 -->
+    <button class="fab-button fab-primary" @click="showCoinConfig = true" title="配置币种">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
+    <coin-config-modal :visible="showCoinConfig" @close="showCoinConfig = false" @update:tracked="onTrackedUpdate" />
   </div>
   </div>
 
+  <script src="{{ url_for('static', filename='js/components/CoinConfigModal.js') }}"></script>
   <script>
     const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
 
@@ -533,6 +543,7 @@
         const REFRESH_TIMEOUT_MS = 15000;
         let countdownTimer = null;
         let lastAutoRefreshTarget = null;
+        const showCoinConfig = ref(false);
 
         const filteredCoins = computed(() => {
           const term = keyword.value.toUpperCase();
@@ -756,9 +767,12 @@
           formatExchangeEntry,
           coinMetaLine,
           loadData,
+          showCoinConfig,
+          onTrackedUpdate: () => loadData(true),
         };
       },
     });
+    app.component('CoinConfigModal', CoinConfigModal);
     app.mount('#app');
   </script>
 </body>

@@ -1,0 +1,51 @@
+/* fab-button.css - 悬浮操作按钮公共样式 */
+
+.fab-button {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fab-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.fab-primary {
+  background: var(--gold-primary, #d4af37);
+  color: white;
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+}
+
+.fab-primary:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(212, 175, 55, 0.45);
+}
+
+.fab-primary:active {
+  transform: scale(0.95);
+}
+
+@media (max-width: 768px) {
+  .fab-button {
+    bottom: 20px;
+    right: 20px;
+    width: 48px;
+    height: 48px;
+  }
+
+  .fab-button svg {
+    width: 20px;
+    height: 20px;
+  }
+}
