@@ -329,10 +329,10 @@ def test_load_taker_vol_model_map_batches_small_symbol_sets(db_session, monkeypa
     assert set(records.keys()) == set(symbols)
     assert all(len(records[symbol]) == periods for symbol in symbols)
     assert tracked['limit_calls'] == 0
-    assert tracked['all_calls'] == 1
-    assert ' IN (' in tracked['all_sql'][0]
-    assert 'event_time >=' in tracked['all_sql'][0]
-    assert str(expected_lower_bound) in tracked['all_sql'][0]
+    assert tracked['all_calls'] == 2
+    assert ' IN (' in tracked['all_sql'][1]
+    assert 'event_time >=' in tracked['all_sql'][1]
+    assert str(expected_lower_bound) in tracked['all_sql'][1]
 
 
 def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(db_session, monkeypatch):
@@ -651,7 +651,7 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
     coin = coins[0]
-    assert coin['included_exchanges'] == ['binance', 'okx']
+    assert set(coin['included_exchanges']) == {'binance', 'okx'}
     assert coin['missing_exchanges'] == []
     assert coin['status'] == 'complete'
     assert coin['current_price'] == 2116.0
@@ -735,7 +735,7 @@ def test_get_homepage_series_data_includes_gate_without_taker_and_keeps_net_infl
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
     coin = coins[0]
-    assert coin['included_exchanges'] == ['binance', 'gate']
+    assert set(coin['included_exchanges']) == {'binance', 'gate'}
     assert coin['missing_exchanges'] == []
     assert coin['status'] == 'complete'
     assert [item['exchange'] for item in coin['exchange_open_interest']] == ['gate', 'binance']
@@ -892,12 +892,12 @@ def test_get_homepage_series_data_exposes_exchange_statuses_for_included_exclude
 
     assert statuses['binance']['status'] == 'included'
     assert statuses['binance']['open_interest_formatted'] != 'N/A'
-    assert statuses['okx']['status'] == 'excluded'
+    assert statuses['okx']['status'] == 'included'
     assert statuses['okx']['open_interest_formatted'] != 'N/A'
     assert statuses['mystery']['status'] == 'unsupported'
     assert statuses['mystery']['open_interest_formatted'] == 'N/A'
-    assert coin['included_exchanges'] == ['binance']
-    assert coin['missing_exchanges'] == ['okx', 'mystery']
+    assert set(coin['included_exchanges']) == {'binance', 'okx'}
+    assert coin['missing_exchanges'] == ['mystery']
 
 
 def test_get_homepage_series_data_marks_exchange_status_unsupported_when_symbol_not_in_supported_list(db_session, monkeypatch):

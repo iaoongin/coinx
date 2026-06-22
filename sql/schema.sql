@@ -117,3 +117,20 @@ CREATE TABLE IF NOT EXISTS market_taker_buy_sell_vol (
     UNIQUE KEY uk_mtbsv_exchange_symbol_period_time (exchange, symbol, period, event_time),
     KEY idx_mtbsv_exchange_symbol_period_time (exchange, symbol, period, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所主动买入卖出量历史数据表';
+
+-- 资金费率历史表
+CREATE TABLE IF NOT EXISTS market_funding_rate (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    symbol VARCHAR(20) NOT NULL COMMENT '交易对名称',
+    period VARCHAR(10) NOT NULL DEFAULT '5m' COMMENT '采集周期',
+    event_time BIGINT NOT NULL COMMENT '采集时间戳（毫秒）',
+    funding_rate DECIMAL(20, 8) COMMENT '上次结算费率',
+    predicted_rate DECIMAL(20, 8) COMMENT '预测费率（下次结算）',
+    next_funding_time BIGINT COMMENT '下次结算时间戳（毫秒）',
+    mark_price DECIMAL(20, 8) COMMENT '标记价格',
+    exchange VARCHAR(20) NOT NULL DEFAULT 'binance' COMMENT '交易所',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY uk_symbol_period_time (symbol, period, event_time),
+    INDEX idx_symbol_period (symbol, period),
+    INDEX idx_symbol_time (symbol, event_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资金费率历史';

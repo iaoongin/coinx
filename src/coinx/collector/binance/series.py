@@ -1,11 +1,14 @@
 from coinx.config import BINANCE_BASE_URL
 from coinx.collector.binance.client import get_session, request_with_binance_retry
+from .funding_rate import fetch_premium_index as fetch_funding_rate
+from .funding_rate import parse_funding_rate
 
 
 SERIES_ENDPOINTS = {
     'open_interest_hist': '/futures/data/openInterestHist',
     'klines': '/fapi/v1/klines',
     'taker_buy_sell_vol': '/futures/data/takerlongshortRatio',
+    'funding_rate': '/fapi/v1/premiumIndex',
 }
 
 DEFAULT_SERIES_TYPES = list(SERIES_ENDPOINTS.keys())
@@ -115,6 +118,9 @@ def parse_taker_buy_sell_vol(payload, symbol, period):
 
 
 def fetch_series_payload(series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
+    if series_type == 'funding_rate':
+        return fetch_funding_rate(symbol, session=session)
+
     fetchers = {
         'open_interest_hist': fetch_open_interest_hist,
         'klines': fetch_klines,
@@ -124,7 +130,7 @@ def fetch_series_payload(series_type, symbol, period, limit, session=None, start
     try:
         fetcher = fetchers[series_type]
     except KeyError as exc:
-        raise ValueError(f"涓嶆敮鎸佺殑搴忓垪绫诲瀷: {series_type}") from exc
+        raise ValueError(f"不支持的类型: {series_type}") from exc
 
     return fetcher(
         symbol,
@@ -141,6 +147,7 @@ def parse_series_payload(series_type, payload, symbol, period):
         'open_interest_hist': parse_open_interest_hist,
         'klines': parse_klines,
         'taker_buy_sell_vol': parse_taker_buy_sell_vol,
+        'funding_rate': parse_funding_rate,
     }
 
     try:

@@ -174,6 +174,7 @@ def _run_homepage_refresh(symbols, series_types, latest_only=False):
             max_workers=_default_exchange_repair_workers(),
         )
         HOME_PAGE_LAST_REFRESH_SUMMARY = summary
+
         return summary
     finally:
         HOME_PAGE_REFRESH_LOCK.release()

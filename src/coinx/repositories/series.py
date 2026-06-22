@@ -4,7 +4,7 @@ from sqlalchemy import text, tuple_
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from coinx.database import get_session
-from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
+from coinx.models import MarketFundingRate, MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.utils import logger
 
 
@@ -12,12 +12,14 @@ SERIES_MODEL_MAP = {
     'klines': MarketKline,
     'open_interest_hist': MarketOpenInterestHist,
     'taker_buy_sell_vol': MarketTakerBuySellVol,
+    'funding_rate': MarketFundingRate,
 }
 
 SERIES_KEY_FIELDS = {
     'klines': ('exchange', 'symbol', 'period', 'open_time'),
     'open_interest_hist': ('exchange', 'symbol', 'period', 'event_time'),
     'taker_buy_sell_vol': ('exchange', 'symbol', 'period', 'event_time'),
+    'funding_rate': ('exchange', 'symbol', 'period', 'event_time'),
 }
 
 MYSQL_DEADLOCK_ERROR_CODE = 1213

@@ -24,12 +24,14 @@ try:
     from coinx.web.routes.pages import pages_bp
     from coinx.web.routes.api_data import api_data_bp
     from coinx.web.routes.api_config import api_config_bp
+    from coinx.web.routes.api_funding_rate import api_funding_rate_bp
 except ImportError:
     # 如果在当前目录运行，可能需要使用相对导入路径
     from routes.auth import auth_bp
     from routes.pages import pages_bp
     from routes.api_data import api_data_bp
     from routes.api_config import api_config_bp
+    from routes.api_funding_rate import api_funding_rate_bp
 
 
 def create_app():
@@ -47,6 +49,7 @@ def create_app():
     app.register_blueprint(pages_bp)
     app.register_blueprint(api_data_bp)
     app.register_blueprint(api_config_bp)
+    app.register_blueprint(api_funding_rate_bp)
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):

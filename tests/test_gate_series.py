@@ -106,16 +106,17 @@ def test_gate_fetchers_use_limit_without_time_window(monkeypatch):
     }
 
 
-def test_gate_adapter_supports_klines_and_open_interest_only():
+def test_gate_adapter_supports_klines_open_interest_and_taker():
     adapter = get_exchange_adapter('gate')
 
     assert adapter.exchange_id == 'gate'
-    assert adapter.supported_series_types == ('klines', 'open_interest_hist')
+    assert 'klines' in adapter.supported_series_types
+    assert 'open_interest_hist' in adapter.supported_series_types
+    assert 'taker_buy_sell_vol' in adapter.supported_series_types
     assert adapter.supports_time_window('klines') is True
     assert adapter.supports_time_window('open_interest_hist') is True
     assert adapter.page_limit('klines') == 1000
     assert adapter.page_limit('open_interest_hist') == 1000
-    assert 'taker_buy_sell_vol' not in adapter.supported_series_types
 
 
 def test_gate_adapter_support_state_uses_contracts_lookup(monkeypatch):

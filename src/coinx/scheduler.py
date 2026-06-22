@@ -15,7 +15,9 @@ from .config import (
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
     FETCH_COINS_TOP_VOLUME_COUNT,
+    FUNDING_RATE_COLLECT_ENABLED,
     ENABLED_EXCHANGES,
+    HOMEPAGE_SERIES_REPAIR_ENABLED,
     REPAIR_HISTORY_COVERAGE_HOURS,
     UPDATE_INTERVAL,
     REPAIR_HISTORY_ENABLED,
@@ -23,6 +25,7 @@ from .config import (
     REPAIR_ROLLING_POINTS,
     REPAIR_TRACKED_INTERVAL,
 )
+from .repositories.funding_rate import collect_funding_rates
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
 from .repositories.market_structure_score import get_market_structure_score_symbols
 from .collector.timing import format_duration_ms
@@ -133,105 +136,106 @@ def scheduled_market_rank_refresh():
         logger.exception(e)
 
 
-@scheduler.scheduled_job(
-    'interval',
-    seconds=REPAIR_TRACKED_INTERVAL,
-    id='repair_market_rolling_job',
-    max_instances=1,
-    coalesce=True
-)
-def scheduled_repair_market_rolling():
-    """轻量滚动修补市场币种所需的多交易所最新序列"""
-    started_at = time.perf_counter()
-    _mark_job_started('repair_market_rolling_job')
-    try:
-        tracked_symbols = get_active_coins()
-        score_symbols = get_market_structure_score_symbols()
-        tracked_symbol_set = set(tracked_symbols)
-        top_symbols = [symbol for symbol in score_symbols if symbol not in tracked_symbol_set]
-        worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
-        if not tracked_symbols and not top_symbols:
-            _mark_job_finished(
-                'repair_market_rolling_job',
-                status='success',
-                summary={'status': 'success', 'message': 'no market symbols', 'symbols': []},
-                started_at=started_at,
+if HOMEPAGE_SERIES_REPAIR_ENABLED:
+    @scheduler.scheduled_job(
+        'interval',
+        seconds=REPAIR_TRACKED_INTERVAL,
+        id='repair_market_rolling_job',
+        max_instances=1,
+        coalesce=True
+    )
+    def scheduled_repair_market_rolling():
+        """轻量滚动修补市场币种所需的多交易所最新序列"""
+        started_at = time.perf_counter()
+        _mark_job_started('repair_market_rolling_job')
+        try:
+            tracked_symbols = get_active_coins()
+            score_symbols = get_market_structure_score_symbols()
+            tracked_symbol_set = set(tracked_symbols)
+            top_symbols = [symbol for symbol in score_symbols if symbol not in tracked_symbol_set]
+            worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
+            if not tracked_symbols and not top_symbols:
+                _mark_job_finished(
+                    'repair_market_rolling_job',
+                    status='success',
+                    summary={'status': 'success', 'message': 'no market symbols', 'symbols': []},
+                    started_at=started_at,
+                )
+                logger.info('无市场币种，跳过市场滚动修补')
+                return
+            logger.info(
+                '滚动修补阶段 1/2: 开始修补跟踪币种全类型: symbols=%d series_types=%s points=%s max_workers=%s',
+                len(tracked_symbols),
+                ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                REPAIR_ROLLING_POINTS,
+                worker_count,
             )
-            logger.info('无市场币种，跳过市场滚动修补')
-            return
-        logger.info(
-            '滚动修补阶段 1/2: 开始修补跟踪币种全类型: symbols=%d series_types=%s points=%s max_workers=%s',
-            len(tracked_symbols),
-            ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
-            REPAIR_ROLLING_POINTS,
-            worker_count,
-        )
-        if tracked_symbols:
-            tracked_summary = repair_rolling_tracked_symbols(
-                symbols=tracked_symbols,
-                series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                points=REPAIR_ROLLING_POINTS,
-                max_workers=worker_count,
+            if tracked_symbols:
+                tracked_summary = repair_rolling_tracked_symbols(
+                    symbols=tracked_symbols,
+                    series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                    points=REPAIR_ROLLING_POINTS,
+                    max_workers=worker_count,
+                )
+            else:
+                tracked_summary = {'status': 'success', 'message': 'no tracked symbols', 'symbols': []}
+            tracked_summary['stage'] = 'tracked'
+            logger.info(
+                '滚动修补阶段 1/2: 跟踪币种全类型完成: symbols=%d success=%d failure=%d skipped=%d duration=%s',
+                len(tracked_symbols),
+                tracked_summary.get('success_count', 0),
+                tracked_summary.get('failure_count', 0),
+                tracked_summary.get('skipped_count', 0),
+                format_duration_ms(tracked_summary.get('duration_ms', 0.0)),
             )
-        else:
-            tracked_summary = {'status': 'success', 'message': 'no tracked symbols', 'symbols': []}
-        tracked_summary['stage'] = 'tracked'
-        logger.info(
-            '滚动修补阶段 1/2: 跟踪币种全类型完成: symbols=%d success=%d failure=%d skipped=%d duration=%s',
-            len(tracked_symbols),
-            tracked_summary.get('success_count', 0),
-            tracked_summary.get('failure_count', 0),
-            tracked_summary.get('skipped_count', 0),
-            format_duration_ms(tracked_summary.get('duration_ms', 0.0)),
-        )
-        logger.info(
-            '滚动修补阶段 2/2: 开始修补 top 榜币种全类型: symbols=%d series_types=%s points=%s max_workers=%s',
-            len(top_symbols),
-            ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
-            REPAIR_ROLLING_POINTS,
-            worker_count,
-        )
-        if top_symbols:
-            top_summary = repair_rolling_tracked_symbols(
-                symbols=top_symbols,
-                series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                points=REPAIR_ROLLING_POINTS,
-                max_workers=worker_count,
+            logger.info(
+                '滚动修补阶段 2/2: 开始修补 top 榜币种全类型: symbols=%d series_types=%s points=%s max_workers=%s',
+                len(top_symbols),
+                ','.join(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                REPAIR_ROLLING_POINTS,
+                worker_count,
             )
-        else:
-            top_summary = {'status': 'success', 'message': 'no top symbols', 'symbols': []}
-        top_summary['stage'] = 'top'
-        logger.info(
-            '滚动修补阶段 2/2: top 榜币种全类型完成: symbols=%d success=%d failure=%d skipped=%d duration=%s',
-            len(top_symbols),
-            top_summary.get('success_count', 0),
-            top_summary.get('failure_count', 0),
-            top_summary.get('skipped_count', 0),
-            format_duration_ms(top_summary.get('duration_ms', 0.0)),
-        )
-        summary = _merge_repair_summaries([tracked_summary, top_summary])
-        _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
-        precheck_complete = summary.get('precheck_skipped_count', 0)
-        task_total = (
-            (summary.get('success_count', 0) or 0)
-            + (summary.get('failure_count', 0) or 0)
-            + max(0, (summary.get('skipped_count', 0) or 0) - precheck_complete)
-        )
-        logger.info(
-            '滚动修补市场币种最新点完成: symbols=%d precheck_complete=%d pending_tasks=%d '
-            'success=%d failure=%d skipped=%d duration=%s',
-            len(tracked_symbols) + len(top_symbols),
-            precheck_complete,
-            task_total,
-            summary.get('success_count', 0),
-            summary.get('failure_count', 0),
-            summary.get('skipped_count', 0),
-            format_duration_ms(summary.get('duration_ms', 0.0)),
-        )
-    except Exception as e:
-        _mark_job_finished('repair_market_rolling_job', status='error', error=e, started_at=started_at)
-        logger.error('滚动修补市场币种最新点失败: %s', e)
-        logger.exception(e)
+            if top_symbols:
+                top_summary = repair_rolling_tracked_symbols(
+                    symbols=top_symbols,
+                    series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                    points=REPAIR_ROLLING_POINTS,
+                    max_workers=worker_count,
+                )
+            else:
+                top_summary = {'status': 'success', 'message': 'no top symbols', 'symbols': []}
+            top_summary['stage'] = 'top'
+            logger.info(
+                '滚动修补阶段 2/2: top 榜币种全类型完成: symbols=%d success=%d failure=%d skipped=%d duration=%s',
+                len(top_symbols),
+                top_summary.get('success_count', 0),
+                top_summary.get('failure_count', 0),
+                top_summary.get('skipped_count', 0),
+                format_duration_ms(top_summary.get('duration_ms', 0.0)),
+            )
+            summary = _merge_repair_summaries([tracked_summary, top_summary])
+            _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
+            precheck_complete = summary.get('precheck_skipped_count', 0)
+            task_total = (
+                (summary.get('success_count', 0) or 0)
+                + (summary.get('failure_count', 0) or 0)
+                + max(0, (summary.get('skipped_count', 0) or 0) - precheck_complete)
+            )
+            logger.info(
+                '滚动修补市场币种最新点完成: symbols=%d precheck_complete=%d pending_tasks=%d '
+                'success=%d failure=%d skipped=%d duration=%s',
+                len(tracked_symbols) + len(top_symbols),
+                precheck_complete,
+                task_total,
+                summary.get('success_count', 0),
+                summary.get('failure_count', 0),
+                summary.get('skipped_count', 0),
+                format_duration_ms(summary.get('duration_ms', 0.0)),
+            )
+        except Exception as e:
+            _mark_job_finished('repair_market_rolling_job', status='error', error=e, started_at=started_at)
+            logger.error('滚动修补市场币种最新点失败: %s', e)
+            logger.exception(e)
 
 
 if REPAIR_HISTORY_ENABLED:
@@ -328,6 +332,32 @@ if REPAIR_HISTORY_ENABLED:
             _mark_job_finished('repair_market_history_job', status='error', error=e, started_at=started_at)
             logger.error('低频历史补齐任务失败: %s', e)
             logger.exception(e)
+
+
+if FUNDING_RATE_COLLECT_ENABLED:
+    @scheduler.scheduled_job(
+        'interval',
+        seconds=REPAIR_TRACKED_INTERVAL,
+        id='collect_funding_rates_job',
+        max_instances=1,
+        coalesce=True
+    )
+    def scheduled_collect_funding_rates():
+        """定时采集资金费率快照（全量 Binance USDT 永续）"""
+        started_at = time.perf_counter()
+        _mark_job_started('collect_funding_rates_job')
+        try:
+            count = collect_funding_rates()
+            _mark_job_finished(
+                'collect_funding_rates_job',
+                status='success',
+                summary={'status': 'success', 'count': count},
+                started_at=started_at,
+            )
+            logger.info('资金费率采集完成: 记录=%d', count)
+        except Exception as e:
+            _mark_job_finished('collect_funding_rates_job', status='error', error=e, started_at=started_at)
+            logger.error('资金费率采集失败: %s', e)
 
 
 @scheduler.scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')

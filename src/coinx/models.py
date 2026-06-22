@@ -6,9 +6,11 @@ from sqlalchemy import (
     Column,
     DateTime,
     DECIMAL,
+    func,
     Index,
     Integer,
     JSON,
+    Numeric,
     String,
     UniqueConstraint,
 )
@@ -169,3 +171,29 @@ class MarketTakerBuySellVol(Base):
 
     def __repr__(self):
         return f"<MarketTakerBuySellVol(exchange='{self.exchange}', symbol='{self.symbol}', period='{self.period}')>"
+
+
+class MarketFundingRate(Base):
+    """资金费率历史表"""
+
+    __tablename__ = 'market_funding_rate'
+    __table_args__ = (
+        UniqueConstraint('symbol', 'period', 'event_time', name='uk_symbol_period_time'),
+        Index('idx_symbol_period', 'symbol', 'period'),
+        Index('idx_symbol_time', 'symbol', 'event_time'),
+        {'comment': '资金费率历史'}
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, comment='交易对名称')
+    period = Column(String(10), nullable=False, default='5m', comment='采集周期')
+    event_time = Column(BigInteger, nullable=False, comment='采集时间戳（毫秒）')
+    funding_rate = Column(Numeric(20, 8), comment='上次结算费率')
+    predicted_rate = Column(Numeric(20, 8), comment='预测费率（下次结算）')
+    next_funding_time = Column(BigInteger, comment='下次结算时间戳（毫秒）')
+    mark_price = Column(Numeric(20, 8), comment='标记价格')
+    exchange = Column(String(20), nullable=False, default='binance', comment='交易所')
+    created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
+
+    def __repr__(self):
+        return f"<MarketFundingRate(symbol='{self.symbol}', predicted_rate={self.predicted_rate})>"

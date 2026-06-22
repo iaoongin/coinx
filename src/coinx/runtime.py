@@ -2,8 +2,13 @@ import threading
 import time
 
 from coinx.coin_manager import get_active_coins
-from coinx.scheduler import scheduler, scheduled_repair_market_rolling, start_scheduler
+from coinx.config import HOMEPAGE_SERIES_REPAIR_ENABLED
+from coinx.scheduler import scheduler, start_scheduler
 from coinx.utils import logger
+
+# 条件性导入主页序列修复函数
+if HOMEPAGE_SERIES_REPAIR_ENABLED:
+    from coinx.scheduler import scheduled_repair_market_rolling
 
 
 def log_startup_self_check():
@@ -19,6 +24,9 @@ def log_startup_self_check():
 
 
 def start_startup_repair():
+    if not HOMEPAGE_SERIES_REPAIR_ENABLED:
+        logger.info('主页序列修复任务已禁用，跳过启动修复')
+        return None
     logger.info('启动启动期首页序列补全任务')
     repair_thread = threading.Thread(target=scheduled_repair_market_rolling, daemon=True)
     repair_thread.start()

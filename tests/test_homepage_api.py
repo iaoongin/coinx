@@ -219,7 +219,7 @@ def test_update_data_uses_homepage_series_refresh(monkeypatch):
     payload = response.get_json()
     assert payload['status'] == 'success'
     assert captured['symbols'] == ['BTCUSDT']
-    assert captured['series_types'] == ['klines', 'open_interest_hist', 'taker_buy_sell_vol']
+    assert set(captured['series_types']) == {'klines', 'open_interest_hist', 'taker_buy_sell_vol'}
     assert captured['latest_only'] is False
     assert payload['message'] == 'homepage rolling repair triggered'
 

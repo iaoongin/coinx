@@ -18,6 +18,7 @@ from coinx.models import (
     MarketTakerBuySellVol,
 )
 from coinx.collector.exchange_repair import latest_closed_5m_open_time
+from .funding_rate import load_latest_funding_rates
 
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
@@ -114,6 +115,33 @@ def format_usd_value(num):
     if abs_value >= 1_000:
         return f"${value / 1_000:.2f}K"
     return f"${value:.2f}"
+
+
+def format_funding_rate(rate):
+    """格式化资金费率为百分比字符串，如 0.001 -> '0.100%'"""
+    if rate is None:
+        return 'N/A'
+    return f"{float(rate) * 100:.3f}%"
+
+
+def format_funding_countdown(next_funding_time):
+    """格式化下次结算倒计时"""
+    if next_funding_time is None:
+        return 'N/A'
+
+    now_ms = int(__import__('time').time() * 1000)
+    diff_ms = int(next_funding_time) - now_ms
+
+    if diff_ms <= 0:
+        return '已结算'
+
+    diff_seconds = diff_ms // 1000
+    hours = diff_seconds // 3600
+    minutes = (diff_seconds % 3600) // 60
+
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
 
 
 def _interval_to_ms(interval):
@@ -867,7 +895,7 @@ def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, taker
 
 
 def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exchange=None):
-    """加载 OI 数据 - 只需要变化的端点，使用精确时间点过滤"""
+    """加载 OI 数据 - 使用范围查询获取完整区间数据"""
     import time as _time
     func_start = _time.time()
     if not symbols:
@@ -888,22 +916,21 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         latest_query = latest_query.filter(time_field <= upper_bound)
     latest_query = latest_query.group_by(model.symbol)
 
-    # 构建时间点集合
-    time_points = set()
-    symbol_latest = {}
+    # 计算基于实际最新时间的下界
+    actual_lower_bound = None
     for row in latest_query.all():
-        symbol_latest[row.symbol] = int(row.latest_time)
-        time_points.add(int(row.latest_time))
-        for interval in TIME_INTERVALS:
-            time_points.add(int(row.latest_time) - _interval_to_ms(interval))
+        latest_time = int(row.latest_time)
+        candidate = latest_time - _MAX_INTERVAL_MS
+        if actual_lower_bound is None or candidate < actual_lower_bound:
+            actual_lower_bound = candidate
 
-    if not time_points:
+    if actual_lower_bound is None:
         return {}
 
     latest_ms = (_time.time() - func_start) * 1000
-    logger.info(f'OI查询: symbol数={len(symbols)}, 时间点数={len(time_points)}, 最新时间查询耗时={latest_ms:.0f}ms')
+    logger.info(f'OI查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
 
-    # 查询所有需要的时间点
+    # 查询完整范围的数据
     query = session.query(
         model.symbol,
         model.event_time,
@@ -912,7 +939,9 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
     ).filter(model.symbol.in_(symbols), model.period == '5m')
     if hasattr(model, 'exchange') and exchange is not None:
         query = query.filter(model.exchange == exchange)
-    query = query.filter(model.event_time.in_(time_points))
+    if upper_bound is not None:
+        query = query.filter(model.event_time <= upper_bound)
+    query = query.filter(model.event_time >= actual_lower_bound)
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
@@ -1443,7 +1472,7 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 anchor_time = None
                 break
 
-            new_anchor_time = min(symbol_exchange_snapshots[exchange]['current_time'] for exchange in included_exchanges)
+            new_anchor_time = max(symbol_exchange_snapshots[exchange]['current_time'] for exchange in included_exchanges)
             stable = new_anchor_time == anchor_time
             anchor_time = new_anchor_time
 
@@ -1479,9 +1508,7 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
         missing_exchanges = [exchange for exchange in exchanges if exchange not in included_exchanges]
         coverage_map[symbol]['included_exchanges'] = included_exchanges
         coverage_map[symbol]['source_exchanges'] = included_exchanges
-        coverage_map[symbol]['missing_exchanges'] = _normalize_exchange_list(
-            [*coverage_map[symbol]['missing_exchanges'], *missing_exchanges]
-        )
+        coverage_map[symbol]['missing_exchanges'] = _normalize_exchange_list(missing_exchanges)
         coverage_map[symbol]['status'] = 'complete' if not coverage_map[symbol]['missing_exchanges'] else 'partial'
         for exchange in coverage_map[symbol]['missing_exchanges']:
             rejection = exchange_rejection_info.get(exchange)
@@ -1585,10 +1612,14 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
 
 
 def _load_homepage_series_maps(session, symbols, upper_bound=None):
-    return _aggregate_homepage_series_maps(session, symbols, upper_bound=upper_bound)
+    aggregate_oi_map, selected_kline_map, _, coverage_map = _aggregate_homepage_series_maps(
+        session, symbols, upper_bound=upper_bound
+    )
+    funding_rate_map = load_latest_funding_rates(symbols, session=session)
+    return aggregate_oi_map, selected_kline_map, {}, coverage_map, funding_rate_map
 
 
-def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, coverage=None):
+def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, coverage=None, funding_rate=None):
     common_times = sorted(set(oi_by_time).intersection(kline_by_time))
     oi_times = sorted(oi_by_time)
     included_exchanges = list((coverage or {}).get('included_exchanges') or (coverage or {}).get('source_exchanges') or [])
@@ -1621,6 +1652,12 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
             'net_inflow_value_formatted': {},
             'changes': empty_changes,
             'current_time': None,
+            'predicted_rate': None,
+            'predicted_rate_formatted': 'N/A',
+            'funding_rate': None,
+            'funding_rate_formatted': 'N/A',
+            'next_funding_time': None,
+            'next_funding_time_formatted': 'N/A',
         }
 
     current_time = common_times[-1] if common_times else oi_times[-1]
@@ -1702,6 +1739,12 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
         }
 
     day_change = changes.get('24h', _empty_change())
+
+    # Extract funding rate data
+    predicted_rate = float(funding_rate['predicted_rate']) if funding_rate and funding_rate['predicted_rate'] is not None else None
+    funding_rate_value = float(funding_rate['funding_rate']) if funding_rate and funding_rate['funding_rate'] is not None else None
+    next_funding_time = int(funding_rate['next_funding_time']) if funding_rate and funding_rate['next_funding_time'] is not None else None
+
     return {
         'symbol': symbol,
         'source_exchanges': included_exchanges,
@@ -1724,6 +1767,12 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
         'net_inflow_value_formatted': _format_usd_map(net_inflow_value),
         'changes': changes,
         'current_time': current_time,
+        'predicted_rate': predicted_rate,
+        'predicted_rate_formatted': format_funding_rate(predicted_rate),
+        'funding_rate': funding_rate_value,
+        'funding_rate_formatted': format_funding_rate(funding_rate_value),
+        'next_funding_time': next_funding_time,
+        'next_funding_time_formatted': format_funding_countdown(next_funding_time),
     }
 
 
@@ -1745,7 +1794,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
 
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         anchor_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, recent_taker_vol_map, coverage_map = _load_homepage_series_maps(
+        recent_open_interest_map, recent_klines_map, recent_taker_vol_map, coverage_map, funding_rate_map = _load_homepage_series_maps(
             db,
             target_symbols,
             upper_bound=anchor_time,
@@ -1760,6 +1809,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
                 kline_by_time=recent_klines_map.get(symbol, {}),
                 taker_vol_by_time=recent_taker_vol_map.get(symbol, {}),
                 coverage=coverage_map.get(symbol, {}),
+                funding_rate=funding_rate_map.get(symbol),
             )
             if coin is None:
                 continue
@@ -1799,7 +1849,7 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         target_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, _, _coverage_map = _load_homepage_series_maps(
+        recent_open_interest_map, recent_klines_map, _, _coverage_map, _ = _load_homepage_series_maps(
             db,
             target_symbols,
             upper_bound=target_time,

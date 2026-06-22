@@ -59,6 +59,13 @@ def market_structure_score():
     return render_template('market_structure_score.html')
 
 
+@pages_bp.route('/funding-rate')
+def funding_rate():
+    """资金费率页面"""
+    logger.info("访问资金费率页面")
+    return render_template('funding_rate.html')
+
+
 @pages_bp.route('/task-jobs')
 def task_jobs():
     """任务管理页面"""

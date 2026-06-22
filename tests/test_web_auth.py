@@ -143,7 +143,15 @@ def test_logout_clears_jwt_cookies():
     assert 'refresh_token_cookie' in cookie_text
 
 
-def test_api_accepts_bearer_header():
+def test_api_accepts_bearer_header(monkeypatch):
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_homepage_series_snapshot',
+        lambda symbols: {'data': [], 'cache_update_time': None},
+    )
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_active_coins',
+        lambda: ['BTCUSDT'],
+    )
     client = create_test_client()
     login_response = _login(client)
 
