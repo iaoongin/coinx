@@ -430,6 +430,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.should_refresh_homepage_series', lambda symbols: not state['repaired'])
+    monkeypatch.setattr('coinx.web.routes.api_data.HOMEPAGE_SERIES_REPAIR_ENABLED', True)
 
     def fake_repair(**kwargs):
         state['repaired'] = True
@@ -542,6 +543,7 @@ def test_get_coins_deduplicates_market_structure_refresh_symbols_against_homepag
             {'symbols': symbols, 'series_types': series_types, 'exchanges': exchanges}
         ) or True,
     )
+    monkeypatch.setattr('coinx.web.routes.api_data.HOMEPAGE_SERIES_REPAIR_ENABLED', True)
 
     client = create_test_client()
 

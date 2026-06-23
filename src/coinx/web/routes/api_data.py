@@ -21,6 +21,7 @@ from coinx.collector.exchange_repair import resolve_repair_worker_count
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
 from coinx.config import (
     ENABLED_EXCHANGES,
+    HOMEPAGE_SERIES_REPAIR_ENABLED,
     REPAIR_HISTORY_COVERAGE_HOURS,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
@@ -572,26 +573,29 @@ def get_coins():
         snapshot_ms = (time.perf_counter() - snapshot_start) * 1000
 
         if active_coins and not _is_complete_homepage_payload(snapshot.get('data') or []):
-            logger.info('首页历史序列不完整，开始后台轻量补全最新点')
-            _start_homepage_refresh_async(
-                active_coins,
-                series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                latest_only=True,
-            )
-            try:
-                score_symbols = get_market_structure_score_symbols()
-            except Exception as e:
-                logger.error(f'加载评分修补所需币种失败: {e}')
-                score_symbols = []
-            active_symbol_set = set(active_coins or [])
-            remaining_score_symbols = [symbol for symbol in score_symbols if symbol not in active_symbol_set]
-            if remaining_score_symbols:
-                logger.info('首页历史序列不完整，开始后台补全评分所需多交易所最新点')
-                _start_market_structure_refresh_async(
-                    remaining_score_symbols,
-                    series_types=list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
-                    exchanges=list(ENABLED_EXCHANGES),
+            if HOMEPAGE_SERIES_REPAIR_ENABLED:
+                logger.info('首页历史序列不完整，开始后台轻量补全最新点')
+                _start_homepage_refresh_async(
+                    active_coins,
+                    series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                    latest_only=True,
                 )
+                try:
+                    score_symbols = get_market_structure_score_symbols()
+                except Exception as e:
+                    logger.error(f'加载评分修补所需币种失败: {e}')
+                    score_symbols = []
+                active_symbol_set = set(active_coins or [])
+                remaining_score_symbols = [symbol for symbol in score_symbols if symbol not in active_symbol_set]
+                if remaining_score_symbols:
+                    logger.info('首页历史序列不完整，开始后台补全评分所需多交易所最新点')
+                    _start_market_structure_refresh_async(
+                        remaining_score_symbols,
+                        series_types=list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
+                        exchanges=list(ENABLED_EXCHANGES),
+                    )
+            else:
+                logger.info('首页历史序列不完整，但修补任务已禁用，跳过自动补全')
 
         formatted_data = _format_homepage_coins_payload(snapshot['data'])
         payload = {
