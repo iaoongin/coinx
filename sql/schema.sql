@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS coins (
     maint_margin_percent DECIMAL(10, 4) COMMENT '维持保证金率',
     required_margin_percent DECIMAL(10, 4) COMMENT '所需保证金率',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_coins_is_tracking (is_tracking)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='币种配置表';
 
 -- 市场数据快照表
