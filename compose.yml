@@ -30,6 +30,10 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --skip-log-bin
+      - --slow_query_log=ON
+      - --log_queries_not_using_indexes=ON
+      - --log_output=FILE
+      - --slow_query_log_file=/var/lib/mysql/slow.log
     volumes:
       - mysql_data:/var/lib/mysql
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
