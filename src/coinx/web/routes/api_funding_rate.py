@@ -9,6 +9,7 @@ from coinx.repositories.funding_rate import (
     collect_funding_rates,
     load_abnormal_funding_rates,
     load_funding_rate_history,
+    load_funding_rate_sparklines,
     load_latest_funding_rates,
 )
 from coinx.repositories.homepage_series import (
@@ -81,6 +82,12 @@ def get_funding_rates():
 
         if limit:
             data = data[:limit]
+
+        # 缩略图只查最终展示的币种
+        visible_symbols = [item['symbol'] for item in data]
+        sparkline_map = load_funding_rate_sparklines(visible_symbols, hours=24)
+        for item in data:
+            item['sparkline'] = sparkline_map.get(item['symbol'], [])
 
         return jsonify({
             'status': 'success',

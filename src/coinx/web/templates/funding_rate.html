@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>
     :root {
       --page-padding: 20px;
@@ -299,8 +300,17 @@
       white-space: nowrap;
     }
 
-    tr:hover td {
+    .data-row {
+      cursor: pointer;
+    }
+
+    .data-row:hover td {
       background: var(--bg-hover);
+    }
+
+    .data-row.expanded td {
+      background: var(--bg-hover);
+      border-bottom-color: transparent;
     }
 
     .symbol-cell {
@@ -347,15 +357,77 @@
       color: var(--text-muted);
     }
 
-    .empty-state {
+    .sparkline-cell {
+      padding: 4px 6px !important;
+    }
+
+    .sparkline-cell svg {
+      display: block;
+    }
+
+    .expand-indicator {
+      display: inline-block;
+      width: 14px;
       text-align: center;
-      padding: 40px 20px;
+      color: var(--text-muted);
+      font-size: 10px;
+      transition: transform 0.2s ease;
+    }
+
+    .expand-indicator.open {
+      transform: rotate(90deg);
+      color: var(--gold-primary);
+    }
+
+    /* Inline expand row */
+    .chart-row td {
+      padding: 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .chart-row td:hover {
+      background: transparent;
+    }
+
+    .chart-expand {
+      padding: 12px 16px 16px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-subtle);
+      animation: expandIn 0.25s ease;
+    }
+
+    .chart-expand-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .chart-expand-title {
+      font-size: 12px;
       color: var(--text-muted);
     }
 
-    .empty-state p {
-      margin: 0;
-      font-size: 14px;
+    .chart-expand-title span {
+      color: var(--gold-primary);
+      font-weight: 600;
+      font-family: var(--font-mono);
+    }
+
+    .chart-inline-container {
+      width: 100%;
+      height: 220px;
+    }
+
+    .chart-inline-loading,
+    .chart-inline-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 220px;
+      color: var(--text-muted);
+      font-size: 12px;
+      gap: 8px;
     }
 
     .loading-spinner {
@@ -366,6 +438,12 @@
       border-top-color: var(--gold-primary);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
+    }
+
+    .loading-spinner-sm {
+      width: 14px;
+      height: 14px;
+      border-width: 1.5px;
     }
 
     @keyframes spin {
@@ -383,14 +461,20 @@
       }
     }
 
-    .fade-enter-active,
-    .fade-leave-active {
-      transition: opacity 0.3s ease;
+    @keyframes expandIn {
+      from { opacity: 0; max-height: 0; }
+      to { opacity: 1; max-height: 300px; }
     }
 
-    .fade-enter-from,
-    .fade-leave-to {
-      opacity: 0;
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state p {
+      margin: 0;
+      font-size: 14px;
     }
 
     @media (max-width: 768px) {
@@ -504,6 +588,7 @@
             <tr>
               <th style="width: 40px">#</th>
               <th>币种</th>
+              <th style="width: 90px">走势</th>
               <th @click="toggleSort('funding_rate')">
                 实时费率
                 <span class="sort-icon" :class="{ active: sortBy === 'funding_rate' || sortBy === 'abs_funding_rate' }">
@@ -517,17 +602,36 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(item, index) in filteredData" :key="item.symbol" :class="{ 'abnormal-row': item.is_abnormal }">
-              <td>{{ '{{ index + 1 }}' }}</td>
-              <td class="symbol-cell">{{ '{{ item.symbol }}' }}</td>
-              <td class="rate-cell" :class="{ positive: item.funding_rate > 0, negative: item.funding_rate < 0, abnormal: item.is_abnormal }">
-                {{ '{{ item.funding_rate_formatted }}' }}
-              </td>
-              <td class="countdown-cell">{{ '{{ item.next_funding_time_formatted }}' }}</td>
-              <td class="time-cell">{{ '{{ formatEventTime(item.next_funding_time) }}' }}</td>
-              <td class="price-cell">{{ '{{ formatPrice(item.mark_price) }}' }}</td>
-              <td class="time-cell">{{ '{{ formatEventTime(item.event_time) }}' }}</td>
-            </tr>
+            <template v-for="(item, index) in filteredData" :key="item.symbol">
+              <tr class="data-row" :class="{ expanded: expandedSymbol === item.symbol }" @click="toggleChart(item.symbol)">
+                <td>
+                  <span class="expand-indicator" :class="{ open: expandedSymbol === item.symbol }">&#9654;</span>
+                </td>
+                <td class="symbol-cell">{{ '{{ item.symbol }}' }}</td>
+                <td class="sparkline-cell" v-html="renderSparkline(item.sparkline)"></td>
+                <td class="rate-cell" :class="{ positive: item.funding_rate > 0, negative: item.funding_rate < 0, abnormal: item.is_abnormal }">
+                  {{ '{{ item.funding_rate_formatted }}' }}
+                </td>
+                <td class="countdown-cell">{{ '{{ item.next_funding_time_formatted }}' }}</td>
+                <td class="time-cell">{{ '{{ formatEventTime(item.next_funding_time) }}' }}</td>
+                <td class="price-cell">{{ '{{ formatPrice(item.mark_price) }}' }}</td>
+                <td class="time-cell">{{ '{{ formatEventTime(item.event_time) }}' }}</td>
+              </tr>
+              <tr v-if="expandedSymbol === item.symbol" class="chart-row">
+                <td colspan="8">
+                  <div class="chart-expand">
+                    <div class="chart-expand-header">
+                      <div class="chart-expand-title"><span>{{ '{{ item.symbol }}' }}</span> 近 24 小时资费走势</div>
+                    </div>
+                    <div v-if="chartLoading" class="chart-inline-loading">
+                      <span class="loading-spinner loading-spinner-sm"></span> 加载中...
+                    </div>
+                    <div v-else-if="chartNoData" class="chart-inline-empty">暂无历史数据</div>
+                    <div v-show="!chartLoading && !chartNoData" :id="'chart-' + item.symbol" class="chart-inline-container"></div>
+                  </div>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
 
@@ -541,7 +645,7 @@
   </div>
 
   <script>
-    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+    const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
     createApp({
       setup() {
@@ -554,6 +658,12 @@
         const lastUpdateTime = ref('--:--:--');
         const refreshCountdown = ref(300);
         const threshold = ref(0.001);
+
+        // Inline chart state
+        const expandedSymbol = ref(null);
+        const chartLoading = ref(false);
+        const chartNoData = ref(false);
+        let chartInstance = null;
 
         let refreshTimer = null;
         let countdownTimer = null;
@@ -684,16 +794,189 @@
           }
         };
 
+        const disposeChart = () => {
+          if (chartInstance) {
+            chartInstance.dispose();
+            chartInstance = null;
+          }
+        };
+
+        const renderFundingChart = (container, historyData) => {
+          disposeChart();
+
+          chartInstance = echarts.init(container, null, { renderer: 'canvas' });
+
+          const times = historyData.map(d => new Date(d.event_time));
+          const frData = historyData.map(d => d.funding_rate ?? null);
+          const prData = historyData.map(d => d.predicted_rate ?? null);
+
+          const allValues = [...frData, ...prData].filter(v => v !== null);
+          const minVal = allValues.length ? Math.min(...allValues) : 0;
+          const maxVal = allValues.length ? Math.max(...allValues) : 0;
+          const padding = Math.max(Math.abs(maxVal - minVal) * 0.2, 0.00005);
+
+          chartInstance.setOption({
+            backgroundColor: 'transparent',
+            grid: {
+              left: 58,
+              right: 20,
+              top: 30,
+              bottom: 30,
+            },
+            legend: {
+              data: ['结算费率', '预测费率'],
+              top: 2,
+              right: 0,
+              textStyle: { color: '#9ca3af', fontSize: 11 },
+              itemWidth: 14,
+              itemHeight: 2,
+            },
+            tooltip: {
+              trigger: 'axis',
+              backgroundColor: 'rgba(15, 15, 20, 0.92)',
+              borderColor: 'rgba(212, 175, 55, 0.3)',
+              borderWidth: 1,
+              textStyle: { color: '#e5e7eb', fontSize: 11 },
+              formatter: function (params) {
+                if (!params.length) return '';
+                const time = params[0].axisValueLabel;
+                let html = '<div style="font-size:12px;margin-bottom:4px;color:#d4af37">' + time + '</div>';
+                params.forEach(function (p) {
+                  if (p.value == null) return;
+                  const color = p.seriesIndex === 0 ? '#2dd4bf' : '#d4af37';
+                  html += '<div style="display:flex;align-items:center;gap:6px;margin-top:2px">'
+                    + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + '"></span>'
+                    + '<span>' + p.seriesName + ': ' + (p.value * 100).toFixed(4) + '%</span></div>';
+                });
+                return html;
+              },
+            },
+            xAxis: {
+              type: 'category',
+              data: times.map(function (t) {
+                var h = t.getHours().toString().padStart(2, '0');
+                var m = t.getMinutes().toString().padStart(2, '0');
+                return h + ':' + m;
+              }),
+              axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+              axisTick: { show: false },
+              axisLabel: { color: '#6b7280', fontSize: 10 },
+            },
+            yAxis: {
+              type: 'value',
+              min: minVal - padding,
+              max: maxVal + padding,
+              splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+              axisLine: { show: false },
+              axisTick: { show: false },
+              axisLabel: {
+                color: '#6b7280',
+                fontSize: 10,
+                formatter: function (v) { return (v * 100).toFixed(3) + '%'; },
+              },
+            },
+            series: [
+              {
+                name: '结算费率',
+                type: 'line',
+                data: frData,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 4,
+                lineStyle: { color: '#2dd4bf', width: 2 },
+                itemStyle: { color: '#2dd4bf' },
+                areaStyle: {
+                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: 'rgba(45, 212, 191, 0.15)' },
+                    { offset: 1, color: 'rgba(45, 212, 191, 0.02)' },
+                  ]),
+                },
+              },
+              {
+                name: '预测费率',
+                type: 'line',
+                data: prData,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 4,
+                lineStyle: { color: '#d4af37', width: 2 },
+                itemStyle: { color: '#d4af37' },
+              },
+            ],
+          });
+        };
+
+        const toggleChart = async (symbol) => {
+          if (expandedSymbol.value === symbol) {
+            expandedSymbol.value = null;
+            disposeChart();
+            return;
+          }
+
+          disposeChart();
+          expandedSymbol.value = symbol;
+          chartLoading.value = true;
+          chartNoData.value = false;
+
+          try {
+            const response = await fetch('/api/funding-rate/history/' + symbol + '?hours=24');
+            const result = await response.json();
+            if (result.status === 'success' && result.data && result.data.length > 0) {
+              chartLoading.value = false;
+              await nextTick();
+              const container = document.getElementById('chart-' + symbol);
+              if (container) {
+                renderFundingChart(container, result.data);
+              }
+            } else {
+              chartNoData.value = true;
+              chartLoading.value = false;
+            }
+          } catch (e) {
+            console.error('加载资费走势数据失败:', e);
+            chartNoData.value = true;
+            chartLoading.value = false;
+          }
+        };
+
+        const handleChartResize = () => {
+          if (chartInstance) chartInstance.resize();
+        };
+
+        const renderSparkline = (rates) => {
+          if (!rates || rates.length < 2) return '<span style="color:var(--text-muted);font-size:10px">--</span>';
+          var W = 80, H = 22, pad = 2;
+          var vals = rates.filter(function (v) { return v !== null; });
+          if (vals.length < 2) return '<span style="color:var(--text-muted);font-size:10px">--</span>';
+          var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+          var range = mx - mn || 1e-8;
+          var pts = [];
+          for (var i = 0; i < rates.length; i++) {
+            var x = pad + (i / (rates.length - 1)) * (W - pad * 2);
+            var v = rates[i];
+            if (v === null) continue;
+            var y = H - pad - ((v - mn) / range) * (H - pad * 2);
+            pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+          }
+          var color = vals[vals.length - 1] >= 0 ? '#2dd4bf' : '#f87171';
+          return '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">'
+            + '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round" points="' + pts.join(' ') + '"/>'
+            + '</svg>';
+        };
+
         onMounted(async () => {
           await loadData();
           if (fundingRates.value.length === 0) {
             await refreshData();
           }
           startAutoRefresh();
+          window.addEventListener('resize', handleChartResize);
         });
 
         onUnmounted(() => {
           stopAutoRefresh();
+          window.removeEventListener('resize', handleChartResize);
+          disposeChart();
         });
 
         return {
@@ -717,6 +1000,11 @@
           formatPrice,
           formatEventTime,
           refreshData,
+          expandedSymbol,
+          chartLoading,
+          chartNoData,
+          toggleChart,
+          renderSparkline,
         };
       }
     }).mount('#app');

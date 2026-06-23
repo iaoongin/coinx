@@ -149,6 +149,7 @@ def load_funding_rate_history(symbol, hours=1, exchange='binance', session=None)
 
         return [
             {
+                'symbol': r.symbol,
                 'event_time': int(r.event_time),
                 'funding_rate': float(r.funding_rate) if r.funding_rate else None,
                 'predicted_rate': float(r.predicted_rate) if r.predicted_rate else None,
@@ -211,6 +212,56 @@ def load_abnormal_funding_rates(threshold=0.001, exchange='binance', session=Non
         abnormal.sort(key=lambda x: abs(x['predicted_rate'] or x['funding_rate'] or 0), reverse=True)
 
         return abnormal
+
+    finally:
+        if own_session:
+            db.close()
+
+
+def load_funding_rate_sparklines(symbols, hours=1, exchange='binance', session=None):
+    """
+    批量加载所有币种的资金费率走势数据（用于缩略图）
+
+    单次查询，按 symbol 分组返回近 N 小时的 predicted_rate 序列。
+
+    Args:
+        symbols: 交易对列表
+        hours: 历史小时数（默认 1）
+        exchange: 交易所
+        session: 数据库 session（可选）
+
+    Returns:
+        dict: {symbol: [predicted_rate, ...]}  按 event_time 正序
+    """
+    if not symbols:
+        return {}
+
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        cutoff_time = int((datetime.utcnow() - timedelta(hours=hours)).timestamp() * 1000)
+
+        records = db.query(
+            MarketFundingRate.symbol,
+            MarketFundingRate.event_time,
+            MarketFundingRate.funding_rate,
+        ).filter(
+            MarketFundingRate.symbol.in_(symbols),
+            MarketFundingRate.period == '5m',
+            MarketFundingRate.exchange == exchange,
+            MarketFundingRate.event_time >= cutoff_time,
+        ).order_by(
+            MarketFundingRate.symbol.asc(),
+            MarketFundingRate.event_time.asc(),
+        ).all()
+
+        result = {}
+        for r in records:
+            val = float(r.funding_rate) if r.funding_rate is not None else None
+            result.setdefault(r.symbol, []).append(val)
+
+        return result
 
     finally:
         if own_session:

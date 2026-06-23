@@ -21,9 +21,10 @@ def client():
 class TestGetFundingRates:
     """Test /api/funding-rate endpoint"""
 
+    @patch('coinx.web.routes.api_funding_rate.load_funding_rate_sparklines')
     @patch('coinx.web.routes.api_funding_rate.load_latest_funding_rates')
     @patch('coinx.web.routes.api_funding_rate.get_exchange_info')
-    def test_get_funding_rates_success(self, mock_exchange_info, mock_load_rates, client):
+    def test_get_funding_rates_success(self, mock_exchange_info, mock_load_rates, mock_sparklines, client):
         """Test successful retrieval of funding rates"""
         mock_exchange_info.return_value = [
             {'symbol': 'BTCUSDT'},
@@ -45,6 +46,7 @@ class TestGetFundingRates:
                 'event_time': 1698768000000,
             },
         }
+        mock_sparklines.return_value = {}
 
         response = client.get('/api/funding-rate')
         data = response.get_json()
@@ -55,6 +57,7 @@ class TestGetFundingRates:
         # Should be sorted by predicted_rate descending (default)
         assert data['data'][0]['symbol'] == 'BTCUSDT'
         assert data['data'][1]['symbol'] == 'ETHUSDT'
+        assert data['data'][0]['sparkline'] == []
 
     @patch('coinx.web.routes.api_funding_rate.load_latest_funding_rates')
     @patch('coinx.web.routes.api_funding_rate.get_exchange_info')
@@ -69,9 +72,10 @@ class TestGetFundingRates:
         assert data['status'] == 'success'
         assert data['data'] == []
 
+    @patch('coinx.web.routes.api_funding_rate.load_funding_rate_sparklines')
     @patch('coinx.web.routes.api_funding_rate.load_latest_funding_rates')
     @patch('coinx.web.routes.api_funding_rate.get_exchange_info')
-    def test_get_funding_rates_with_limit(self, mock_exchange_info, mock_load_rates, client):
+    def test_get_funding_rates_with_limit(self, mock_exchange_info, mock_load_rates, mock_sparklines, client):
         """Test limit parameter"""
         mock_exchange_info.return_value = [
             {'symbol': 'BTCUSDT'},
@@ -101,6 +105,7 @@ class TestGetFundingRates:
                 'event_time': 1698768000000,
             },
         }
+        mock_sparklines.return_value = {}
 
         response = client.get('/api/funding-rate?limit=2')
         data = response.get_json()
@@ -108,9 +113,10 @@ class TestGetFundingRates:
         assert response.status_code == 200
         assert len(data['data']) == 2
 
+    @patch('coinx.web.routes.api_funding_rate.load_funding_rate_sparklines')
     @patch('coinx.web.routes.api_funding_rate.load_latest_funding_rates')
     @patch('coinx.web.routes.api_funding_rate.get_exchange_info')
-    def test_get_funding_rates_abnormal_marked(self, mock_exchange_info, mock_load_rates, client):
+    def test_get_funding_rates_abnormal_marked(self, mock_exchange_info, mock_load_rates, mock_sparklines, client):
         """Test that abnormal rates are marked correctly"""
         mock_exchange_info.return_value = [{'symbol': 'BTCUSDT'}]
         mock_load_rates.return_value = {
@@ -122,6 +128,7 @@ class TestGetFundingRates:
                 'event_time': 1698768000000,
             },
         }
+        mock_sparklines.return_value = {}
 
         response = client.get('/api/funding-rate')
         data = response.get_json()
