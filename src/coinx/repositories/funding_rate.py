@@ -6,6 +6,7 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from coinx.collector.binance.funding_rate import fetch_all_premium_index
 from coinx.collector.binance.client import get_session as get_http_session
+from coinx.config import DB_TYPE
 from coinx.database import get_session
 from coinx.models import MarketFundingRate
 from coinx.utils import logger
@@ -33,7 +34,11 @@ def save_funding_rates(records, session=None):
 
     try:
         dialect = db.bind.dialect.name
-        if dialect == 'mysql':
+        if DB_TYPE == 'starrocks' and dialect == 'mysql':
+            insert_cols = [c.name for c in MarketFundingRate.__table__.columns]
+            values = [{k: v for k, v in r.items() if k in insert_cols} for r in records]
+            db.execute(MarketFundingRate.__table__.insert().values(values))
+        elif dialect == 'mysql':
             stmt = mysql_insert(MarketFundingRate).values(records)
             stmt = stmt.on_duplicate_key_update(
                 funding_rate=stmt.inserted.funding_rate,
@@ -98,7 +103,14 @@ def load_latest_funding_rates(symbols, exchange='binance', session=None):
             MarketFundingRate.exchange == exchange
         ).group_by(MarketFundingRate.symbol).subquery()
 
-        records = db.query(MarketFundingRate).join(
+        records = db.query(
+            MarketFundingRate.symbol,
+            MarketFundingRate.event_time,
+            MarketFundingRate.funding_rate,
+            MarketFundingRate.predicted_rate,
+            MarketFundingRate.next_funding_time,
+            MarketFundingRate.mark_price,
+        ).join(
             subquery,
             (MarketFundingRate.symbol == subquery.c.symbol) &
             (MarketFundingRate.event_time == subquery.c.max_time)
@@ -140,7 +152,14 @@ def load_funding_rate_history(symbol, hours=1, exchange='binance', session=None)
     try:
         cutoff_time = int((datetime.utcnow() - timedelta(hours=hours)).timestamp() * 1000)
 
-        records = db.query(MarketFundingRate).filter(
+        records = db.query(
+            MarketFundingRate.symbol,
+            MarketFundingRate.event_time,
+            MarketFundingRate.funding_rate,
+            MarketFundingRate.predicted_rate,
+            MarketFundingRate.next_funding_time,
+            MarketFundingRate.mark_price,
+        ).filter(
             MarketFundingRate.symbol == symbol,
             MarketFundingRate.period == '5m',
             MarketFundingRate.exchange == exchange,
@@ -188,7 +207,14 @@ def load_abnormal_funding_rates(threshold=0.001, exchange='binance', session=Non
             MarketFundingRate.exchange == exchange
         ).group_by(MarketFundingRate.symbol).subquery()
 
-        records = db.query(MarketFundingRate).join(
+        records = db.query(
+            MarketFundingRate.symbol,
+            MarketFundingRate.event_time,
+            MarketFundingRate.funding_rate,
+            MarketFundingRate.predicted_rate,
+            MarketFundingRate.next_funding_time,
+            MarketFundingRate.mark_price,
+        ).join(
             subquery,
             (MarketFundingRate.symbol == subquery.c.symbol) &
             (MarketFundingRate.event_time == subquery.c.max_time)

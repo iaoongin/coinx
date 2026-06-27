@@ -2,7 +2,7 @@ import sys
 import os
 import json
 from datetime import datetime
-from sqlalchemy.dialects.mysql import insert
+from sqlalchemy import text
 
 # 添加项目根目录到路径
 project_root = os.path.dirname(os.path.dirname(__file__))
@@ -14,7 +14,27 @@ sys.path.insert(0, os.path.join(project_root, 'src'))
 from coinx.utils import logger
 from coinx.database import db_session, init_db
 from coinx.models import Coin
-from coinx.config import DATA_DIR, TIME_INTERVALS
+from coinx.config import DB_TYPE, DATA_DIR, TIME_INTERVALS
+
+
+def _is_mysql_compatible():
+    """判断当前数据库是否支持 INSERT ON DUPLICATE KEY UPDATE（MySQL 和 StarRocks 均支持）"""
+    return DB_TYPE in ('mysql', 'starrocks')
+
+
+def _raw_upsert_coin(session, values):
+    """MySQL: INSERT ... ON DUPLICATE KEY UPDATE; StarRocks: INSERT（主键自动覆盖）"""
+    columns = list(values.keys())
+    placeholders = ', '.join(':{}'.format(col) for col in columns)
+    if DB_TYPE == 'starrocks':
+        sql = 'INSERT INTO coins ({}) VALUES ({})'.format(', '.join(columns), placeholders)
+    else:
+        update_clause = ', '.join('{} = VALUES({})'.format(col, col) for col in columns if col != 'symbol')
+        sql = 'INSERT INTO coins ({}) VALUES ({}) ON DUPLICATE KEY UPDATE {}'.format(
+            ', '.join(columns), placeholders, update_clause
+        )
+    session.execute(text(sql), values)
+
 
 # 币种配置文件路径
 COINS_CONFIG_FILE = os.path.join(DATA_DIR, 'coins_config.json')
@@ -74,18 +94,24 @@ def save_coins_config_dict(coins_dict):
     """
     try:
         for symbol, tracked in coins_dict.items():
-            # 使用 merge 进行 upsert (insert or update)
-            # 注意：Merge 会查询一次，效率可能略低，也可以使用 SQLAlchemy 的 upsert 方言
-            
-            # MySQL特定的 UPSERT
-            stmt = insert(Coin).values(symbol=symbol, is_tracking=tracked)
-            on_duplicate_key_stmt = stmt.on_duplicate_key_update(is_tracking=tracked, updated_at=datetime.now())
-            
-            db_session.execute(on_duplicate_key_stmt)
-            
+            if _is_mysql_compatible():
+                _raw_upsert_coin(db_session, {
+                    'symbol': symbol,
+                    'is_tracking': tracked,
+                    'updated_at': datetime.now(),
+                })
+            else:
+                # 通用 fallback（SQLite 等）
+                instance = db_session.query(Coin).filter(Coin.symbol == symbol).first()
+                if instance:
+                    instance.is_tracking = tracked
+                    instance.updated_at = datetime.now()
+                else:
+                    db_session.add(Coin(symbol=symbol, is_tracking=tracked))
+
         db_session.commit()
         logger.info(f"币种配置已保存到数据库: {len(coins_dict)} 个币种")
-        
+
     except Exception as e:
         db_session.rollback()
         logger.error(f"保存币种配置失败: {e}")
@@ -181,9 +207,15 @@ def update_coins_config():
                 }
                 
                 # 执行 Upsert
-                stmt = insert(Coin).values(**values)
-                on_duplicate_key_stmt = stmt.on_duplicate_key_update(**values)
-                db_session.execute(on_duplicate_key_stmt)
+                if _is_mysql_compatible():
+                    _raw_upsert_coin(db_session, values)
+                else:
+                    instance = db_session.query(Coin).filter(Coin.symbol == symbol).first()
+                    if instance:
+                        for k, v in values.items():
+                            setattr(instance, k, v)
+                    else:
+                        db_session.add(Coin(**values))
             
             db_session.commit()
             
@@ -236,9 +268,20 @@ def set_coin_tracking(symbol, tracked):
     """
     try:
         # 使用upsert逻辑更新单个
-        stmt = insert(Coin).values(symbol=symbol, is_tracking=tracked)
-        on_duplicate_key_stmt = stmt.on_duplicate_key_update(is_tracking=tracked, updated_at=datetime.now())
-        db_session.execute(on_duplicate_key_stmt)
+        if _is_mysql_compatible():
+            _raw_upsert_coin(db_session, {
+                'symbol': symbol,
+                'is_tracking': tracked,
+                'updated_at': datetime.now(),
+            })
+        else:
+            instance = db_session.query(Coin).filter(Coin.symbol == symbol).first()
+            if instance:
+                instance.is_tracking = tracked
+                instance.updated_at = datetime.now()
+            else:
+                db_session.add(Coin(symbol=symbol, is_tracking=tracked))
+
         db_session.commit()
         
         logger.info(f"币种 {symbol} 跟踪状态已更新为: {tracked}")

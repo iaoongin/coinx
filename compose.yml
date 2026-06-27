@@ -45,5 +45,70 @@ services:
       start_period: 30s
     restart: always
 
+  starrocks-fe:
+    image: starrocks/fe-ubuntu:3.4.2
+    container_name: coinx-starrocks-fe
+    hostname: starrocks-fe
+    profiles:
+      - starrocks
+    command: ["/opt/starrocks/fe/bin/start_fe.sh"]
+    ports:
+      - "${SR_FE_HTTP_PORT:-8030}:8030"
+      - "${SR_FE_QUERY_PORT:-9030}:9030"
+      - "9010:9010"
+    environment:
+      - FE_SERVERS=fe1:starrocks-fe:9010
+      - HOST_IP=starrocks-fe
+    volumes:
+      - starrocks_fe_meta:/opt/starrocks/fe/meta
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8030/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: always
+    networks:
+      default:
+        ipv4_address: 192.168.192.4
+
+  starrocks-be:
+    image: starrocks/be-ubuntu:3.4.2
+    container_name: coinx-starrocks-be
+    hostname: starrocks-be
+    profiles:
+      - starrocks
+    command: ["/opt/starrocks/be/bin/start_be.sh"]
+    depends_on:
+      starrocks-fe:
+        condition: service_healthy
+    ports:
+      - "${SR_BE_WEB_PORT:-8040}:8040"
+      - "9060:9060"
+      - "9050:9050"
+    environment:
+      - FE_SERVERS=fe1:starrocks-fe:9010
+      - HOST_IP=starrocks-be
+    volumes:
+      - starrocks_be_storage:/opt/starrocks/be/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8040/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: always
+    networks:
+      default:
+        ipv4_address: 192.168.192.5
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 192.168.192.0/20
+
 volumes:
   mysql_data: {}
+  starrocks_fe_meta: {}
+  starrocks_be_storage: {}

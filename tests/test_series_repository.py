@@ -156,6 +156,7 @@ class _FakeMysqlPinnedSession(_FakeMysqlSession):
 
 
 def test_upsert_series_records_retries_mysql_deadlock(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlSession(failures_before_success=2)
     sleep_calls = []
     monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
@@ -186,6 +187,7 @@ def test_upsert_series_records_retries_mysql_deadlock(monkeypatch):
 
 
 def test_upsert_series_records_retries_mysql_lock_wait_timeout(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlSession(failures_before_success=2, failure_error_code=1205)
     sleep_calls = []
     monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
@@ -216,6 +218,7 @@ def test_upsert_series_records_retries_mysql_lock_wait_timeout(monkeypatch):
 
 
 def test_upsert_series_records_in_batches_commits_once(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlSession()
     sleep_calls = []
     monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
@@ -256,7 +259,8 @@ def test_upsert_series_records_in_batches_commits_once(monkeypatch):
     assert sleep_calls == []
 
 
-def test_upsert_series_records_uses_mysql_named_lock():
+def test_upsert_series_records_uses_mysql_named_lock(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlSession()
 
     affected = upsert_series_records(
@@ -282,7 +286,8 @@ def test_upsert_series_records_uses_mysql_named_lock():
     assert any('RELEASE_LOCK' in statement for statement, _ in session.executed_statements)
 
 
-def test_upsert_series_records_in_batches_uses_mysql_named_lock_once():
+def test_upsert_series_records_in_batches_uses_mysql_named_lock_once(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlSession()
 
     affected = upsert_series_records_in_batches(
@@ -323,6 +328,7 @@ def test_upsert_series_records_in_batches_uses_mysql_named_lock_once():
 
 
 def test_upsert_series_records_retries_mysql_named_lock_timeout(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlSession(lock_result=(0, 1))
     sleep_calls = []
     monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
@@ -354,7 +360,8 @@ def test_upsert_series_records_retries_mysql_named_lock_timeout(monkeypatch):
     assert sleep_calls == [0.2]
 
 
-def test_upsert_series_records_releases_mysql_named_lock_on_same_connection():
+def test_upsert_series_records_releases_mysql_named_lock_on_same_connection(monkeypatch):
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'mysql')
     session = _FakeMysqlPinnedSession()
 
     affected = upsert_series_records(
@@ -384,3 +391,146 @@ def test_upsert_series_records_releases_mysql_named_lock_on_same_connection():
     assert session.connection.commit_calls == 1
     assert session.connection.rollback_calls == 0
     assert session.connection_closed is True
+
+
+# ---------- StarRocks dialect tests ----------
+
+class _FakeStarrocksSession:
+    """Simulate StarRocks session (INSERT ON DUPLICATE KEY UPDATE, no GET_LOCK)"""
+
+    def __init__(self, failures_before_success=0, failure_error_code=1213):
+        self.bind = SimpleNamespace(dialect=SimpleNamespace(name='mysql'))
+        self.failures_before_success = failures_before_success
+        self.failure_error_code = failure_error_code
+        self.execute_calls = 0
+        self.commit_calls = 0
+        self.rollback_calls = 0
+        self.closed = False
+        self.executed_statements = []
+
+    class _ScalarResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar(self):
+            return self._value
+
+    def execute(self, statement, params=None):
+        statement_text = str(statement)
+        self.executed_statements.append((statement_text, params))
+        self.execute_calls += 1
+        if self.execute_calls <= self.failures_before_success:
+            raise OperationalError(
+                statement='INSERT ... ON DUPLICATE KEY UPDATE',
+                params={},
+                orig=Exception(self.failure_error_code, 'retryable lock error'),
+            )
+        return self._ScalarResult(1)
+
+    def commit(self):
+        self.commit_calls += 1
+
+    def rollback(self):
+        self.rollback_calls += 1
+
+    def close(self):
+        self.closed = True
+
+    def get_bind(self):
+        owner = self
+
+        class _FakeBind:
+            dialect = SimpleNamespace(name='mysql')
+
+            def connect(self_inner):
+                return owner
+
+        return _FakeBind()
+
+
+def _starrocks_sample_record():
+    return {
+        'symbol': 'BTCUSDT',
+        'period': '5m',
+        'open_time': 1711526400000,
+        'close_time': 1711526699999,
+        'open_price': 68000.1,
+        'high_price': 68100.2,
+        'low_price': 67950.3,
+        'close_price': 68020.4,
+    }
+
+
+def test_starrocks_upsert_series_records_basic(monkeypatch):
+    """StarRocks 方言下 upsert 不调用 GET_LOCK/RELEASE_LOCK"""
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'starrocks')
+    session = _FakeStarrocksSession()
+
+    affected = upsert_series_records(
+        'binance',
+        'klines',
+        [_starrocks_sample_record()],
+        session=session,
+    )
+
+    assert affected == 1
+    assert session.execute_calls == 1
+    assert session.commit_calls == 1
+    assert session.rollback_calls == 0
+    # 确认没有 GET_LOCK / RELEASE_LOCK 调用
+    assert not any('GET_LOCK' in s for s, _ in session.executed_statements)
+    assert not any('RELEASE_LOCK' in s for s, _ in session.executed_statements)
+
+
+def test_starrocks_upsert_series_records_retries_on_deadlock(monkeypatch):
+    """StarRocks 方言下 deadlock 也应重试（与 MySQL 行为一致）"""
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'starrocks')
+    session = _FakeStarrocksSession(failures_before_success=2)
+    sleep_calls = []
+    monkeypatch.setattr('coinx.repositories.series.time.sleep', lambda seconds: sleep_calls.append(seconds))
+
+    affected = upsert_series_records(
+        'binance',
+        'klines',
+        [_starrocks_sample_record()],
+        session=session,
+    )
+
+    assert affected == 1
+    assert session.execute_calls == 3
+    assert session.commit_calls == 1
+    assert session.rollback_calls == 2
+    assert sleep_calls == [0.2, 0.4]
+
+
+def test_starrocks_upsert_series_records_in_batches_commits_once(monkeypatch):
+    """StarRocks 方言下批量 upsert 只提交一次（与 MySQL 行为一致）"""
+    monkeypatch.setattr('coinx.repositories.series.DB_TYPE', 'starrocks')
+    session = _FakeStarrocksSession()
+
+    affected = upsert_series_records_in_batches(
+        'binance',
+        'klines',
+        [
+            _starrocks_sample_record(),
+            {
+                **_starrocks_sample_record(),
+                'open_time': 1711526700000,
+                'close_time': 1711526999999,
+                'open_price': 68020.4,
+                'high_price': 68110.2,
+                'low_price': 68000.0,
+                'close_price': 68080.4,
+            },
+        ],
+        batch_size=1,
+        session=session,
+    )
+
+    assert affected == 2
+    assert session.execute_calls == 2
+    assert session.commit_calls == 1
+    assert session.rollback_calls == 0
+    # 确认没有 GET_LOCK / RELEASE_LOCK 调用
+    assert not any('GET_LOCK' in s for s, _ in session.executed_statements)
+    assert not any('RELEASE_LOCK' in s for s, _ in session.executed_statements)

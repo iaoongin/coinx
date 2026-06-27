@@ -71,6 +71,7 @@ PROXY_POOL_URLS = get_env('PROXY_POOL_URLS', '')
 PROXY_POOL_STRATEGY = get_env('PROXY_POOL_STRATEGY', 'round_robin')
 PROXY_POOL_FAIL_COOLDOWN_SECONDS = get_env('PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30, int)
 
+DB_TYPE = get_env('DB_TYPE', 'mysql')  # 'mysql' | 'starrocks'
 DB_HOST = get_env('DB_HOST', 'localhost')
 DB_PORT = get_env('DB_PORT', 3306, int)
 DB_USER = get_env('DB_USER', 'root')
@@ -78,7 +79,15 @@ DB_PASSWORD = get_env('DB_PASSWORD', '')
 DB_NAME = get_env('DB_NAME', 'coinx')
 DB_CHARSET = get_env('DB_CHARSET', 'utf8mb4')
 
-DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset={DB_CHARSET}"
+if DB_TYPE == 'starrocks':
+    SR_HOST = get_env('SR_HOST', DB_HOST)
+    SR_PORT = get_env('SR_PORT', 9030, int)
+    SR_USER = get_env('SR_USER', DB_USER)
+    SR_PASSWORD = get_env('SR_PASSWORD', DB_PASSWORD)
+    SR_DB = get_env('SR_DB', DB_NAME)
+    DATABASE_URI = f"mysql+pymysql://{SR_USER}:{SR_PASSWORD}@{SR_HOST}:{SR_PORT}/{SR_DB}?charset={DB_CHARSET}"
+else:
+    DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset={DB_CHARSET}"
 
 BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://proxy.yffjglcms.com/fapi.binance.com')
 

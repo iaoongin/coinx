@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>nul
 REM CoinX management script
 REM Usage: start.bat [action]
 REM Actions:
@@ -11,7 +12,11 @@ REM   status  : check status
 set ACTION=%1
 if "%ACTION%"=="" set ACTION=run
 
-python scripts\start_app.py %ACTION%
+if exist "venv\Scripts\python.exe" (
+    venv\Scripts\python.exe scripts\start_app.py %ACTION%
+) else (
+    python scripts\start_app.py %ACTION%
+)
 if "%ACTION%"=="start" pause
 if "%ACTION%"=="stop" pause
 if "%ACTION%"=="restart" pause

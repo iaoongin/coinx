@@ -36,14 +36,30 @@ class FlaskAppManager:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
 
-    def _is_app_command(self, cmdline):
-        # 前台模式是 start_app.py run；后台模式是直接运行 main.py。
-        return (
-            "main.py" in cmdline
-            or "web.app" in cmdline
-            or "-m web.app" in cmdline
-            or ("start_app.py" in cmdline and " run" in f" {cmdline} ")
-        )
+    def _is_app_command(self, cmdline_args):
+        # cmdline_args: 原始的进程参数列表 (proc.cmdline())
+        # 仅匹配两种确切场景：
+        #   1) python src/coinx/main.py  (后台启动)
+        #   2) python scripts/start_app.py run  (前台启动)
+        if not cmdline_args or len(cmdline_args) < 2:
+            return False
+        app_path_str = str(self.app_path)
+        start_app_path_str = str(project_root / "scripts" / "start_app.py")
+        args = cmdline_args  # [python_exe, arg1, arg2, ...]
+
+        # 场景 1: python src/coinx/main.py
+        if len(args) >= 2 and args[1] == app_path_str:
+            return True
+
+        # 场景 2: python scripts/start_app.py [run|start|stop|restart]
+        if len(args) >= 3 and args[1] == start_app_path_str and args[2] in ("run", "start", "stop", "restart"):
+            return True
+
+        # 场景 3: python -m coinx.web.app
+        if len(args) >= 3 and args[1] == "-m" and args[2] == "coinx.web.app":
+            return True
+
+        return False
 
     def _find_app_processes(self):
         current_pid = os.getpid()
@@ -52,8 +68,7 @@ class FlaskAppManager:
             try:
                 if proc.info["pid"] == current_pid or not proc.info["cmdline"]:
                     continue
-                cmdline = " ".join(proc.info["cmdline"])
-                if self._is_app_command(cmdline) and "python" in proc.info["name"].lower():
+                if self._is_app_command(proc.info["cmdline"]) and "python" in proc.info["name"].lower():
                     found.append(proc.info["pid"])
             except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
                 pass
@@ -76,9 +91,9 @@ class FlaskAppManager:
                 # 确认进程是Python并且正在运行相关文件
                 if process.is_running() and self._is_python_process(process):
                     # 检查命令行参数是否匹配应用入口
-                    cmdline = " ".join(process.cmdline())
-                    logger.info(f"进程命令行: {cmdline}")
-                    if self._is_app_command(cmdline):
+                    cmdline_args = process.cmdline()
+                    logger.info(f"进程命令行: {' '.join(cmdline_args)}")
+                    if self._is_app_command(cmdline_args):
                         logger.info(f"找到匹配的进程，PID: {pid}")
                         return True
                     else:
@@ -283,9 +298,9 @@ class FlaskAppManager:
                 # 确认进程是Python并且正在运行相关文件
                 if process.is_running() and self._is_python_process(process):
                     # 检查命令行参数是否匹配应用入口
-                    cmdline = " ".join(process.cmdline())
-                    logger.info(f"进程命令行: {cmdline}")
-                    if self._is_app_command(cmdline):
+                    cmdline_args = process.cmdline()
+                    logger.info(f"进程命令行: {' '.join(cmdline_args)}")
+                    if self._is_app_command(cmdline_args):
                         logger.info(f"应用正在运行，PID: {pid}")
                         return
                     else:

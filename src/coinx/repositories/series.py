@@ -1,8 +1,10 @@
+import threading
 import time
+from datetime import datetime
 
-from sqlalchemy import text, tuple_
-from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy import text
 
+from coinx.config import DB_TYPE
 from coinx.database import get_session
 from coinx.models import MarketFundingRate, MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.utils import logger
@@ -28,6 +30,33 @@ MYSQL_DEADLOCK_MAX_RETRIES = 3
 MYSQL_DEADLOCK_RETRY_DELAY_SECONDS = 0.2
 MYSQL_NAMED_LOCK_TIMEOUT_SECONDS = 30
 MYSQL_NAMED_LOCK_MAX_RETRIES = 3
+
+
+def _dialect_name(db):
+    """获取数据库方言名称"""
+    bind = getattr(db, 'bind', None)
+    if bind is None:
+        bind = db.get_bind()
+    return getattr(bind.dialect, 'name', '') if bind else ''
+
+
+def _is_mysql_compatible_dialect(db):
+    """判断是否支持 INSERT ON DUPLICATE KEY UPDATE（MySQL 和 StarRocks 均支持）"""
+    dialect = _dialect_name(db)
+    return dialect in ('mysql',) or (DB_TYPE == 'starrocks' and dialect != 'sqlite')
+
+
+# StarRocks 应用级锁（StarRocks 不支持 GET_LOCK）
+_starrocks_locks = {}
+_starrocks_locks_mutex = threading.Lock()
+
+
+def _get_starrocks_lock(exchange, series_type):
+    key = (exchange, series_type)
+    with _starrocks_locks_mutex:
+        if key not in _starrocks_locks:
+            _starrocks_locks[key] = threading.Lock()
+        return _starrocks_locks[key]
 
 
 def get_series_model(series_type):
@@ -104,12 +133,32 @@ def _with_mysql_named_lock(db, exchange, series_type, callback):
             connection.close()
 
 
+def _with_starrocks_lock(exchange, series_type, callback):
+    """StarRocks 使用进程内 threading.Lock 替代 MySQL 命名锁"""
+    lock = _get_starrocks_lock(exchange, series_type)
+    with lock:
+        return callback()
+
+
+def _with_write_lock(db, exchange, series_type, callback):
+    """根据数据库类型选择合适的锁策略"""
+    if DB_TYPE == 'starrocks':
+        # StarRocks 不支持 GET_LOCK，使用进程内锁
+        return _with_starrocks_lock(exchange, series_type, lambda: callback(db))
+    if DB_TYPE == 'mysql':
+        return _with_mysql_named_lock(db, exchange, series_type, callback)
+    return callback(db)
+
+
 def _build_values_list(model, exchange, records):
     values_list = []
     model_columns = {column.name for column in model.__table__.columns}
+    has_updated_at = 'updated_at' in model_columns
     for record in records:
         values = dict(record)
         values['exchange'] = exchange
+        if has_updated_at:
+            values['updated_at'] = datetime.now()
         values = {key: value for key, value in values.items() if key in model_columns}
         values_list.append(values)
     return values_list
@@ -120,16 +169,46 @@ def _sort_values_list(series_type, values_list):
     return sorted(values_list, key=lambda values: tuple(values[field] for field in key_fields))
 
 
-def _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=True):
-    statement = mysql_insert(model).values(values_list)
-    update_columns = {
-        column.name: statement.inserted[column.name]
-        for column in model.__table__.columns
-        if column.name not in ('id', 'created_at')
-    }
+def _upsert_values_on_mysql_compatible(model, exchange, series_type, values_list, db, commit=True):
+    """MySQL: INSERT ... ON DUPLICATE KEY UPDATE; StarRocks: INSERT（主键自动覆盖）"""
+    columns = [c.name for c in model.__table__.columns]
+    table_name = model.__tablename__
+
+    row_placeholders = []
+    params = {}
+    for i, values in enumerate(values_list):
+        cols = []
+        for col in columns:
+            key = f'{col}_{i}'
+            params[key] = values.get(col)
+            cols.append(f':{key}')
+        row_placeholders.append(f"({', '.join(cols)})")
+
+    if DB_TYPE == 'starrocks':
+        insert_columns = [c for c in columns if c != 'id']
+        sr_row_placeholders = []
+        sr_params = {}
+        for i, values in enumerate(values_list):
+            cols = []
+            for col in insert_columns:
+                key = f'{col}_{i}'
+                sr_params[key] = values.get(col)
+                cols.append(f':{key}')
+            sr_row_placeholders.append(f"({', '.join(cols)})")
+        sql = f"INSERT INTO {table_name} ({', '.join(insert_columns)}) VALUES {', '.join(sr_row_placeholders)}"
+        params = sr_params
+    else:
+        updatable = [c for c in columns if c not in ('id', 'created_at')]
+        sql = (
+            f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES "
+            f"{', '.join(row_placeholders)} "
+            f"ON DUPLICATE KEY UPDATE "
+            f"{', '.join(f'{col} = VALUES({col})' for col in updatable)}"
+        )
+
     for attempt in range(1, MYSQL_DEADLOCK_MAX_RETRIES + 1):
         try:
-            db.execute(statement.on_duplicate_key_update(**update_columns))
+            db.execute(text(sql), params)
             if commit:
                 db.commit()
             return len(values_list)
@@ -138,7 +217,7 @@ def _upsert_mysql_values(model, exchange, series_type, values_list, db, commit=T
             if not _is_mysql_retryable_lock_error(exc) or attempt >= MYSQL_DEADLOCK_MAX_RETRIES:
                 raise
             logger.warning(
-                'MySQL lock retry for series write exchange=%s series_type=%s records=%d attempt=%d/%d',
+                'MySQL/StarRocks lock retry for series write exchange=%s series_type=%s records=%d attempt=%d/%d',
                 exchange,
                 series_type,
                 len(values_list),
@@ -158,15 +237,14 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
     effective_batch_size = max(1, int(batch_size or 1))
 
     try:
-        affected = 0
-        if db.bind and db.bind.dialect.name == 'mysql':
+        if _is_mysql_compatible_dialect(db):
             def _write_batches(connection):
                 try:
-                    mysql_affected = 0
+                    batch_affected = 0
                     for index in range(0, len(records), effective_batch_size):
                         batch_records = records[index:index + effective_batch_size]
                         values_list = _sort_values_list(series_type, _build_values_list(model, exchange, batch_records))
-                        mysql_affected += _upsert_mysql_values(
+                        batch_affected += _upsert_values_on_mysql_compatible(
                             model,
                             exchange,
                             series_type,
@@ -175,13 +253,14 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
                             commit=False,
                         )
                     connection.commit()
-                    return mysql_affected
+                    return batch_affected
                 except Exception:
                     connection.rollback()
                     raise
 
-            return _with_mysql_named_lock(db, exchange, series_type, _write_batches)
+            return _with_write_lock(db, exchange, series_type, _write_batches)
 
+        affected = 0
         for index in range(0, len(records), effective_batch_size):
             batch_records = records[index:index + effective_batch_size]
             affected += upsert_series_records(exchange, series_type, batch_records, session=db)
@@ -206,10 +285,10 @@ def upsert_series_records(exchange, series_type, records, session=None):
     try:
         values_list = _sort_values_list(series_type, _build_values_list(model, exchange, records))
 
-        if db.bind and db.bind.dialect.name == 'mysql':
+        if _is_mysql_compatible_dialect(db):
             def _write_records(connection):
                 try:
-                    affected = _upsert_mysql_values(
+                    affected = _upsert_values_on_mysql_compatible(
                         model,
                         exchange,
                         series_type,
@@ -223,31 +302,38 @@ def upsert_series_records(exchange, series_type, records, session=None):
                     connection.rollback()
                     raise
 
-            return _with_mysql_named_lock(db, exchange, series_type, _write_records)
+            return _with_write_lock(db, exchange, series_type, _write_records)
 
-        key_values = [tuple(values[field] for field in key_fields) for values in values_list]
-        key_columns = [getattr(model, field) for field in key_fields]
-        existing_rows = (
-            db.query(model)
-            .filter(tuple_(*key_columns).in_(key_values))
-            .all()
-        )
-        existing_by_key = {
-            tuple(getattr(row, field) for field in key_fields): row
-            for row in existing_rows
-        }
+        # SQLite 等不支持 ON DUPLICATE KEY UPDATE 的方言，走 ORM 读改写
+        key_fields_list = list(key_fields)
+        key_columns = [getattr(model, field) for field in key_fields_list]
+        from sqlalchemy import or_, and_
+        _OR_BATCH = 50
+        all_key_tuples = [
+            tuple(values[field] for field in key_fields_list)
+            for values in values_list
+        ]
+        existing_by_key = {}
+        for batch_start in range(0, len(all_key_tuples), _OR_BATCH):
+            batch_tuples = all_key_tuples[batch_start:batch_start + _OR_BATCH]
+            or_conditions = [
+                and_(*[col == val for col, val in zip(key_columns, kt)])
+                for kt in batch_tuples
+            ]
+            rows = db.query(model).filter(or_(*or_conditions)).all()
+            for row in rows:
+                key = tuple(getattr(row, field) for field in key_fields)
+                existing_by_key[key] = row
 
         affected = 0
         for values in values_list:
             unique_key = tuple(values[field] for field in key_fields)
             instance = existing_by_key.get(unique_key)
-
             if instance is None:
                 db.add(model(**values))
             else:
                 for key, value in values.items():
                     setattr(instance, key, value)
-
             affected += 1
 
         db.commit()
