@@ -11,6 +11,15 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>
+    .page-frame {
+      max-width: var(--page-max-width);
+      margin: 0 auto;
+    }
+
+    .page-frame .nav-container {
+      width: 100%;
+    }
+
     :root {
       --page-padding: 20px;
     }
@@ -505,7 +514,9 @@
   </style>
 </head>
 <body>
+<div class="page-frame">
   {% include 'components/nav.html' %}
+</div>
   <div id="app">
     <div class="shell">
       <!-- Header -->

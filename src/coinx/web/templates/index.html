@@ -195,6 +195,23 @@
       font-weight: 700;
     }
 
+    .coin-meta-funding {
+      flex: 0 0 auto;
+      margin-left: auto;
+      color: rgba(148, 163, 184, 0.85);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: help;
+    }
+
+    .coin-meta-funding b.positive { color: var(--positive); }
+    .coin-meta-funding b.negative { color: var(--negative); }
+
+    .coin-meta-funding b {
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
     .exchange-pill {
       display: inline-flex;
       align-items: center;
@@ -468,6 +485,7 @@
             >
               [[ formatExchangeEntry(item) ]]
             </span>
+            <span v-if="coin.funding_rate_formatted" class="coin-meta-funding" :title="'下次结算: ' + (coin.next_funding_time_formatted || 'N/A')">费率 <b :class="valueClass(coin.funding_rate)">[[ coin.funding_rate_formatted ]]</b></span>
           </div>
         </div>
 

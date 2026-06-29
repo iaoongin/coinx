@@ -426,6 +426,12 @@ def _format_homepage_coins_payload(coins_data):
             'net_inflow': coin.get('net_inflow', {}),
             'net_inflow_value': coin.get('net_inflow_value', {}),
             'net_inflow_value_formatted': coin.get('net_inflow_value_formatted', {}),
+            'funding_rate': coin.get('funding_rate'),
+            'funding_rate_formatted': coin.get('funding_rate_formatted'),
+            'predicted_rate': coin.get('predicted_rate'),
+            'predicted_rate_formatted': coin.get('predicted_rate_formatted'),
+            'next_funding_time': coin.get('next_funding_time'),
+            'next_funding_time_formatted': coin.get('next_funding_time_formatted'),
         }
 
         changes = []
