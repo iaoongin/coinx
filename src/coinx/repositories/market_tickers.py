@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from sqlalchemy import and_, func, desc, asc
+from sqlalchemy import func, desc, asc
 
+from coinx.config import DB_TYPE
 from coinx.database import get_session
 from coinx.models import MarketTickers
 
@@ -16,11 +17,17 @@ def save_market_tickers(records: List[dict], collect_time: int = None, session=N
 
     try:
         timestamp = collect_time if collect_time else int(__import__('time').time() * 1000)
-        
+
         for record in records:
             record['close_time'] = timestamp
-        
-        db.add_all([MarketTickers(**record) for record in records])
+
+        dialect = db.bind.dialect.name
+        if DB_TYPE == 'starrocks' and dialect == 'mysql':
+            insert_cols = [c.name for c in MarketTickers.__table__.columns]
+            values = [{k: v for k, v in r.items() if k in insert_cols} for r in records]
+            db.execute(MarketTickers.__table__.insert().values(values))
+        else:
+            db.add_all([MarketTickers(**record) for record in records])
         db.commit()
         return len(records)
     except Exception:
@@ -37,7 +44,7 @@ def get_market_tickers(
     limit: int = 100,
     close_time: Optional[int] = None,
     session=None,
-) -> List[MarketTickers]:
+) -> List:
     """获取行情快照数据（按指定维度排序）"""
     own_session = session is None
     db = session or get_session()
@@ -49,7 +56,25 @@ def get_market_tickers(
         if close_time is None:
             return []
 
-        query = db.query(MarketTickers).filter(MarketTickers.close_time == close_time)
+        query = db.query(
+            MarketTickers.symbol,
+            MarketTickers.price_change,
+            MarketTickers.price_change_percent,
+            MarketTickers.weighted_avg_price,
+            MarketTickers.last_price,
+            MarketTickers.last_qty,
+            MarketTickers.open_price,
+            MarketTickers.high_price,
+            MarketTickers.low_price,
+            MarketTickers.volume,
+            MarketTickers.quote_volume,
+            MarketTickers.open_time,
+            MarketTickers.close_time,
+            MarketTickers.first_id,
+            MarketTickers.last_id,
+            MarketTickers.count,
+            MarketTickers.created_at,
+        ).filter(MarketTickers.close_time == close_time)
 
         if rank_type == 'price_change':
             if direction == 'down':
@@ -130,7 +155,13 @@ def delete_old_records(days: int = 7, session=None) -> int:
 
     try:
         cutoff_time = int(time.time() * 1000) - (days * 24 * 60 * 60 * 1000)
-        deleted = db.query(MarketTickers).filter(MarketTickers.close_time < cutoff_time).delete()
+        if DB_TYPE == 'starrocks':
+            result = db.execute(
+                MarketTickers.__table__.delete().where(MarketTickers.close_time < cutoff_time)
+            )
+            deleted = result.rowcount
+        else:
+            deleted = db.query(MarketTickers).filter(MarketTickers.close_time < cutoff_time).delete()
         db.commit()
         return deleted
     except Exception:
