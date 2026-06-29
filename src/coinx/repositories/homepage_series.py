@@ -5,7 +5,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Optional
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
@@ -537,10 +537,13 @@ def _calc_net_inflow_value_for_period(taker_vol_by_time, kline_by_time, current_
 
 
 def _has_required_change_coverage(oi_by_time, kline_by_time, current_time):
-    return (
-        _check_overall_window_health(oi_by_time, current_time)
-        and _check_overall_window_health(kline_by_time, current_time)
-    )
+    if not current_time:
+        return False
+    for interval in TIME_INTERVALS:
+        target = current_time - _interval_to_ms(interval)
+        if oi_by_time.get(target) is None:
+            return False
+    return _check_overall_window_health(kline_by_time, current_time)
 
 
 def _has_required_net_inflow_coverage(kline_by_time, current_time):
@@ -916,32 +919,48 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         latest_query = latest_query.filter(time_field <= upper_bound)
     latest_query = latest_query.group_by(model.symbol)
 
-    # 计算基于实际最新时间的下界
-    actual_lower_bound = None
+    # 收集每个 symbol 的 latest_time，并计算需要的目标时间点
+    symbol_latest = {}
     for row in latest_query.all():
-        latest_time = int(row.latest_time)
-        candidate = latest_time - _MAX_INTERVAL_MS
-        if actual_lower_bound is None or candidate < actual_lower_bound:
-            actual_lower_bound = candidate
+        symbol_latest[row.symbol] = int(row.latest_time)
 
-    if actual_lower_bound is None:
+    if not symbol_latest:
         return {}
 
     latest_ms = (_time.time() - func_start) * 1000
     logger.info(f'OI查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
 
-    # 查询完整范围的数据
+    # 只查询需要的目标时间点（当前点 + 每个间隔变化点）
+    conditions = []
+    for symbol, latest in symbol_latest.items():
+        target_times = {latest}
+        for interval in TIME_INTERVALS:
+            target_times.add(latest - _interval_to_ms(interval))
+        target_times = sorted(t for t in target_times if t > 0)
+        if not target_times:
+            continue
+        condition = and_(
+            model.symbol == symbol,
+            model.event_time.in_(target_times),
+        )
+        if hasattr(model, 'exchange') and exchange is not None:
+            condition = and_(condition, model.exchange == exchange)
+        conditions.append(condition)
+
+    if not conditions:
+        return {}
+
     query = session.query(
         model.symbol,
         model.event_time,
         model.sum_open_interest,
         model.sum_open_interest_value,
-    ).filter(model.symbol.in_(symbols), model.period == '5m')
-    if hasattr(model, 'exchange') and exchange is not None:
-        query = query.filter(model.exchange == exchange)
+    ).filter(
+        or_(*conditions),
+        model.period == '5m',
+    )
     if upper_bound is not None:
         query = query.filter(model.event_time <= upper_bound)
-    query = query.filter(model.event_time >= actual_lower_bound)
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
@@ -949,7 +968,8 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
 
     total_ms = (_time.time() - func_start) * 1000
-    logger.info(f'OI查询完成: 符号数={len(symbols)}, 返回记录数={sum(len(v) for v in records_by_symbol.values())}, 总耗时={total_ms:.0f}ms')
+    total_records = sum(len(v) for v in records_by_symbol.values())
+    logger.info(f'OI查询完成: 符号数={len(symbols)}, 目标时间点数={total_records}, 总耗时={total_ms:.0f}ms')
     return records_by_symbol
 
 
