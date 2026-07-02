@@ -2,7 +2,7 @@ import threading
 import time
 
 from coinx.coin_manager import get_active_coins
-from coinx.config import HOMEPAGE_SERIES_REPAIR_ENABLED
+from coinx.config import HOMEPAGE_SERIES_REPAIR_ENABLED, SCHEDULER_ENABLED
 from coinx.scheduler import scheduler, start_scheduler
 from coinx.utils import logger
 
@@ -34,6 +34,13 @@ def start_startup_repair():
 
 
 def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
+    if not SCHEDULER_ENABLED:
+        logger.info('调度器已禁用（SCHEDULER_ENABLED=false），跳过启动运行时服务')
+        return {
+            'scheduler_thread': None,
+            'repair_thread': None,
+            'tracked_coins': [],
+        }
     logger.info('开始启动运行时服务')
     scheduler_thread = threading.Thread(target=start_scheduler, daemon=True)
     scheduler_thread.start()

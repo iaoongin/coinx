@@ -19,6 +19,7 @@ from .config import (
     ENABLED_EXCHANGES,
     HOMEPAGE_SERIES_REPAIR_ENABLED,
     REPAIR_HISTORY_COVERAGE_HOURS,
+    SCHEDULER_ENABLED,
     UPDATE_INTERVAL,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
@@ -383,6 +384,9 @@ def scheduled_coins_config_update():
 
 def start_scheduler():
     """Start the background scheduler."""
+    if not SCHEDULER_ENABLED:
+        logger.info('调度器已禁用（SCHEDULER_ENABLED=false），所有定时任务不会执行')
+        return
     logger.info('开始启动调度器')
     try:
         scheduler.start()
