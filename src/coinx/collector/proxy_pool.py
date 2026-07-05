@@ -209,12 +209,16 @@ class ProxyPool:
 
 
 def build_okx_proxy_pool():
+    if not USE_PROXY:
+        return ProxyPool(
+            proxies=[],
+            strategy=PROXY_POOL_STRATEGY,
+            fail_cooldown_seconds=PROXY_POOL_FAIL_COOLDOWN_SECONDS,
+        )
+
     proxies = parse_proxy_pool_urls(PROXY_POOL_URLS)
-    if not proxies:
-        if USE_PROXY:
-            proxies = [{'id': DEFAULT_PROXY_ID, 'url': HTTPS_PROXY_URL or PROXY_URL}]
-        else:
-            proxies = [{'id': DEFAULT_PROXY_ID, 'url': None}]
+    if not proxies and USE_PROXY:
+        proxies = [{'id': DEFAULT_PROXY_ID, 'url': HTTPS_PROXY_URL or PROXY_URL}]
     health_check_results = ProxyPool.check_proxies_concurrently(proxies)
     available_proxies = [{'id': item['id'], 'url': item.get('url')} for item in health_check_results['available']]
     unavailable_proxies = health_check_results['unavailable']

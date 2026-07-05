@@ -107,28 +107,23 @@ def test_proxy_pool_filters_unavailable_proxies_during_initialization(monkeypatc
     assert pool.all_proxy_ids() == ['good']
 
 
-def test_build_okx_proxy_pool_falls_back_to_direct_when_all_proxies_unavailable(monkeypatch):
+def test_build_okx_proxy_pool_skips_health_check_when_proxy_disabled(monkeypatch):
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_URLS', 'bad-a=http://bad-a.example.com:2261;bad-b=http://bad-b.example.com:2261')
     monkeypatch.setattr(proxy_pool, 'USE_PROXY', False)
     monkeypatch.setattr(proxy_pool, 'USE_PROXY_POOL', True)
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_STRATEGY', 'round_robin')
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30)
-    monkeypatch.setattr(
-        ProxyPool,
-        'check_proxies_concurrently',
-        staticmethod(
-            lambda proxies: {
-                'available': [],
-                'unavailable': [
-                    {'id': 'bad-a', 'latency_ms': 5000, 'reason': 'timed out'},
-                    {'id': 'bad-b', 'latency_ms': 5000, 'reason': 'timed out'},
-                ],
-            }
-        ),
-    )
+    calls = []
+
+    def fake_check(proxies):
+        calls.append(proxies)
+        return {'available': [], 'unavailable': []}
+
+    monkeypatch.setattr(ProxyPool, 'check_proxies_concurrently', staticmethod(fake_check))
 
     pool = proxy_pool.build_okx_proxy_pool()
 
+    assert calls == []
     assert pool.enabled() is False
     assert pool.choose_proxy() == 'direct'
 
@@ -165,7 +160,7 @@ def test_proxy_pool_concurrent_health_check_collects_latency_and_status(monkeypa
 
 def test_build_okx_proxy_pool_logs_health_check_summary(monkeypatch, caplog):
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_URLS', 'good=http://good.example.com:2261;bad=http://bad.example.com:2261')
-    monkeypatch.setattr(proxy_pool, 'USE_PROXY', False)
+    monkeypatch.setattr(proxy_pool, 'USE_PROXY', True)
     monkeypatch.setattr(proxy_pool, 'USE_PROXY_POOL', True)
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_STRATEGY', 'round_robin')
     monkeypatch.setattr(proxy_pool, 'PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30)
