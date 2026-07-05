@@ -199,6 +199,79 @@
       border-color: var(--gold-primary);
     }
 
+    .search-input {
+      padding: 5px 10px;
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font-size: 12px;
+      width: 150px;
+      transition: all var(--transition-fast);
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: var(--gold-primary);
+    }
+
+    .search-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .pagination {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0 4px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .pagination-info {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .pagination-controls {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .page-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all var(--transition-fast);
+      min-width: 32px;
+      text-align: center;
+    }
+
+    .page-btn:hover:not(:disabled):not(.active) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
+    }
+
+    .page-btn.active {
+      background: var(--gold-primary);
+      color: #080808;
+      border-color: var(--gold-primary);
+      font-weight: 600;
+    }
+
+    .page-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     .checkbox-label {
       display: flex;
       align-items: center;
@@ -255,6 +328,29 @@
       position: relative;
       z-index: 1;
       overflow-x: auto;
+    }
+
+    .table-container.loading {
+      overflow: hidden;
+    }
+
+    .table-loading-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(10, 12, 18, 0.58);
+      backdrop-filter: blur(2px);
+    }
+
+    .table-loading-text {
+      color: var(--text-secondary);
+      font-size: 12px;
+      letter-spacing: 0.04em;
     }
 
     table {
@@ -532,11 +628,11 @@
           </div>
           <button
             class="btn btn-icon"
-            :class="{ 'btn-primary': isRefreshing }"
-            :disabled="isRefreshing"
+            :class="{ 'btn-primary': loading }"
+            :disabled="loading"
             @click="refreshData"
           >
-            <span v-if="isRefreshing" class="loading-spinner"></span>
+            <span v-if="loading" class="loading-spinner"></span>
             <span v-else>刷新</span>
           </button>
         </div>
@@ -546,20 +642,23 @@
       <div class="filters-bar">
         <div class="filter-group">
           <span class="filter-label">排序:</span>
-          <select class="filter-select" v-model="sortBy" @change="sortData">
+          <select class="filter-select" v-model="sortBy" @change="onFilterChange">
             <option value="funding_rate">实时费率</option>
             <option value="abs_funding_rate">实时费率(绝对值)</option>
           </select>
         </div>
         <div class="filter-group">
           <span class="filter-label">方向:</span>
-          <select class="filter-select" v-model="sortOrder" @change="sortData">
+          <select class="filter-select" v-model="sortOrder" @change="onFilterChange">
             <option value="desc">降序</option>
             <option value="asc">升序</option>
           </select>
         </div>
+        <div class="filter-group">
+          <input class="search-input" v-model.trim="keyword" placeholder="搜索币种..." @input="onSearchInput">
+        </div>
         <label class="checkbox-label">
-          <input type="checkbox" v-model="showAbnormalOnly">
+          <input type="checkbox" v-model="showAbnormalOnly" @change="onFilterChange">
           仅显示异常
         </label>
       </div>
@@ -568,25 +667,29 @@
       <div class="stats-bar">
         <div class="stat-item">
           <span class="stat-label">总币种数</span>
-          <span class="stat-value">{{ '{{ totalCount }}' }}</span>
+          <span class="stat-value">{{ '{{ stats.total }}' }}</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">异常数量</span>
-          <span class="stat-value warning">{{ '{{ abnormalCount }}' }}</span>
+          <span class="stat-value warning">{{ '{{ stats.abnormal }}' }}</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">正费率</span>
-          <span class="stat-value positive">{{ '{{ positiveCount }}' }}</span>
+          <span class="stat-value positive">{{ '{{ stats.positive }}' }}</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">负费率</span>
-          <span class="stat-value negative">{{ '{{ negativeCount }}' }}</span>
+          <span class="stat-value negative">{{ '{{ stats.negative }}' }}</span>
         </div>
       </div>
 
       <!-- Data Table -->
-      <div class="table-container">
-        <table v-if="filteredData.length > 0">
+      <div class="table-container" :class="{ loading: loading }">
+        <div v-if="loading" class="table-loading-overlay">
+          <span class="loading-spinner"></span>
+          <div class="table-loading-text">加载中</div>
+        </div>
+        <table v-if="fundingRates.length > 0">
           <thead>
             <tr>
               <th style="width: 40px">#</th>
@@ -605,7 +708,7 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="(item, index) in filteredData" :key="item.symbol">
+            <template v-for="(item, index) in fundingRates" :key="item.symbol">
               <tr class="data-row" :class="{ expanded: expandedSymbol === item.symbol }" @click="toggleChart(item.symbol)">
                 <td>
                   <span class="expand-indicator" :class="{ open: expandedSymbol === item.symbol }">&#9654;</span>
@@ -639,9 +742,23 @@
         </table>
 
         <div v-else class="empty-state">
-          <p v-if="loading">加载中...</p>
-          <p v-else-if="showAbnormalOnly">暂无异常资金费率</p>
+          <p v-if="showAbnormalOnly">暂无异常资金费率</p>
           <p v-else>暂无数据</p>
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination" v-if="totalPages > 1 || totalCount > pageSize">
+        <div class="pagination-info">
+          共 {{ '{{ totalCount }}' }} 条，第 {{ '{{ page }}' }} / {{ '{{ totalPages }}' }} 页
+        </div>
+        <div class="pagination-controls">
+          <button class="page-btn" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
+          <template v-for="p in visiblePages" :key="p">
+            <button v-if="p === '...'" class="page-btn" disabled>...</button>
+            <button v-else class="page-btn" :class="{ active: p === page }" @click="changePage(p)">{{ '{{ p }}' }}</button>
+          </template>
+          <button class="page-btn" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</button>
         </div>
       </div>
     </div>
@@ -653,14 +770,18 @@
     createApp({
       setup() {
         const fundingRates = ref([]);
-        const loading = ref(true);
-        const isRefreshing = ref(false);
+        const loading = ref(false);
         const sortBy = ref('funding_rate');
         const sortOrder = ref('desc');
         const showAbnormalOnly = ref(false);
+        const keyword = ref('');
+        const page = ref(1);
+        const pageSize = ref(50);
+        const totalCount = ref(0);
         const lastUpdateTime = ref('--:--:--');
         const refreshCountdown = ref(300);
         const threshold = ref(0.001);
+        const stats = ref({ total: 0, abnormal: 0, positive: 0, negative: 0 });
 
         // Inline chart state
         const expandedSymbol = ref(null);
@@ -670,62 +791,105 @@
 
         let refreshTimer = null;
         let countdownTimer = null;
+        let searchTimer = null;
 
         const thresholdPercent = computed(() => {
           return (threshold.value * 100).toFixed(1);
         });
 
-        const totalCount = computed(() => fundingRates.value.length);
-
-        const abnormalCount = computed(() => {
-          return fundingRates.value.filter(item => item.is_abnormal).length;
+        const totalPages = computed(() => {
+          return Math.ceil(totalCount.value / pageSize.value) || 1;
         });
 
-        const positiveCount = computed(() => {
-          return fundingRates.value.filter(item => item.funding_rate > 0).length;
+        const visiblePages = computed(() => {
+          const total = totalPages.value;
+          const current = page.value;
+          if (total <= 7) {
+            return Array.from({ length: total }, (_, i) => i + 1);
+          }
+          let startPage, endPage;
+          if (current <= 4) {
+            startPage = 1;
+            endPage = 7;
+          } else if (current + 3 >= total) {
+            startPage = total - 6;
+            endPage = total;
+          } else {
+            startPage = current - 3;
+            endPage = current + 3;
+          }
+          return Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
         });
 
-        const negativeCount = computed(() => {
-          return fundingRates.value.filter(item => item.funding_rate < 0).length;
-        });
-
-        const filteredData = computed(() => {
-          let data = [...fundingRates.value];
-
-          if (showAbnormalOnly.value) {
-            data = data.filter(item => item.is_abnormal);
+        const loadData = async (skipIfLoading = true) => {
+          if (loading.value && skipIfLoading) {
+            return;
           }
 
-          return data;
-        });
-
-        const sortData = () => {
-          const key = sortBy.value;
-          const reverse = sortOrder.value === 'desc';
-
-          fundingRates.value.sort((a, b) => {
-            let valA, valB;
-
-            if (key === 'abs_funding_rate') {
-              valA = Math.abs(a.funding_rate || 0);
-              valB = Math.abs(b.funding_rate || 0);
-            } else {
-              valA = a.funding_rate || 0;
-              valB = b.funding_rate || 0;
+          loading.value = true;
+          try {
+            const pageBefore = page.value;
+            const params = new URLSearchParams({
+              sort_by: sortBy.value,
+              sort_order: sortOrder.value,
+              page: pageBefore,
+              page_size: pageSize.value,
+              show_abnormal_only: showAbnormalOnly.value,
+            });
+            if (keyword.value) {
+              params.set('keyword', keyword.value);
             }
 
-            return reverse ? valB - valA : valA - valB;
-          });
+            const response = await fetch('/api/funding-rate?' + params.toString());
+            const data = await response.json();
+
+            if (data.status === 'success') {
+              fundingRates.value = data.data || [];
+              totalCount.value = data.total_count || 0;
+              threshold.value = data.threshold || 0.001;
+              stats.value = data.stats || { total: 0, abnormal: 0, positive: 0, negative: 0 };
+              lastUpdateTime.value = new Date().toLocaleTimeString('zh-CN');
+
+              const maxPage = Math.ceil(totalCount.value / pageSize.value) || 1;
+              if (pageBefore > maxPage) {
+                page.value = maxPage;
+                return loadData(false);
+              }
+            }
+          } catch (error) {
+            console.error('加载资金费率数据失败:', error);
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const onFilterChange = () => {
+          page.value = 1;
+          loadData();
+        };
+
+        const onSearchInput = () => {
+          if (searchTimer) clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => {
+            page.value = 1;
+            loadData();
+          }, 300);
+        };
+
+        const changePage = (newPage) => {
+          if (newPage < 1 || newPage > totalPages.value) return;
+          page.value = newPage;
+          loadData();
         };
 
         const toggleSort = (field) => {
-          if (sortBy.value === field || sortBy.value === `abs_${field}`) {
+          if (sortBy.value === field || sortBy.value === 'abs_' + field) {
             sortOrder.value = sortOrder.value === 'desc' ? 'asc' : 'desc';
           } else {
             sortBy.value = field;
             sortOrder.value = 'desc';
           }
-          sortData();
+          onFilterChange();
         };
 
         const formatPrice = (price) => {
@@ -741,35 +905,22 @@
           const hours = date.getHours().toString().padStart(2, '0');
           const minutes = date.getMinutes().toString().padStart(2, '0');
           const seconds = date.getSeconds().toString().padStart(2, '0');
-          return `${hours}:${minutes}:${seconds}`;
-        };
-
-        const loadData = async () => {
-          try {
-            const response = await fetch('/api/funding-rate?sort_by=funding_rate&sort_order=desc');
-            const data = await response.json();
-
-            if (data.status === 'success') {
-              fundingRates.value = data.data || [];
-              threshold.value = data.threshold || 0.001;
-              sortData();
-              lastUpdateTime.value = new Date().toLocaleTimeString('zh-CN');
-            }
-          } catch (error) {
-            console.error('加载资金费率数据失败:', error);
-          } finally {
-            loading.value = false;
-          }
+          return hours + ':' + minutes + ':' + seconds;
         };
 
         const refreshData = async () => {
-          isRefreshing.value = true;
+          if (loading.value) {
+            return;
+          }
+
+          loading.value = true;
           try {
             await fetch('/api/funding-rate/refresh');
-            await loadData();
+            await loadData(false);
             refreshCountdown.value = 300;
-          } finally {
-            isRefreshing.value = false;
+          } catch (error) {
+            console.error('鍒锋柊璧勯噾璐圭巼鏁版嵁澶辫触:', error);
+            loading.value = false;
           }
         };
 
@@ -969,7 +1120,7 @@
 
         onMounted(async () => {
           await loadData();
-          if (fundingRates.value.length === 0) {
+          if (totalCount.value === 0) {
             await refreshData();
           }
           startAutoRefresh();
@@ -985,20 +1136,23 @@
         return {
           fundingRates,
           loading,
-          isRefreshing,
           sortBy,
           sortOrder,
           showAbnormalOnly,
+          keyword,
+          page,
+          pageSize,
+          totalCount,
+          totalPages,
+          visiblePages,
+          stats,
           lastUpdateTime,
           refreshCountdown,
           threshold,
           thresholdPercent,
-          totalCount,
-          abnormalCount,
-          positiveCount,
-          negativeCount,
-          filteredData,
-          sortData,
+          onFilterChange,
+          onSearchInput,
+          changePage,
           toggleSort,
           formatPrice,
           formatEventTime,

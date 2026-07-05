@@ -1,7 +1,7 @@
 """资金费率数据存储和查询模块"""
 from datetime import datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from coinx.collector.binance.funding_rate import fetch_all_premium_index
@@ -128,6 +128,169 @@ def load_latest_funding_rates(symbols, exchange='binance', session=None):
 
         return result
 
+    finally:
+        if own_session:
+            db.close()
+
+
+def load_latest_funding_rate_page(
+    keyword='',
+    show_abnormal_only=False,
+    sort_by='funding_rate',
+    sort_order='desc',
+    page=1,
+    page_size=50,
+    threshold=0.001,
+    period='5m',
+    session=None,
+):
+    """Load latest funding-rate rows, stats, and paging with one SQL query."""
+    own_session = session is None
+    db = session or get_session()
+
+    order_sql_map = {
+        'predicted_rate': 'predicted_rate',
+        'abs_predicted_rate': 'ABS(predicted_rate)',
+        'funding_rate': 'funding_rate',
+        'abs_funding_rate': 'ABS(funding_rate)',
+    }
+    order_sql = order_sql_map.get(sort_by, 'predicted_rate')
+    order_dir = 'ASC' if sort_order == 'asc' else 'DESC'
+    offset = max(page - 1, 0) * page_size
+    keyword = keyword or ''
+
+    sql = text(f"""
+        WITH ranked AS (
+            SELECT
+                symbol,
+                event_time,
+                funding_rate,
+                predicted_rate,
+                next_funding_time,
+                mark_price,
+                ROW_NUMBER() OVER (
+                    PARTITION BY symbol
+                    ORDER BY event_time DESC
+                ) AS rn
+            FROM market_funding_rate
+            WHERE period = :period
+        ),
+        latest AS (
+            SELECT
+                symbol,
+                event_time,
+                funding_rate,
+                predicted_rate,
+                next_funding_time,
+                mark_price,
+                CASE
+                    WHEN ABS(COALESCE(predicted_rate, funding_rate, 0)) >= :threshold THEN 1
+                    ELSE 0
+                END AS is_abnormal
+            FROM ranked
+            WHERE rn = 1
+              AND (:keyword = '' OR UPPER(symbol) LIKE :keyword_like)
+              AND (
+                    :show_abnormal_only = 0
+                    OR ABS(COALESCE(predicted_rate, funding_rate, 0)) >= :threshold
+              )
+        ),
+        counted AS (
+            SELECT
+                COUNT(*) AS total_count,
+                COALESCE(SUM(is_abnormal), 0) AS abnormal_count,
+                COALESCE(SUM(CASE WHEN funding_rate > 0 THEN 1 ELSE 0 END), 0) AS positive_count,
+                COALESCE(SUM(CASE WHEN funding_rate < 0 THEN 1 ELSE 0 END), 0) AS negative_count
+            FROM latest
+        ),
+        numbered AS (
+            SELECT
+                symbol,
+                event_time,
+                funding_rate,
+                predicted_rate,
+                next_funding_time,
+                mark_price,
+                is_abnormal,
+                ROW_NUMBER() OVER (
+                    ORDER BY {order_sql} {order_dir}, symbol ASC
+                ) AS seq
+            FROM latest
+        ),
+        paged AS (
+            SELECT *
+            FROM numbered
+            WHERE seq > :offset
+              AND seq <= :offset + :limit
+        )
+        SELECT
+            paged.symbol,
+            paged.event_time,
+            paged.funding_rate,
+            paged.predicted_rate,
+            paged.next_funding_time,
+            paged.mark_price,
+            paged.is_abnormal,
+            counted.total_count,
+            counted.abnormal_count,
+            counted.positive_count,
+            counted.negative_count
+        FROM counted
+        LEFT JOIN paged ON 1 = 1
+        ORDER BY paged.seq
+    """)
+
+    try:
+        rows = db.execute(
+            sql,
+            {
+                'period': period,
+                'threshold': threshold,
+                'keyword': keyword,
+                'keyword_like': f"%{keyword.upper()}%",
+                'show_abnormal_only': 1 if show_abnormal_only else 0,
+                'offset': offset,
+                'limit': page_size,
+            },
+        ).mappings().all()
+
+        if not rows:
+            return {
+                'data': [],
+                'total_count': 0,
+                'stats': {
+                    'total': 0,
+                    'abnormal': 0,
+                    'positive': 0,
+                    'negative': 0,
+                },
+            }
+
+        head = rows[0]
+        data = []
+        for row in rows:
+            if not row['symbol']:
+                continue
+            data.append({
+                'symbol': row['symbol'],
+                'predicted_rate': float(row['predicted_rate']) if row['predicted_rate'] is not None else None,
+                'funding_rate': float(row['funding_rate']) if row['funding_rate'] is not None else None,
+                'next_funding_time': int(row['next_funding_time']) if row['next_funding_time'] is not None else None,
+                'mark_price': float(row['mark_price']) if row['mark_price'] is not None else None,
+                'event_time': int(row['event_time']) if row['event_time'] is not None else None,
+                'is_abnormal': bool(row['is_abnormal']),
+            })
+
+        return {
+            'data': data,
+            'total_count': int(head['total_count'] or 0),
+            'stats': {
+                'total': int(head['total_count'] or 0),
+                'abnormal': int(head['abnormal_count'] or 0),
+                'positive': int(head['positive_count'] or 0),
+                'negative': int(head['negative_count'] or 0),
+            },
+        }
     finally:
         if own_session:
             db.close()

@@ -2,15 +2,13 @@ import time
 
 from flask import Blueprint, jsonify, request
 
-from coinx.coin_manager import get_active_coins
-from coinx.collector.binance.market import get_exchange_info
 from coinx.config import FUNDING_RATE_ABNORMAL_THRESHOLD
 from coinx.repositories.funding_rate import (
     collect_funding_rates,
     load_abnormal_funding_rates,
     load_funding_rate_history,
     load_funding_rate_sparklines,
-    load_latest_funding_rates,
+    load_latest_funding_rate_page,
 )
 from coinx.repositories.homepage_series import (
     format_funding_countdown,
@@ -24,76 +22,63 @@ api_funding_rate_bp = Blueprint('api_funding_rate', __name__)
 
 @api_funding_rate_bp.route('/api/funding-rate')
 def get_funding_rates():
-    """获取资金费率排行榜数据"""
+    """获取资金费率排行榜数据（支持搜索和分页）"""
     logger.info('开始加载资金费率数据')
     try:
+        keyword = request.args.get('keyword', '').strip()
+        show_abnormal_only = request.args.get('show_abnormal_only', '').lower() in ('true', '1')
+        page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', type=int)
+        page_size = request.args.get('page_size', type=int)
+        if page_size is None:
+            page_size = limit if limit is not None else 50
+        page_size = min(max(page_size, 1), 200)
         sort_by = request.args.get('sort_by', 'funding_rate')
         sort_order = request.args.get('sort_order', 'desc')
 
-        exchange_info = get_exchange_info()
-        if not exchange_info:
-            return jsonify({
-                'status': 'success',
-                'message': 'exchange info unavailable',
-                'data': [],
-            })
+        page_result = load_latest_funding_rate_page(
+            keyword=keyword,
+            show_abnormal_only=show_abnormal_only,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+            threshold=FUNDING_RATE_ABNORMAL_THRESHOLD,
+        )
 
-        all_symbols = [s['symbol'] for s in exchange_info]
-        funding_rate_map = load_latest_funding_rates(all_symbols)
+        page_data = []
+        for rate_obj in page_result['data']:
+            predicted_rate = rate_obj['predicted_rate']
+            funding_rate = rate_obj['funding_rate']
+            next_funding_time = rate_obj['next_funding_time']
 
-        data = []
-        for symbol, rate_obj in funding_rate_map.items():
-            if rate_obj is None:
-                continue
-
-            predicted_rate = float(rate_obj['predicted_rate']) if rate_obj['predicted_rate'] is not None else None
-            funding_rate = float(rate_obj['funding_rate']) if rate_obj['funding_rate'] is not None else None
-            next_funding_time = int(rate_obj['next_funding_time']) if rate_obj['next_funding_time'] is not None else None
-            mark_price = float(rate_obj['mark_price']) if rate_obj['mark_price'] is not None else None
-
-            is_abnormal = (
-                (predicted_rate is not None and abs(predicted_rate) >= FUNDING_RATE_ABNORMAL_THRESHOLD)
-                or (funding_rate is not None and abs(funding_rate) >= FUNDING_RATE_ABNORMAL_THRESHOLD)
-            )
-
-            data.append({
-                'symbol': symbol,
+            page_data.append({
+                'symbol': rate_obj['symbol'],
                 'predicted_rate': predicted_rate,
                 'predicted_rate_formatted': format_funding_rate(predicted_rate),
                 'funding_rate': funding_rate,
                 'funding_rate_formatted': format_funding_rate(funding_rate),
                 'next_funding_time': next_funding_time,
                 'next_funding_time_formatted': format_funding_countdown(next_funding_time),
-                'mark_price': mark_price,
-                'is_abnormal': is_abnormal,
-                'event_time': int(rate_obj['event_time']) if rate_obj['event_time'] else None,
+                'mark_price': rate_obj['mark_price'],
+                'is_abnormal': rate_obj['is_abnormal'],
+                'event_time': rate_obj['event_time'],
             })
 
-        reverse = sort_order == 'desc'
-        if sort_by == 'abs_predicted_rate':
-            data.sort(key=lambda x: abs(x['predicted_rate'] or 0), reverse=reverse)
-        elif sort_by == 'funding_rate':
-            data.sort(key=lambda x: x['funding_rate'] or 0, reverse=reverse)
-        elif sort_by == 'abs_funding_rate':
-            data.sort(key=lambda x: abs(x['funding_rate'] or 0), reverse=reverse)
-        else:
-            data.sort(key=lambda x: x['predicted_rate'] or 0, reverse=reverse)
-
-        if limit:
-            data = data[:limit]
-
-        # 缩略图只查最终展示的币种
-        visible_symbols = [item['symbol'] for item in data]
+        visible_symbols = [item['symbol'] for item in page_data]
         sparkline_map = load_funding_rate_sparklines(visible_symbols, hours=24)
-        for item in data:
+        for item in page_data:
             item['sparkline'] = sparkline_map.get(item['symbol'], [])
 
         return jsonify({
             'status': 'success',
             'message': 'funding rates loaded',
-            'data': data,
+            'data': page_data,
+            'total_count': page_result['total_count'],
+            'page': page,
+            'page_size': page_size,
             'threshold': FUNDING_RATE_ABNORMAL_THRESHOLD,
+            'stats': page_result['stats'],
         })
     except Exception as e:
         logger.error(f'加载资金费率数据失败: {e}')
