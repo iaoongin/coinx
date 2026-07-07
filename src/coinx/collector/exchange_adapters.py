@@ -170,7 +170,8 @@ def _build_gate_adapter():
             'open_interest_hist': 1000,
             'taker_buy_sell_vol': 1000,
         },
-        taker_period_by_interval=DEFAULT_TAKER_PERIOD_BY_INTERVAL,
+        # Gate taker数据不可信：contract_stats API的longTakerSize/shortTakerSize
+        # 与klines成交量口径不匹配，方向一致性仅73%，净流入回填/展示均不准确
     )
 
 
