@@ -18,7 +18,7 @@ from datetime import datetime
 
 import pytest
 from flask import Flask
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 
 PROFILE_REPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs', 'profile_reports')
@@ -48,7 +48,38 @@ def _current_exchange():
     return getattr(_tls, 'exchange', None)
 
 
-MAX_SQL_LEN = 1000
+def _fmt_val(v):
+    if isinstance(v, str):
+        return f"'{v}'"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, (list, tuple)):
+        return '(' + ', '.join(_fmt_val(x) for x in v) + ')'
+    if v is None:
+        return 'NULL'
+    if hasattr(v, 'isoformat'):
+        return f"'{v.isoformat()}'"
+    return str(v)
+
+
+def _interp_sql(sql, params):
+    import re
+    params = params or {}
+
+    def _repl_list(m):
+        v = params.get(m.group(1), '')
+        if isinstance(v, (list, tuple)):
+            return ', '.join(_fmt_val(x) for x in v)
+        return _fmt_val(v)
+
+    def _repl_val(m):
+        return _fmt_val(params.get(m.group(1), m.group(0)))
+
+    sql = re.sub(r'__\[POSTCOMPILE_(\w+)\]', _repl_list, sql)
+    sql = re.sub(r'%\((\w+)\)s', _repl_val, sql)
+    return sql
+
+
 
 
 class TimingCollector:
@@ -70,14 +101,26 @@ class TimingCollector:
 
     def record_sql(self, stage, exchange, sql, params=None):
         with self._lock:
-            if len(sql) > MAX_SQL_LEN:
-                sql = sql[:MAX_SQL_LEN] + '...'
             self._sqls.append({
                 'stage': stage,
                 'exchange': exchange,
                 'sql': sql,
                 'params': params or {},
             })
+
+    def _fmt_explain(self, sql_text, params):
+        interp = _interp_sql(sql_text, params)
+        lines = [f"        {interp}"]
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text(f"EXPLAIN {interp}"))
+                for row in result:
+                    detail = ' '.join(f"{c}={v}" for c, v in zip(result.keys(), row) if v is not None)
+                    lines.append(f"          EXPLAIN: {detail}")
+        except Exception as ex:
+            lines.append(f"          EXPLAIN error: {ex}")
+        return lines
+
 
     def report(self, api_elapsed=None, report_dir=None):
         lines = []
@@ -110,12 +153,7 @@ class TimingCollector:
                 for idx, s in enumerate(stage_sqls):
                     label = _sql_label(e['stage'], idx, len(stage_sqls))
                     lines.append(f"      [{label}]")
-                    lines.append(f"        {s['sql']}")
-                    if s['params']:
-                        p = ', '.join(f"{k}={v!r}" for k, v in s['params'].items())
-                        if len(p) > 400:
-                            p = p[:400] + '...'
-                        lines.append(f"        PARAMS: {p}")
+                    lines.extend(self._fmt_explain(s['sql'], s['params']))
 
         others = [e for e in self._entries if not e['exchange']]
         if others:
@@ -128,12 +166,7 @@ class TimingCollector:
                 for idx, s in enumerate(stage_sqls):
                     label = _sql_label(e['stage'], idx, len(stage_sqls))
                     lines.append(f"      [{label}]")
-                    lines.append(f"        {s['sql']}")
-                    if s['params']:
-                        p = ', '.join(f"{k}={v!r}" for k, v in s['params'].items())
-                        if len(p) > 400:
-                            p = p[:400] + '...'
-                        lines.append(f"        PARAMS: {p}")
+                    lines.extend(self._fmt_explain(s['sql'], s['params']))
 
         lines.append('\n' + '-' * 72)
         summary_stages = {'交易所加载合计', '资金费率查询'}
@@ -156,7 +189,7 @@ class TimingCollector:
         if report_dir:
             os.makedirs(report_dir, exist_ok=True)
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            report_path = os.path.join(report_dir, f'homepage_profile_{ts}.txt')
+            report_path = os.path.join(report_dir, f'homepage_profile_{ts}.log')
             with open(report_path, 'w', encoding='utf8') as f:
                 f.write(text)
                 f.write('\n')

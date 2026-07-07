@@ -915,8 +915,6 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
     )
     if hasattr(model, 'exchange') and exchange is not None:
         latest_query = latest_query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        latest_query = latest_query.filter(time_field <= upper_bound)
     latest_query = latest_query.group_by(model.symbol)
 
     # 收集每个 symbol 的 latest_time，并计算需要的目标时间点
@@ -991,8 +989,6 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
     )
     if hasattr(model, 'exchange') and exchange is not None:
         latest_query = latest_query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        latest_query = latest_query.filter(time_field <= upper_bound)
     latest_query = latest_query.group_by(model.symbol)
 
     # 计算基于实际最新时间的下界
@@ -1053,8 +1049,6 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
     )
     if hasattr(model, 'exchange') and exchange is not None:
         latest_query = latest_query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        latest_query = latest_query.filter(time_field <= upper_bound)
     latest_query = latest_query.group_by(model.symbol)
 
     # 计算基于实际最新时间的下界

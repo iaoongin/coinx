@@ -110,6 +110,7 @@ class MarketOpenInterestHist(Base):
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_moih_exchange_symbol_period_time'),
         Index('idx_moih_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
+        Index('idx_moih_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -129,6 +130,7 @@ class MarketKline(Base):
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'open_time', name='uk_mk_exchange_symbol_period_open_time'),
         Index('idx_mk_exchange_symbol_period_open_time', 'exchange', 'symbol', 'period', 'open_time'),
+        Index('idx_mk_symbol_period_exchange_open_time', 'symbol', 'period', 'exchange', 'open_time'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -156,6 +158,7 @@ class MarketTakerBuySellVol(Base):
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_mtbsv_exchange_symbol_period_time'),
         Index('idx_mtbsv_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
+        Index('idx_mtbsv_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
