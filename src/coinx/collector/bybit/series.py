@@ -283,7 +283,6 @@ def parse_klines(payload, symbol, period):
                 'trade_count': None,
                 'taker_buy_base_volume': None,
                 'taker_buy_quote_volume': None,
-                'raw_json': item,
             }
         )
     return parsed
@@ -300,7 +299,6 @@ def parse_open_interest_hist(payload, symbol, period):
                 'event_time': int(item['timestamp']),
                 'sum_open_interest': _to_float(item.get('openInterest')),
                 'sum_open_interest_value': None,
-                'raw_json': item,
             }
         )
     return parsed
