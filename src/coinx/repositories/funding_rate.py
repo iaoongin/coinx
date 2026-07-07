@@ -75,13 +75,12 @@ def save_funding_rates(records, session=None):
             db.close()
 
 
-def load_latest_funding_rates(symbols, exchange='binance', session=None):
+def load_latest_funding_rates(symbols, session=None):
     """
     加载指定币种的最新资金费率（批量查询优化）
 
     Args:
         symbols: 交易对列表
-        exchange: 交易所
         session: 数据库 session（可选）
 
     Returns:
@@ -100,7 +99,6 @@ def load_latest_funding_rates(symbols, exchange='binance', session=None):
         ).filter(
             MarketFundingRate.symbol.in_(symbols),
             MarketFundingRate.period == '5m',
-            MarketFundingRate.exchange == exchange
         ).group_by(MarketFundingRate.symbol).subquery()
 
         records = db.query(

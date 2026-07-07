@@ -132,6 +132,5 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
     exchange VARCHAR(20) NOT NULL DEFAULT 'binance' COMMENT '交易所',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE KEY uk_symbol_period_time (symbol, period, event_time),
-    INDEX idx_symbol_period (symbol, period),
     INDEX idx_symbol_time (symbol, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资金费率历史';
