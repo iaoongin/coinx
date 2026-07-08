@@ -364,30 +364,21 @@ def _log_homepage_exchange_rejection(symbol, exchange, anchor_time, stage, reaso
 
     summary_reason = reasons[0].get('reason', 'homepage_exchange_rejected')
     summary = _summarize_homepage_rejection_reasons(reasons)
-    logger.warning(
-        '首页交易所门禁否决: '
-        f'symbol={symbol} exchange={exchange} stage={stage} anchor_time={anchor_time} '
-        f'reason={summary_reason} summary="{summary}"'
-    )
+    logger.warning(_fmt('交易所门禁否决：', exchange=exchange, symbol=symbol, stage=stage,
+                        anchor_time=anchor_time, reason=summary_reason, summary=summary))
 
 
 def _log_homepage_symbol_summary(symbol, included_exchanges, missing_exchanges, status, current_time):
     available = bool(included_exchanges)
-    message = (
-        '首页交易所聚合完成'
-        if available
-        else '首页交易所聚合为空态'
-    )
-    log_line = (
-        f'{message}: symbol={symbol} current_time={current_time} status={status} '
-        f'included_exchanges={_format_homepage_log_details(included_exchanges)} '
-        f'missing_exchanges={_format_homepage_log_details(missing_exchanges)} '
-        f'available={str(available).lower()}'
-    )
+    log = _fmt('交易所聚合完成：' if available else '交易所聚合为空态：', symbol=symbol,
+               current_time=current_time, status=status,
+               included_exchanges=_format_homepage_log_details(included_exchanges),
+               missing_exchanges=_format_homepage_log_details(missing_exchanges),
+               available=str(available).lower())
     if available:
-        logger.info(log_line)
+        logger.info(log)
     else:
-        logger.warning(log_line)
+        logger.warning(log)
 
 
 def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_time, taker_maps_by_period, anchor_time):
@@ -897,6 +888,24 @@ def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, taker
     }
 
 
+_FMT_COL_WIDTHS = (18, 16, 16, 16)
+
+
+def _cjk_ljust(s, width):
+    dw = sum(2 if ord(c) > 0x2e80 else 1 for c in s)
+    return s + ' ' * max(0, width - dw)
+
+
+def _fmt(label, **kw):
+    items = list(kw.items())
+    parts = [_cjk_ljust(label, _FMT_COL_WIDTHS[0])]
+    for i, (k, v) in enumerate(items[:3]):
+        parts.append(_cjk_ljust(f'{k}={v}', _FMT_COL_WIDTHS[min(i + 1, 3)]))
+    for k, v in items[3:]:
+        parts.append(f'{k}={v}')
+    return '  '.join(parts)
+
+
 def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exchange=None):
     """加载 OI 数据 - 使用范围查询获取完整区间数据"""
     import time as _time
@@ -926,7 +935,7 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         return {}
 
     latest_ms = (_time.time() - func_start) * 1000
-    logger.info(f'OI查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
+    logger.info(_fmt('OI查询：', exchange=exchange, symbols=len(symbols), duration=f'{latest_ms:.0f}ms'))
 
     # 只查询需要的目标时间点（当前点 + 每个间隔变化点）
     conditions = []
@@ -967,7 +976,7 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
 
     total_ms = (_time.time() - func_start) * 1000
     total_records = sum(len(v) for v in records_by_symbol.values())
-    logger.info(f'OI查询完成: 符号数={len(symbols)}, 目标时间点数={total_records}, 总耗时={total_ms:.0f}ms')
+    logger.info(_fmt('OI查询完成：', exchange=exchange, records=total_records, duration=f'{total_ms:.0f}ms'))
     return records_by_symbol
 
 
@@ -1003,7 +1012,7 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
         return {}
 
     latest_ms = (_time.time() - func_start) * 1000
-    logger.info(f'Kline查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
+    logger.info(_fmt('Kline查询：', exchange=exchange, symbols=len(symbols), duration=f'{latest_ms:.0f}ms'))
 
     # 查询完整范围的数据
     query = session.query(
@@ -1027,7 +1036,7 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
         records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
 
     total_ms = (_time.time() - func_start) * 1000
-    logger.info(f'Kline查询完成: 符号数={len(symbols)}, 返回记录数={sum(len(v) for v in records_by_symbol.values())}, 总耗时={total_ms:.0f}ms')
+    logger.info(_fmt('Kline查询完成：', exchange=exchange, symbols=len(symbols), records=sum(len(v) for v in records_by_symbol.values()), duration=f'{total_ms:.0f}ms'))
     return records_by_symbol
 
 
@@ -1063,7 +1072,7 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         return {}
 
     latest_ms = (_time.time() - func_start) * 1000
-    logger.info(f'Taker查询: symbol数={len(symbols)}, 最新时间查询耗时={latest_ms:.0f}ms')
+    logger.info(_fmt('Taker查询：', exchange=exchange, symbols=len(symbols), duration=f'{latest_ms:.0f}ms'))
 
     # 查询完整范围的数据
     query = session.query(
@@ -1085,7 +1094,7 @@ def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchang
         records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
 
     total_ms = (_time.time() - func_start) * 1000
-    logger.info(f'Taker查询完成: 符号数={len(symbols)}, 返回记录数={sum(len(v) for v in records_by_symbol.values())}, 总耗时={total_ms:.0f}ms')
+    logger.info(_fmt('Taker查询完成：', exchange=exchange, symbols=len(symbols), records=sum(len(v) for v in records_by_symbol.values()), duration=f'{total_ms:.0f}ms'))
     return records_by_symbol
 
 
@@ -1105,7 +1114,7 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         taker_periods = ['5m']
 
     start_time = __import__('time').perf_counter()
-    logger.debug('首页映射加载开始: exchange=%s symbols=%d', exchange, len(symbols))
+    logger.debug(_fmt('交易所加载开始：', exchange=exchange, symbols=len(symbols)))
 
     oi_start = __import__('time').perf_counter()
     oi_map = _load_open_interest_model_map(
@@ -1117,12 +1126,7 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     )
     oi_elapsed = __import__('time').perf_counter() - oi_start
     if oi_elapsed >= 0.1:
-        logger.info(
-            '首页映射 OI 完成: exchange=%s symbols=%d 耗时=%.2fs',
-            exchange,
-            len(symbols),
-            oi_elapsed,
-        )
+        logger.info(_fmt('OI 加载完成：', exchange=exchange, symbols=len(symbols), duration=f'{oi_elapsed:.2f}s'))
 
     kline_start = __import__('time').perf_counter()
     kline_map = _load_kline_model_map(
@@ -1134,12 +1138,7 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     )
     kline_elapsed = __import__('time').perf_counter() - kline_start
     if kline_elapsed >= 0.1:
-        logger.info(
-            '首页映射 Kline 完成: exchange=%s symbols=%d 耗时=%.2fs',
-            exchange,
-            len(symbols),
-            kline_elapsed,
-        )
+        logger.info(_fmt('Kline 加载完成：', exchange=exchange, symbols=len(symbols), duration=f'{kline_elapsed:.2f}s'))
 
     taker_start = __import__('time').perf_counter()
     taker_maps_by_period = {
@@ -1155,15 +1154,9 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         }
     taker_elapsed = __import__('time').perf_counter() - taker_start
     if taker_elapsed >= 0.1:
-        logger.info(
-            '首页映射 Taker 完成: exchange=%s periods=%d symbols=%d 耗时=%.2fs',
-            exchange,
-            len(taker_maps_by_period),
-            len(symbols),
-            taker_elapsed,
-        )
+        logger.info(_fmt('Taker 加载完成：', exchange=exchange, periods=len(taker_maps_by_period), symbols=len(symbols), duration=f'{taker_elapsed:.2f}s'))
 
-    logger.info('首页映射加载完成: exchange=%s 耗时=%.2fs', exchange, __import__('time').perf_counter() - start_time)
+    logger.info(_fmt('交易所加载完成：', exchange=exchange, duration=f'{__import__("time").perf_counter() - start_time:.2f}s'))
     return oi_map, kline_map, taker_maps_by_period
 
 
@@ -1191,12 +1184,12 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
         from coinx.database import get_session
         thread_session = get_session()
         try:
-            logger.info(f'线程开始加载交易所: {exchange}')
+            logger.info(_fmt('线程开始加载：', exchange=exchange))
             result = _load_exchange_homepage_maps(thread_session, exchange, symbols, upper_bound=upper_bound)
-            logger.info(f'线程完成加载交易所: {exchange}')
+            logger.info(_fmt('线程加载完成：', exchange=exchange))
             return exchange, result, None
         except Exception as e:
-            logger.error(f'线程加载交易所失败: {exchange}, error={e}')
+            logger.error(_fmt('线程加载失败：', exchange=exchange, error=e))
             return exchange, None, e
         finally:
             thread_session.close()
@@ -1204,14 +1197,14 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
     start_time = _time.perf_counter()
 
     # 使用线程池并行查询（最多4个并发，避免数据库连接池耗尽）
-    logger.info(f'开始并行加载 {len(supported_list)} 个交易所: {supported_list}')
+    logger.info(_fmt('开始并行加载：', exchanges=len(supported_list), exchange_list=supported_list))
     with ThreadPoolExecutor(max_workers=min(4, len(supported_list))) as executor:
         futures = {executor.submit(load_exchange, exchange): exchange for exchange in supported_list}
 
         for future in as_completed(futures):
             exchange, result, error = future.result()
             if error:
-                logger.error(f'交易所 {exchange} 加载失败: {error}')
+                logger.error(_fmt('交易所加载失败：', exchange=exchange, error=error))
                 exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
             else:
                 exchange_maps[exchange] = result
@@ -1222,7 +1215,7 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 exchange_adapters[exchange] = None
 
     elapsed = _time.perf_counter() - start_time
-    logger.info(f'首页映射并行加载完成: 交易所数={len(exchanges)}, 耗时={elapsed:.2f}s')
+    logger.info(_fmt('并行加载完成：', exchanges=len(exchanges), duration=f'{elapsed:.2f}s'))
 
     primary_exchange = PRIMARY_PRICE_EXCHANGE.lower()
 
