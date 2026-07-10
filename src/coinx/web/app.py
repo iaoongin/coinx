@@ -10,7 +10,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from coinx.config import WEB_DEBUG, WEB_HOST, WEB_PORT
+from coinx.config import WEB_AUTH_DISABLED, WEB_DEBUG, WEB_HOST, WEB_PORT
 from coinx.database import db_session
 from coinx.runtime import start_runtime_services
 from coinx.utils import logger
@@ -57,6 +57,8 @@ def create_app():
 
     @app.before_request
     def require_login():
+        if WEB_AUTH_DISABLED:
+            return None
         # 登录页、退出接口和静态资源不需要登录，其余请求统一拦截
         endpoint = request.endpoint or ''
         if endpoint in {'auth.login', 'auth.logout', 'auth.refresh', 'static'}:

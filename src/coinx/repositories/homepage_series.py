@@ -1,11 +1,10 @@
 import json
-import random
 from dataclasses import dataclass
 from decimal import Decimal
 from functools import lru_cache
 from typing import Optional
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, text
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
@@ -154,8 +153,127 @@ def _interval_to_ms(interval):
     raise ValueError(f'不支持的时间周期: {interval}')
 
 
-_MAX_INTERVAL_MS = max(_interval_to_ms(interval) for interval in TIME_INTERVALS)
-_REQUIRED_POINTS = (_MAX_INTERVAL_MS // FIVE_MINUTES_MS) + 1
+
+
+
+def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
+    import time as _time
+    func_start = _time.time()
+
+    intervals = [
+        ('5m',   1),
+        ('15m',  3),
+        ('30m',  6),
+        ('1h',   12),
+        ('4h',   48),
+        ('12h',  144),
+        ('24h',  288),
+        ('48h',  576),
+        ('72h',  864),
+        ('168h', 2016),
+    ]
+
+    result = _empty_net_inflow_map(symbols)
+
+    if not symbols:
+        return result
+
+    latest_rows = session.query(
+        MarketTakerBuySellVol.symbol,
+        func.max(MarketTakerBuySellVol.event_time).label('latest_time')
+    ).filter(
+        MarketTakerBuySellVol.symbol.in_(symbols),
+        MarketTakerBuySellVol.exchange == exchange,
+        MarketTakerBuySellVol.period == '5m',
+    ).group_by(MarketTakerBuySellVol.symbol).all()
+
+    if not latest_rows:
+        total_ms = (_time.time() - func_start) * 1000
+        logger.info(_fmt('净流入SQL查询完成：', exchange=exchange, symbols=0, duration=f'{total_ms:.0f}ms'))
+        return result
+
+    symbol_latest = {row.symbol: int(row.latest_time) for row in latest_rows}
+
+    symbol_placeholders = ', '.join(f':sym_{i}' for i in range(len(symbol_latest)))
+    sql = text(f"""
+        SELECT
+            v.symbol,
+            SUM(CASE WHEN v.event_time >= :base_5m   THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_5m,
+            SUM(CASE WHEN v.event_time >= :base_15m  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_15m,
+            SUM(CASE WHEN v.event_time >= :base_30m  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_30m,
+            SUM(CASE WHEN v.event_time >= :base_1h   THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_1h,
+            SUM(CASE WHEN v.event_time >= :base_4h   THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_4h,
+            SUM(CASE WHEN v.event_time >= :base_12h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_12h,
+            SUM(CASE WHEN v.event_time >= :base_24h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_24h,
+            SUM(CASE WHEN v.event_time >= :base_48h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_48h,
+            SUM(CASE WHEN v.event_time >= :base_72h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_72h,
+            SUM(CASE WHEN v.event_time >= :base_168h THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_168h,
+            SUM(CASE WHEN v.event_time >= :base_5m   THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_5m,
+            SUM(CASE WHEN v.event_time >= :base_15m  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_15m,
+            SUM(CASE WHEN v.event_time >= :base_30m  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_30m,
+            SUM(CASE WHEN v.event_time >= :base_1h   THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_1h,
+            SUM(CASE WHEN v.event_time >= :base_4h   THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_4h,
+            SUM(CASE WHEN v.event_time >= :base_12h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_12h,
+            SUM(CASE WHEN v.event_time >= :base_24h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_24h,
+            SUM(CASE WHEN v.event_time >= :base_48h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_48h,
+            SUM(CASE WHEN v.event_time >= :base_72h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_72h,
+            SUM(CASE WHEN v.event_time >= :base_168h THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_168h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_5m   THEN 1 ELSE 0 END) / 1   * 100, 1) AS health_5m,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_15m  THEN 1 ELSE 0 END) / 3   * 100, 1) AS health_15m,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_30m  THEN 1 ELSE 0 END) / 6   * 100, 1) AS health_30m,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_1h   THEN 1 ELSE 0 END) / 12  * 100, 1) AS health_1h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_4h   THEN 1 ELSE 0 END) / 48  * 100, 1) AS health_4h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_12h  THEN 1 ELSE 0 END) / 144 * 100, 1) AS health_12h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_24h  THEN 1 ELSE 0 END) / 288 * 100, 1) AS health_24h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_48h  THEN 1 ELSE 0 END) / 576 * 100, 1) AS health_48h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_72h  THEN 1 ELSE 0 END) / 864 * 100, 1) AS health_72h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_168h THEN 1 ELSE 0 END) / 2016 * 100, 1) AS health_168h
+        FROM market_taker_buy_sell_vol v
+        JOIN market_klines k
+          ON k.exchange = v.exchange AND k.symbol = v.symbol AND k.period = v.period AND k.open_time = v.event_time
+        WHERE v.exchange = :exchange
+          AND v.symbol IN ({symbol_placeholders})
+          AND v.period = '5m'
+          AND k.period = '5m'
+          AND v.event_time >= :lower_bound
+        GROUP BY v.symbol
+    """)
+
+    unified_base = list(symbol_latest.values())[0]
+    base_boundaries = {}
+    for interval, _ in intervals:
+        base_boundaries[f'base_{interval}'] = unified_base - int(_interval_to_ms(interval)) + FIVE_MINUTES_MS
+
+    params = {
+        'exchange': exchange,
+        'lower_bound': unified_base - int(_interval_to_ms('168h')) + FIVE_MINUTES_MS,
+        **{f'sym_{i}': s for i, s in enumerate(symbol_latest)},
+    }
+    params.update(base_boundaries)
+
+    rows = session.execute(sql, params).fetchall()
+
+    for row in rows:
+        symbol = row.symbol
+        if symbol in result:
+            for interval, _ in intervals:
+                col = f'net_inflow_{interval}'
+                val_col = f'net_inflow_value_{interval}'
+                health_col = f'health_{interval}'
+                val = getattr(row, col, None)
+                if val is not None:
+                    result[symbol]['net_inflow'][interval] = float(val)
+                val_v = getattr(row, val_col, None)
+                if val_v is not None:
+                    result[symbol]['net_inflow_value'][interval] = float(val_v)
+                health_val = getattr(row, health_col, None)
+                if health_val is not None:
+                    result[symbol]['health'][interval] = float(health_val)
+
+    total_ms = (_time.time() - func_start) * 1000
+    populated = sum(1 for s in result if result[s]['net_inflow'])
+    logger.info(_fmt('净流入SQL查询完成：', exchange=exchange, symbols=populated, duration=f'{total_ms:.0f}ms'))
+    return result
 
 
 def _empty_change():
@@ -186,82 +304,6 @@ def _calc_share_percent(value, total):
     return float(value or 0) / float(total) * 100
 
 
-def _get_exact_window(records_by_time, current_time, points):
-    window = []
-    for offset in range(points):
-        record = records_by_time.get(current_time - offset * FIVE_MINUTES_MS)
-        if record is not None:
-            window.append(record)
-    return window or None
-
-
-def _check_overall_window_health(records_by_time, current_time, sample_size=100):
-    max_points = _interval_to_ms(TIME_INTERVALS[-1]) // FIVE_MINUTES_MS
-    min_present = -(-max_points * HOMEPAGE_WINDOW_HEALTH_THRESHOLD // 100)
-
-    # 使用采样检查，避免遍历全部 2016 个时间点
-    actual_sample_size = min(sample_size, max_points)
-    sample_offsets = random.sample(range(max_points), actual_sample_size)
-    present = sum(
-        1 for offset in sample_offsets
-        if records_by_time.get(current_time - offset * FIVE_MINUTES_MS) is not None
-    )
-    # 按比例估算总覆盖率
-    estimated_present = present * (max_points / actual_sample_size)
-    return estimated_present >= min_present
-
-
-def _get_exact_window_by_step(records_by_time, current_time, points, step_ms):
-    window = []
-    for offset in range(points):
-        record = records_by_time.get(current_time - offset * step_ms)
-        if record is not None:
-            window.append(record)
-    return window or None
-
-
-def _calc_net_inflow_from_taker_vol(window, price=None):
-    if not window:
-        return 0
-    buy_vol = sum(float(item.buy_vol or 0) for item in window)
-    sell_vol = sum(float(item.sell_vol or 0) for item in window)
-    inflow = buy_vol - sell_vol
-    if price is not None:
-        return inflow * float(price)
-    return inflow
-
-
-def _calc_net_inflow_value_from_window(taker_window, kline_by_time):
-    if not taker_window or not kline_by_time:
-        return None
-
-    inflow_value = 0.0
-    has_value = False
-    for taker_point in taker_window:
-        kline_point = kline_by_time.get(taker_point.event_time)
-        if kline_point is None:
-            continue
-
-        if (
-            kline_point.quote_volume is not None
-            and kline_point.taker_buy_quote_volume is not None
-        ):
-            inflow_value += (2 * float(kline_point.taker_buy_quote_volume)) - float(kline_point.quote_volume)
-            has_value = True
-            continue
-
-        if kline_point.close_price is None:
-            continue
-        buy_vol = float(taker_point.buy_vol or 0)
-        sell_vol = float(taker_point.sell_vol or 0)
-        inflow_value += (buy_vol - sell_vol) * float(kline_point.close_price)
-        has_value = True
-
-    if not has_value:
-        return None
-    return inflow_value
-
-
 def _format_usd_map(values):
     return {
         interval: format_usd_value(value)
@@ -270,29 +312,8 @@ def _format_usd_map(values):
     }
 
 
-def _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time, price=None):
-    inflow = {}
-    for interval in TIME_INTERVALS:
-        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
-        window = _get_exact_window(taker_vol_by_time, current_time, points)
-        if not window:
-            continue
-
-        inflow[interval] = _calc_net_inflow_from_taker_vol(window, price=price)
-    return inflow
-
-
-def _build_net_inflow_value_from_taker_vol(taker_vol_by_time, kline_by_time, current_time):
-    inflow_value = {}
-    for interval in TIME_INTERVALS:
-        points = _interval_to_ms(interval) // FIVE_MINUTES_MS
-        taker_window = _get_exact_window(taker_vol_by_time, current_time, points)
-        if not taker_window:
-            continue
-        value = _calc_net_inflow_value_from_window(taker_window, kline_by_time)
-        if value is not None:
-            inflow_value[interval] = value
-    return inflow_value
+def _empty_net_inflow_map(symbols):
+    return {symbol: {'net_inflow': {}, 'net_inflow_value': {}, 'health': {}} for symbol in symbols}
 
 
 def _format_homepage_log_details(details):
@@ -381,7 +402,7 @@ def _log_homepage_symbol_summary(symbol, included_exchanges, missing_exchanges, 
         logger.warning(log)
 
 
-def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_time, taker_maps_by_period, anchor_time):
+def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_time, anchor_time):
     reasons = []
 
     if not oi_by_time:
@@ -439,94 +460,6 @@ def _collect_exchange_homepage_rejection_reasons(exchange, oi_by_time, kline_by_
     return reasons
 
 
-def _collect_exchange_homepage_taker_reasons(exchange, taker_maps_by_period, anchor_time):
-    if anchor_time is None:
-        return []
-
-    has_any_taker_history = any(bool(period_map) for period_map in (taker_maps_by_period or {}).values())
-    if not has_any_taker_history:
-        return [{'reason': 'missing_taker_history', 'details': {'health_pct': 0}}]
-
-    best_map = max(
-        (period_map for period_map in (taker_maps_by_period or {}).values()),
-        key=len,
-    )
-    total = _interval_to_ms(TIME_INTERVALS[-1]) // FIVE_MINUTES_MS
-    present = sum(
-        1 for offset in range(total)
-        if best_map.get(anchor_time - offset * FIVE_MINUTES_MS) is not None
-    )
-    health_pct = round(present / total * 100, 1)
-    if health_pct >= HOMEPAGE_WINDOW_HEALTH_THRESHOLD:
-        return []
-    return [{'reason': 'taker_health_low', 'details': {'health_pct': health_pct}}]
-
-
-def _period_to_ms(period):
-    if period.endswith('m'):
-        return int(period[:-1]) * 60 * 1000
-    if period.endswith('h') or period.endswith('H'):
-        return int(period[:-1]) * 60 * 60 * 1000
-    if period.endswith('d') or period.endswith('D'):
-        return int(period[:-1]) * 24 * 60 * 60 * 1000
-    raise ValueError(f'unsupported homepage period: {period}')
-
-
-def _calc_net_inflow_for_period(taker_vol_by_time, current_time, interval, period):
-    if not taker_vol_by_time:
-        return None
-
-    period_ms = _period_to_ms(period)
-    interval_ms = _interval_to_ms(interval)
-    points = interval_ms // period_ms
-    if points <= 0:
-        return None
-
-    if period == '5m':
-        # 对于 5m 周期，使用最近的可用数据（允许时间偏差）
-        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
-        if not available_times:
-            return None
-        period_current_time = max(available_times)
-    else:
-        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
-        if not available_times:
-            return None
-        period_current_time = max(available_times)
-    window = _get_exact_window_by_step(taker_vol_by_time, period_current_time, points, period_ms)
-    if not window:
-        return None
-    return _calc_net_inflow_from_taker_vol(window)
-
-
-def _calc_net_inflow_value_for_period(taker_vol_by_time, kline_by_time, current_time, interval, period):
-    if not taker_vol_by_time or not kline_by_time:
-        return None
-
-    period_ms = _period_to_ms(period)
-    interval_ms = _interval_to_ms(interval)
-    points = interval_ms // period_ms
-    if points <= 0:
-        return None
-
-    if period == '5m':
-        # 对于 5m 周期，使用最近的可用数据（允许时间偏差）
-        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
-        if not available_times:
-            return None
-        period_current_time = max(available_times)
-    else:
-        available_times = [event_time for event_time in taker_vol_by_time if event_time <= current_time]
-        if not available_times:
-            return None
-        period_current_time = max(available_times)
-
-    taker_window = _get_exact_window_by_step(taker_vol_by_time, period_current_time, points, period_ms)
-    if not taker_window:
-        return None
-    return _calc_net_inflow_value_from_window(taker_window, kline_by_time)
-
-
 def _has_required_change_coverage(oi_by_time, kline_by_time, current_time):
     if not current_time:
         return False
@@ -534,15 +467,7 @@ def _has_required_change_coverage(oi_by_time, kline_by_time, current_time):
         target = current_time - _interval_to_ms(interval)
         if oi_by_time.get(target) is None:
             return False
-    return _check_overall_window_health(kline_by_time, current_time)
-
-
-def _has_required_net_inflow_coverage(kline_by_time, current_time):
-    return _check_overall_window_health(kline_by_time, current_time)
-
-
-def _has_required_net_inflow_coverage_vol(taker_vol_by_time, current_time):
-    return _check_overall_window_health(taker_vol_by_time, current_time)
+    return True
 
 
 def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
@@ -552,17 +477,6 @@ def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
 
     current_time = common_times[-1]
     return _has_required_change_coverage(oi_by_time, kline_by_time, current_time)
-
-
-def _has_complete_homepage_coverage_full(oi_by_time, kline_by_time, taker_vol_by_time):
-    common_times = sorted(set(oi_by_time).intersection(kline_by_time).intersection(taker_vol_by_time))
-    if not common_times:
-        return False
-
-    current_time = common_times[-1]
-    return _has_required_change_coverage(oi_by_time, kline_by_time, current_time) and _has_required_net_inflow_coverage_vol(
-        taker_vol_by_time, current_time
-    )
 
 
 def _build_open_interest_point(row):
@@ -583,16 +497,6 @@ def _build_kline_point(row):
         close_price=float(row.close_price) if row.close_price is not None else None,
         quote_volume=float(row.quote_volume) if row.quote_volume is not None else None,
         taker_buy_quote_volume=float(row.taker_buy_quote_volume) if row.taker_buy_quote_volume is not None else None,
-    )
-
-
-def _build_taker_buy_sell_vol_point(row):
-    return HomepageTakerBuySellVolPoint(
-        symbol=row.symbol,
-        event_time=int(row.event_time),
-        buy_sell_ratio=float(row.buy_sell_ratio) if row.buy_sell_ratio is not None else None,
-        buy_vol=float(row.buy_vol) if row.buy_vol is not None else None,
-        sell_vol=float(row.sell_vol) if row.sell_vol is not None else None,
     )
 
 
@@ -645,27 +549,6 @@ def _with_estimated_open_interest_value(point, reference_kline):
     )
 
 
-def _merge_taker_points(*points):
-    existing_points = [point for point in points if point is not None]
-    if not existing_points:
-        return None
-
-    symbol = existing_points[0].symbol
-    event_time = existing_points[0].event_time
-    total_buy_vol = sum(float(point.buy_vol or 0) for point in existing_points)
-    total_sell_vol = sum(float(point.sell_vol or 0) for point in existing_points)
-    ratio = None
-    if total_sell_vol:
-        ratio = total_buy_vol / total_sell_vol
-    return HomepageTakerBuySellVolPoint(
-        symbol=symbol,
-        event_time=event_time,
-        buy_sell_ratio=ratio,
-        buy_vol=total_buy_vol,
-        sell_vol=total_sell_vol,
-    )
-
-
 def _build_exchange_open_interest_rows(exchange_points, total_value, total_open_interest):
     rows = []
     for exchange, point in exchange_points.items():
@@ -698,14 +581,34 @@ def _supports_taker(exchange):
         return False
 
 
+def _has_unreliable_taker_source(exchange):
+    return (exchange or '').lower() == 'gate'
+
+
 def _has_available_taker_source(exchange, status, support_state=None, taker_rejection=None):
     if status != 'included':
         return False
     if (support_state or {}).get('state') == 'unsupported':
         return False
+    if _has_unreliable_taker_source(exchange):
+        return False
     if not _supports_taker(exchange):
         return False
     return not bool((taker_rejection or {}).get('reasons'))
+
+
+def _build_taker_status(exchange, row_status, support_state=None, taker_rejection=None):
+    if row_status != 'included':
+        return row_status
+    if (support_state or {}).get('state') == 'unsupported':
+        return 'unsupported'
+    if _has_unreliable_taker_source(exchange):
+        return 'unreliable'
+    if not _supports_taker(exchange):
+        return 'unsupported'
+    if (taker_rejection or {}).get('reasons'):
+        return 'missing'
+    return 'available'
 
 
 def _build_exchange_status_rows(
@@ -766,13 +669,14 @@ def _build_exchange_status_rows(
                 support_state=support_state,
                 taker_rejection=taker_rejection,
             )
-            if taker_rejection.get('reasons'):
-                row['taker_status'] = 'missing'
+            row['taker_status'] = _build_taker_status(
+                exchange,
+                row['status'],
+                support_state=support_state,
+                taker_rejection=taker_rejection,
+            )
+            if taker_rejection.get('reasons') and row['taker_status'] == 'missing':
                 row['taker_reason'] = taker_rejection.get('reasons')
-            elif not exchange_supports_taker:
-                row['taker_status'] = 'unsupported'
-            else:
-                row['taker_status'] = 'available'
             rows.append(row)
             continue
 
@@ -805,15 +709,14 @@ def _build_exchange_status_rows(
             row['reason'] = rejection.get('reasons') or []
             row['stage'] = rejection.get('stage')
         taker_rejection = snapshot.get('taker_rejection') or {}
-        if row_status != 'included':
-            row['taker_status'] = row_status
-        elif not exchange_supports_taker:
-            row['taker_status'] = 'unsupported'
-        elif taker_rejection.get('reasons'):
-            row['taker_status'] = 'missing'
+        row['taker_status'] = _build_taker_status(
+            exchange,
+            row_status,
+            support_state=support_state,
+            taker_rejection=taker_rejection,
+        )
+        if taker_rejection.get('reasons') and row['taker_status'] == 'missing':
             row['taker_reason'] = taker_rejection.get('reasons')
-        else:
-            row['taker_status'] = 'available'
         if support_state.get('state') == 'unknown':
             row['support_state'] = 'unknown'
         rows.append(row)
@@ -847,44 +750,50 @@ def _get_exchange_common_time(oi_by_time, kline_by_time):
     return common_times[-1]
 
 
-def _exchange_supports_homepage_anchor(exchange, oi_by_time, kline_by_time, taker_maps_by_period, anchor_time):
+def _exchange_supports_homepage_anchor(exchange, oi_by_time, kline_by_time, anchor_time):
     return not _collect_exchange_homepage_rejection_reasons(
         exchange,
         oi_by_time,
         kline_by_time,
-        taker_maps_by_period,
         anchor_time,
     )
 
 
-def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, taker_maps_by_period):
+def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time):
+    _s = __import__('time').perf_counter()
     current_time = _get_exchange_common_time(oi_by_time, kline_by_time)
+    _t1 = __import__('time').perf_counter()
+    _ct_ms = (_t1 - _s) * 1000
     if current_time is None:
+        reasons = _collect_exchange_homepage_rejection_reasons(
+            exchange,
+            oi_by_time,
+            kline_by_time,
+            None,
+        )
+        _t2 = __import__('time').perf_counter()
+        _rej_ms = (_t2 - _t1) * 1000
+        logger.info(_fmt('snapshot明细：', exchange=exchange, common_time_ms=f'{_ct_ms:.1f}', rejection_ms=f'{_rej_ms:.1f}'))
         return {
             'complete': False,
             'current_time': None,
-            'reasons': _collect_exchange_homepage_rejection_reasons(
-                exchange,
-                oi_by_time,
-                kline_by_time,
-                taker_maps_by_period,
-                None,
-            ),
+            'reasons': reasons,
         }
 
     reasons = _collect_exchange_homepage_rejection_reasons(
         exchange,
         oi_by_time,
         kline_by_time,
-        taker_maps_by_period,
         current_time,
     )
+    _t2 = __import__('time').perf_counter()
+    _rej_ms = (_t2 - _t1) * 1000
     complete = not reasons
+    logger.info(_fmt('snapshot明细：', exchange=exchange, common_time_ms=f'{_ct_ms:.1f}', rejection_ms=f'{_rej_ms:.1f}'))
     return {
         'complete': complete,
         'current_time': current_time,
         'reasons': reasons,
-        'taker_reasons': _collect_exchange_homepage_taker_reasons(exchange, taker_maps_by_period, current_time),
     }
 
 
@@ -907,13 +816,12 @@ def _fmt(label, **kw):
 
 
 def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exchange=None):
-    """加载 OI 数据 - 使用范围查询获取完整区间数据"""
+    """加载 OI 数据 - 按目标时间点加载"""
     import time as _time
     func_start = _time.time()
     if not symbols:
-        return {}
+        return {}, {}
 
-    # 先查询每个 symbol 的最新时间点
     time_field = model.event_time
     latest_query = session.query(
         model.symbol,
@@ -926,18 +834,16 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         latest_query = latest_query.filter(model.exchange == exchange)
     latest_query = latest_query.group_by(model.symbol)
 
-    # 收集每个 symbol 的 latest_time，并计算需要的目标时间点
     symbol_latest = {}
     for row in latest_query.all():
         symbol_latest[row.symbol] = int(row.latest_time)
 
     if not symbol_latest:
-        return {}
+        return {}, {}
 
     latest_ms = (_time.time() - func_start) * 1000
     logger.info(_fmt('OI查询：', exchange=exchange, symbols=len(symbols), duration=f'{latest_ms:.0f}ms'))
 
-    # 只查询需要的目标时间点（当前点 + 每个间隔变化点）
     conditions = []
     for symbol, latest in symbol_latest.items():
         target_times = {latest}
@@ -955,7 +861,7 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
         conditions.append(condition)
 
     if not conditions:
-        return {}
+        return {}, symbol_latest
 
     query = session.query(
         model.symbol,
@@ -977,44 +883,58 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
     total_ms = (_time.time() - func_start) * 1000
     total_records = sum(len(v) for v in records_by_symbol.values())
     logger.info(_fmt('OI查询完成：', exchange=exchange, records=total_records, duration=f'{total_ms:.0f}ms'))
-    return records_by_symbol
+    return records_by_symbol, symbol_latest
 
 
-def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=None):
-    """加载 Kline 数据 - 需要完整范围用于计算净流入价值"""
+def _load_kline_model_map(session, model, symbols, symbol_latest=None, upper_bound=None, exchange=None):
+    """加载 Kline 数据 - 按目标时间点加载。接受 symbol_latest 确保与 OI 同基准"""
     import time as _time
     func_start = _time.time()
     if not symbols:
-        return {}
+        return {}, {}
 
-    # 先查询每个 symbol 的最新时间点，确保数据范围正确
-    time_field = model.open_time
-    latest_query = session.query(
-        model.symbol,
-        func.max(time_field).label('latest_time')
-    ).filter(
-        model.symbol.in_(symbols),
-        model.period == '5m'
-    )
-    if hasattr(model, 'exchange') and exchange is not None:
-        latest_query = latest_query.filter(model.exchange == exchange)
-    latest_query = latest_query.group_by(model.symbol)
+    if symbol_latest is None:
+        time_field = model.open_time
+        latest_query = session.query(
+            model.symbol,
+            func.max(time_field).label('latest_time')
+        ).filter(
+            model.symbol.in_(symbols),
+            model.period == '5m'
+        )
+        if hasattr(model, 'exchange') and exchange is not None:
+            latest_query = latest_query.filter(model.exchange == exchange)
+        latest_query = latest_query.group_by(model.symbol)
 
-    # 计算基于实际最新时间的下界
-    actual_lower_bound = None
-    for row in latest_query.all():
-        latest_time = int(row.latest_time)
-        candidate = latest_time - _MAX_INTERVAL_MS
-        if actual_lower_bound is None or candidate < actual_lower_bound:
-            actual_lower_bound = candidate
+        symbol_latest = {}
+        for row in latest_query.all():
+            symbol_latest[row.symbol] = int(row.latest_time)
 
-    if actual_lower_bound is None:
-        return {}
+        if not symbol_latest:
+            return {}, {}
 
     latest_ms = (_time.time() - func_start) * 1000
     logger.info(_fmt('Kline查询：', exchange=exchange, symbols=len(symbols), duration=f'{latest_ms:.0f}ms'))
 
-    # 查询完整范围的数据
+    conditions = []
+    for symbol, latest in symbol_latest.items():
+        target_times = {latest}
+        for interval in TIME_INTERVALS:
+            target_times.add(latest - _interval_to_ms(interval))
+        target_times = sorted(t for t in target_times if t > 0)
+        if not target_times:
+            continue
+        condition = and_(
+            model.symbol == symbol,
+            model.open_time.in_(target_times),
+        )
+        if hasattr(model, 'exchange') and exchange is not None:
+            condition = and_(condition, model.exchange == exchange)
+        conditions.append(condition)
+
+    if not conditions:
+        return {}, symbol_latest
+
     query = session.query(
         model.symbol,
         model.open_time,
@@ -1023,12 +943,12 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
         model.close_price,
         model.quote_volume,
         model.taker_buy_quote_volume,
-    ).filter(model.symbol.in_(symbols), model.period == '5m')
-    if hasattr(model, 'exchange') and exchange is not None:
-        query = query.filter(model.exchange == exchange)
+    ).filter(
+        or_(*conditions),
+        model.period == '5m',
+    )
     if upper_bound is not None:
         query = query.filter(model.open_time <= upper_bound)
-    query = query.filter(model.open_time >= actual_lower_bound)
 
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
@@ -1037,87 +957,17 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
 
     total_ms = (_time.time() - func_start) * 1000
     logger.info(_fmt('Kline查询完成：', exchange=exchange, symbols=len(symbols), records=sum(len(v) for v in records_by_symbol.values()), duration=f'{total_ms:.0f}ms'))
-    return records_by_symbol
-
-
-def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchange=None, period='5m'):
-    """加载 Taker 数据 - 需要完整范围用于累计净流入"""
-    import time as _time
-    func_start = _time.time()
-    if not symbols:
-        return {}
-
-    # 先查询每个 symbol 的最新时间点，确保数据范围正确
-    time_field = model.event_time
-    latest_query = session.query(
-        model.symbol,
-        func.max(time_field).label('latest_time')
-    ).filter(
-        model.symbol.in_(symbols),
-        model.period == period
-    )
-    if hasattr(model, 'exchange') and exchange is not None:
-        latest_query = latest_query.filter(model.exchange == exchange)
-    latest_query = latest_query.group_by(model.symbol)
-
-    # 计算基于实际最新时间的下界
-    actual_lower_bound = None
-    for row in latest_query.all():
-        latest_time = int(row.latest_time)
-        candidate = latest_time - _MAX_INTERVAL_MS
-        if actual_lower_bound is None or candidate < actual_lower_bound:
-            actual_lower_bound = candidate
-
-    if actual_lower_bound is None:
-        return {}
-
-    latest_ms = (_time.time() - func_start) * 1000
-    logger.info(_fmt('Taker查询：', exchange=exchange, symbols=len(symbols), duration=f'{latest_ms:.0f}ms'))
-
-    # 查询完整范围的数据
-    query = session.query(
-        model.symbol,
-        model.event_time,
-        model.buy_sell_ratio,
-        model.buy_vol,
-        model.sell_vol,
-    ).filter(model.symbol.in_(symbols), model.period == period)
-    if hasattr(model, 'exchange') and exchange is not None:
-        query = query.filter(model.exchange == exchange)
-    if upper_bound is not None:
-        query = query.filter(model.event_time <= upper_bound)
-    query = query.filter(model.event_time >= actual_lower_bound)
-
-    records_by_symbol = {symbol: {} for symbol in symbols}
-    for row in query.all():
-        point = _build_taker_buy_sell_vol_point(row)
-        records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
-
-    total_ms = (_time.time() - func_start) * 1000
-    logger.info(_fmt('Taker查询完成：', exchange=exchange, symbols=len(symbols), records=sum(len(v) for v in records_by_symbol.values()), duration=f'{total_ms:.0f}ms'))
-    return records_by_symbol
+    return records_by_symbol, symbol_latest
 
 
 def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     exchange = exchange.lower()
-    try:
-        adapter = get_exchange_adapter(exchange)
-        taker_periods = sorted(
-            {
-                adapter.taker_period_for_interval(interval)
-                for interval in TIME_INTERVALS
-                if adapter.taker_period_for_interval(interval)
-            }
-        )
-    except Exception:
-        adapter = None
-        taker_periods = ['5m']
 
     start_time = __import__('time').perf_counter()
     logger.debug(_fmt('交易所加载开始：', exchange=exchange, symbols=len(symbols)))
 
     oi_start = __import__('time').perf_counter()
-    oi_map = _load_open_interest_model_map(
+    oi_map, symbol_latest = _load_open_interest_model_map(
         session,
         MarketOpenInterestHist,
         symbols,
@@ -1129,10 +979,11 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
         logger.info(_fmt('OI 加载完成：', exchange=exchange, symbols=len(symbols), duration=f'{oi_elapsed:.2f}s'))
 
     kline_start = __import__('time').perf_counter()
-    kline_map = _load_kline_model_map(
+    kline_map, kline_latest = _load_kline_model_map(
         session,
         MarketKline,
         symbols,
+        symbol_latest=symbol_latest,
         upper_bound=upper_bound,
         exchange=exchange,
     )
@@ -1140,24 +991,28 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     if kline_elapsed >= 0.1:
         logger.info(_fmt('Kline 加载完成：', exchange=exchange, symbols=len(symbols), duration=f'{kline_elapsed:.2f}s'))
 
-    taker_start = __import__('time').perf_counter()
-    taker_maps_by_period = {
-        period: _load_taker_vol_model_map(
+    net_inflow_start = __import__('time').perf_counter()
+    if _has_unreliable_taker_source(exchange):
+        net_inflow_map = _empty_net_inflow_map(symbols)
+        logger.info('Skip homepage net inflow SQL for unreliable taker source: exchange=%s symbols=%s', exchange, len(symbols))
+    else:
+        net_inflow_map = _load_net_inflow_sql(
             session,
-            MarketTakerBuySellVol,
+            exchange,
             symbols,
             upper_bound=upper_bound,
-            exchange=exchange,
-            period=period,
         )
-        for period in taker_periods
-        }
-    taker_elapsed = __import__('time').perf_counter() - taker_start
-    if taker_elapsed >= 0.1:
-        logger.info(_fmt('Taker 加载完成：', exchange=exchange, periods=len(taker_maps_by_period), symbols=len(symbols), duration=f'{taker_elapsed:.2f}s'))
+    net_inflow_elapsed = __import__('time').perf_counter() - net_inflow_start
+    if net_inflow_elapsed >= 0.1:
+        logger.info(_fmt('净流入查询完成：', exchange=exchange, symbols=len(symbols), duration=f'{net_inflow_elapsed:.2f}s'))
 
+    unified_latest = {
+        sym: min(symbol_latest.get(sym, 0), kline_latest.get(sym, 0))
+        for sym in symbols
+        if sym in symbol_latest and sym in kline_latest
+    }
     logger.info(_fmt('交易所加载完成：', exchange=exchange, duration=f'{__import__("time").perf_counter() - start_time:.2f}s'))
-    return oi_map, kline_map, taker_maps_by_period
+    return oi_map, kline_map, net_inflow_map, unified_latest
 
 
 def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
@@ -1175,47 +1030,53 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
 
     # 不支持的交易所直接填充空数据
     for exchange in unsupported_list:
-        exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
+        exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {}, {})
         exchange_adapters[exchange] = None
 
     # 并行查询支持的交易所
     def load_exchange(exchange):
-        """加载单个交易所的数据（在线程中运行）"""
+        """Load one exchange in a worker thread."""
         from coinx.database import get_session
         thread_session = get_session()
+        adapter = None
         try:
-            logger.info(_fmt('线程开始加载：', exchange=exchange))
+            logger.info('Homepage exchange load start: exchange=%s', exchange)
             result = _load_exchange_homepage_maps(thread_session, exchange, symbols, upper_bound=upper_bound)
-            logger.info(_fmt('线程加载完成：', exchange=exchange))
-            return exchange, result, None
+            try:
+                adapter = get_exchange_adapter(exchange)
+            except Exception:
+                adapter = None
+            if adapter is not None and hasattr(adapter, 'warm_symbol_support_cache'):
+                try:
+                    adapter.warm_symbol_support_cache()
+                except Exception as exc:
+                    logger.warning('Exchange support cache prewarm failed: exchange=%s error=%s', exchange, exc)
+            logger.info('Homepage exchange load done: exchange=%s', exchange)
+            return exchange, result, adapter, None
         except Exception as e:
-            logger.error(_fmt('线程加载失败：', exchange=exchange, error=e))
-            return exchange, None, e
+            logger.error('Homepage exchange load failed: exchange=%s error=%s', exchange, e)
+            return exchange, None, adapter, e
         finally:
             thread_session.close()
 
     start_time = _time.perf_counter()
 
-    # 使用线程池并行查询（最多4个并发，避免数据库连接池耗尽）
-    logger.info(_fmt('开始并行加载：', exchanges=len(supported_list), exchange_list=supported_list))
+    logger.info('Homepage parallel exchange load start: exchanges=%s exchange_list=%s', len(supported_list), supported_list)
     with ThreadPoolExecutor(max_workers=min(4, len(supported_list))) as executor:
         futures = {executor.submit(load_exchange, exchange): exchange for exchange in supported_list}
 
         for future in as_completed(futures):
-            exchange, result, error = future.result()
+            exchange, result, adapter, error = future.result()
             if error:
-                logger.error(_fmt('交易所加载失败：', exchange=exchange, error=error))
-                exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {})
+                logger.error('Homepage exchange load failed after future completion: exchange=%s error=%s', exchange, error)
+                exchange_maps[exchange] = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {}, {})
             else:
                 exchange_maps[exchange] = result
 
-            try:
-                exchange_adapters[exchange] = get_exchange_adapter(exchange)
-            except Exception:
-                exchange_adapters[exchange] = None
+            exchange_adapters[exchange] = adapter
 
     elapsed = _time.perf_counter() - start_time
-    logger.info(_fmt('并行加载完成：', exchanges=len(exchanges), duration=f'{elapsed:.2f}s'))
+    logger.info('Homepage parallel exchange load done: exchanges=%s duration=%.2fs', len(exchanges), elapsed)
 
     primary_exchange = PRIMARY_PRICE_EXCHANGE.lower()
 
@@ -1229,21 +1090,23 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             'net_inflow': {},
             'net_inflow_value': {},
             'status': 'empty',
+            'latest_time': None,
         }
         for symbol in symbols
     }
     selected_kline_map = {symbol: {} for symbol in symbols}
 
     for symbol in symbols:
+        _sym_start = __import__('time').perf_counter()
         symbol_exchange_snapshots = {}
         exchange_rejection_info = {}
-        for exchange, (oi_map, _kline_map, taker_maps_by_period) in exchange_maps.items():
+        symbol_net_inflow_by_exchange = {}
+        for exchange, (oi_map, _kline_map, net_inflow_map, unified_latest) in exchange_maps.items():
             if exchange not in supported_exchanges:
                 symbol_exchange_snapshots[exchange] = {
                     'current_time': None,
                     'oi_by_time': {},
                     'kline_by_time': {},
-                    'taker_maps_by_period': {},
                     'complete': False,
                     'unsupported': True,
                     'support_state': {'state': 'unsupported'},
@@ -1267,17 +1130,18 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 }
                 continue
 
+            _e_start = __import__('time').perf_counter()
             adapter = exchange_adapters.get(exchange)
             support_state = {'state': 'supported', 'supported': True, 'known': True}
             if adapter is not None and hasattr(adapter, 'symbol_support_state'):
-                support_state = adapter.symbol_support_state(symbol, session=session)
+                support_state = adapter.symbol_support_state(symbol)
+            _t_support = (__import__('time').perf_counter() - _e_start) * 1000
 
             if support_state.get('state') == 'unsupported':
                 symbol_exchange_snapshots[exchange] = {
                     'current_time': None,
                     'oi_by_time': {},
                     'kline_by_time': {},
-                    'taker_maps_by_period': {},
                     'complete': False,
                     'unsupported': True,
                     'support_state': support_state,
@@ -1302,39 +1166,63 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'anchor_time': None,
                     'reasons': symbol_exchange_snapshots[exchange]['reasons'],
                 }
+                logger.info(_fmt('聚合打点：', symbol=symbol, exchange=exchange, support=f'{_t_support:.1f}', get='-', snap='-', taker='-'))
                 continue
 
+            _t3 = __import__('time').perf_counter()
             symbol_oi = oi_map.get(symbol, {})
             symbol_kline = _kline_map.get(symbol, {})
-            symbol_taker = {
-                period: period_map.get(symbol, {})
-                for period, period_map in (taker_maps_by_period or {}).items()
-            }
-            if symbol_oi or symbol_kline or any(symbol_taker.values()):
+            symbol_net_inflow = net_inflow_map.get(symbol, {'net_inflow': {}, 'health': {}})
+            symbol_net_inflow_by_exchange[exchange] = symbol_net_inflow
+            _t_get = (__import__('time').perf_counter() - _t3) * 1000
+
+            _t_snap = 0.0
+            _t_taker = 0.0
+            if symbol_oi or symbol_kline:
+                _t4 = __import__('time').perf_counter()
                 snapshot = _build_exchange_homepage_snapshot(
                     exchange=exchange,
                     oi_by_time=symbol_oi,
                     kline_by_time=symbol_kline,
-                    taker_maps_by_period=symbol_taker,
                 )
+                _t_snap = (__import__('time').perf_counter() - _t4) * 1000
+
+                _t5 = __import__('time').perf_counter()
+                taker_reasons = []
+                if _has_unreliable_taker_source(exchange):
+                    taker_reasons.append({'reason': 'unreliable_taker_source', 'details': {'exchange': exchange}})
+                else:
+                    net_inflow_data = symbol_net_inflow.get('net_inflow', {})
+                    health = symbol_net_inflow.get('health', {})
+                    has_any_taker = bool(net_inflow_data)
+                    if not has_any_taker:
+                        taker_reasons.append({'reason': 'missing_taker_history', 'details': {'health_pct': 0}})
+                    else:
+                        for interval in TIME_INTERVALS:
+                            h = health.get(interval)
+                            if h is not None and h < HOMEPAGE_WINDOW_HEALTH_THRESHOLD:
+                                taker_reasons.append({
+                                    'reason': 'taker_health_low',
+                                    'details': {'interval': interval, 'health_pct': h},
+                                })
+                _t_taker = (__import__('time').perf_counter() - _t5) * 1000
+
                 symbol_exchange_snapshots[exchange] = {
                     'current_time': snapshot['current_time'],
                     'oi_by_time': symbol_oi,
                     'kline_by_time': symbol_kline,
-                    'taker_maps_by_period': symbol_taker,
                     'complete': snapshot['complete'],
                     'unsupported': False,
                     'support_state': support_state,
                     'taker_rejection': {
                         'stage': 'taker_validation',
                         'anchor_time': snapshot.get('current_time'),
-                        'reasons': snapshot.get('taker_reasons') or [],
+                        'reasons': taker_reasons,
                     },
                     'reasons': snapshot.get('reasons') or _collect_exchange_homepage_rejection_reasons(
                         exchange,
                         symbol_oi,
                         symbol_kline,
-                        symbol_taker,
                         snapshot.get('current_time'),
                     ),
                 }
@@ -1352,20 +1240,18 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'current_time': None,
                     'oi_by_time': symbol_oi,
                     'kline_by_time': symbol_kline,
-                    'taker_maps_by_period': symbol_taker,
                     'complete': False,
                     'unsupported': False,
                     'support_state': support_state,
                     'taker_rejection': {
                         'stage': 'taker_validation',
                         'anchor_time': None,
-                        'reasons': _collect_exchange_homepage_taker_reasons(exchange, symbol_taker, None),
+                        'reasons': [{'reason': 'missing_taker_history', 'details': {'health_pct': 0}}],
                     },
                     'reasons': _collect_exchange_homepage_rejection_reasons(
                         exchange,
                         symbol_oi,
                         symbol_kline,
-                        symbol_taker,
                         None,
                     ),
                 }
@@ -1375,6 +1261,8 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     'anchor_time': None,
                     'reasons': symbol_exchange_snapshots[exchange]['reasons'],
                 }
+
+            logger.info(_fmt('聚合打点：', symbol=symbol, exchange=exchange, support=f'{_t_support:.1f}', get=f'{_t_get:.1f}', snap=f'{_t_snap:.1f}', taker=f'{_t_taker:.1f}'))
 
         included_exchanges = [
             exchange
@@ -1406,6 +1294,10 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 current_time=None,
             )
             continue
+
+        _t1 = __import__('time').perf_counter()
+        _snap_elapsed = (_t1 - _sym_start) * 1000
+        logger.info(_fmt('聚合打点：', symbol=symbol, stage='snapshot', ms=f'{_snap_elapsed:.0f}'))
 
         anchor_candidates = [
             snapshot['current_time']
@@ -1447,7 +1339,6 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                     exchange=exchange,
                     oi_by_time=snapshot['oi_by_time'],
                     kline_by_time=snapshot['kline_by_time'],
-                    taker_maps_by_period=snapshot['taker_maps_by_period'],
                     anchor_time=anchor_time,
                 ):
                     included_exchanges.append(exchange)
@@ -1460,16 +1351,6 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                             exchange,
                             snapshot['oi_by_time'],
                             snapshot['kline_by_time'],
-                            snapshot['taker_maps_by_period'],
-                            anchor_time,
-                        ),
-                    }
-                    snapshot['taker_rejection'] = {
-                        'stage': 'taker_validation',
-                        'anchor_time': anchor_time,
-                        'reasons': _collect_exchange_homepage_taker_reasons(
-                            exchange,
-                            snapshot['taker_maps_by_period'],
                             anchor_time,
                         ),
                     }
@@ -1517,6 +1398,13 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
         coverage_map[symbol]['source_exchanges'] = included_exchanges
         coverage_map[symbol]['missing_exchanges'] = _normalize_exchange_list(missing_exchanges)
         coverage_map[symbol]['status'] = 'complete' if not coverage_map[symbol]['missing_exchanges'] else 'partial'
+
+        unified_times = [
+            unified_latest.get(symbol)
+            for exchange, (_, _, _, unified_latest) in exchange_maps.items()
+            if exchange in included_exchanges and unified_latest.get(symbol)
+        ]
+        coverage_map[symbol]['latest_time'] = min(unified_times) if unified_times else None
         for exchange in coverage_map[symbol]['missing_exchanges']:
             rejection = exchange_rejection_info.get(exchange)
             if rejection:
@@ -1534,6 +1422,10 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             status=coverage_map[symbol]['status'],
             current_time=anchor_time,
         )
+
+        _t2 = __import__('time').perf_counter()
+        _anchor_elapsed = (_t2 - _t1) * 1000
+        logger.info(_fmt('聚合打点：', symbol=symbol, stage='anchor_loop', ms=f'{_anchor_elapsed:.0f}'))
 
         price_exchange = primary_exchange if primary_exchange in included_exchanges else included_exchanges[0]
         selected_kline_map[symbol] = exchange_maps[price_exchange][1].get(symbol, {})
@@ -1557,33 +1449,19 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 coverage_map[symbol]['open_interest_by_exchange'][event_time] = exchange_points
                 aggregate_oi_map[symbol][event_time] = merged_point
 
-        # 按整体健康度判断交易所是否贡献 taker 数据
-        exchange_taker_contributed = {
-            exchange: not symbol_exchange_snapshots[exchange].get('taker_rejection', {}).get('reasons')
-            for exchange in included_exchanges
-        }
-
-        # 累计净流入
+        # 从 SQL 结果累计净流入
         for interval in TIME_INTERVALS:
             interval_values = []
             interval_value_values = []
             for exchange in included_exchanges:
-                if not exchange_taker_contributed.get(exchange):
+                taker_rejection = symbol_exchange_snapshots[exchange].get('taker_rejection', {})
+                if taker_rejection.get('reasons'):
                     continue
-                snapshot = symbol_exchange_snapshots[exchange]
-                adapter = exchange_adapters.get(exchange)
-                period = adapter.taker_period_for_interval(interval)
-                taker_by_time = (snapshot['taker_maps_by_period'] or {}).get(period, {})
-                inflow = _calc_net_inflow_for_period(taker_by_time, anchor_time, interval, period)
+                net_inflow_data = symbol_net_inflow_by_exchange.get(exchange, {})
+                inflow = net_inflow_data.get('net_inflow', {}).get(interval)
+                inflow_value = net_inflow_data.get('net_inflow_value', {}).get(interval)
                 if inflow is not None:
                     interval_values.append(inflow)
-                inflow_value = _calc_net_inflow_value_for_period(
-                    taker_by_time,
-                    selected_kline_map[symbol],
-                    anchor_time,
-                    interval,
-                    period,
-                )
                 if inflow_value is not None:
                     interval_value_values.append(inflow_value)
 
@@ -1591,16 +1469,6 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
                 coverage_map[symbol]['net_inflow'][interval] = sum(interval_values)
             if interval_value_values:
                 coverage_map[symbol]['net_inflow_value'][interval] = sum(interval_value_values)
-
-        # 根据实际贡献结果更新 included 交易所的 taker_rejection
-        for exchange in included_exchanges:
-            if exchange_taker_contributed.get(exchange):
-                snapshot = symbol_exchange_snapshots[exchange]
-                snapshot['taker_rejection'] = {
-                    'stage': 'taker_validation',
-                    'anchor_time': anchor_time,
-                    'reasons': [],
-                }
 
         included_open_interest_rows = _build_exchange_open_interest_rows(
             coverage_map[symbol]['open_interest_by_exchange'].get(anchor_time, {}),
@@ -1615,6 +1483,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
             {item['exchange']: item for item in included_open_interest_rows},
         )
 
+        _t3 = __import__('time').perf_counter()
+        _merge_elapsed = (_t3 - _t2) * 1000
+        _total_elapsed = (_t3 - _sym_start) * 1000
+        logger.info(_fmt('聚合打点：', symbol=symbol, stage='merge', ms=f'{_merge_elapsed:.0f}', total=f'{_total_elapsed:.0f}'))
+
     return aggregate_oi_map, selected_kline_map, {}, coverage_map
 
 
@@ -1623,12 +1496,12 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
         session, symbols, upper_bound=upper_bound
     )
     funding_rate_map = load_latest_funding_rates(symbols, session=session)
-    return aggregate_oi_map, selected_kline_map, {}, coverage_map, funding_rate_map
+    return aggregate_oi_map, selected_kline_map, coverage_map, funding_rate_map
 
 
-def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, coverage=None, funding_rate=None):
-    common_times = sorted(set(oi_by_time).intersection(kline_by_time))
-    oi_times = sorted(oi_by_time)
+def _build_coin_payload(symbol, oi, kline_by_time, coverage=None, funding_rate=None):
+    common_times = sorted(set(oi).intersection(kline_by_time))
+    oi_times = sorted(oi)
     included_exchanges = list((coverage or {}).get('included_exchanges') or (coverage or {}).get('source_exchanges') or [])
     missing_exchanges = list((coverage or {}).get('missing_exchanges') or [])
     status = (coverage or {}).get('status')
@@ -1671,12 +1544,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     net_inflow = dict((coverage or {}).get('net_inflow') or {})
     net_inflow_value = dict((coverage or {}).get('net_inflow_value') or {})
 
-    if not net_inflow and taker_vol_by_time and any(taker_vol_by_time.values()):
-        net_inflow = _build_net_inflow_from_taker_vol(taker_vol_by_time, current_time)
-    if not net_inflow_value and taker_vol_by_time and any(taker_vol_by_time.values()):
-        net_inflow_value = _build_net_inflow_value_from_taker_vol(taker_vol_by_time, kline_by_time, current_time)
-
-    current_oi = oi_by_time.get(current_time)
+    current_oi = oi.get(current_time)
     if current_oi is None:
         empty_changes = {interval: _empty_change() for interval in TIME_INTERVALS}
         return {
@@ -1708,8 +1576,6 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     current_open_interest = float(current_oi.sum_open_interest or 0)
     current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
     current_price = float(current_kline.close_price) if current_kline and current_kline.close_price is not None else None
-    if not net_inflow_value and net_inflow and current_price is not None:
-        net_inflow_value = {interval: value * current_price for interval, value in net_inflow.items()}
     exchange_open_interest = _build_exchange_open_interest_rows(
         ((coverage or {}).get('open_interest_by_exchange') or {}).get(current_time, {}),
         current_open_interest_value,
@@ -1719,7 +1585,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     changes = {}
     for interval in TIME_INTERVALS:
         target_time = current_time - _interval_to_ms(interval)
-        target_oi = oi_by_time.get(target_time)
+        target_oi = oi.get(target_time)
         target_kline = kline_by_time.get(target_time)
 
         if target_oi is None or target_kline is None:
@@ -1752,6 +1618,8 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
     funding_rate_value = float(funding_rate['funding_rate']) if funding_rate and funding_rate['funding_rate'] is not None else None
     next_funding_time = int(funding_rate['next_funding_time']) if funding_rate and funding_rate['next_funding_time'] is not None else None
 
+    latest_time = (coverage or {}).get('latest_time')
+
     return {
         'symbol': symbol,
         'source_exchanges': included_exchanges,
@@ -1774,6 +1642,7 @@ def _build_coin_payload(symbol, oi_by_time, kline_by_time, taker_vol_by_time, co
         'net_inflow_value_formatted': _format_usd_map(net_inflow_value),
         'changes': changes,
         'current_time': current_time,
+        'latest_time': latest_time,
         'predicted_rate': predicted_rate,
         'predicted_rate_formatted': format_funding_rate(predicted_rate),
         'funding_rate': funding_rate_value,
@@ -1801,7 +1670,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
 
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         anchor_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, recent_taker_vol_map, coverage_map, funding_rate_map = _load_homepage_series_maps(
+        recent_open_interest_map, recent_klines_map, coverage_map, funding_rate_map = _load_homepage_series_maps(
             db,
             target_symbols,
             upper_bound=anchor_time,
@@ -1812,9 +1681,8 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
         for symbol in target_symbols:
             coin = _build_coin_payload(
                 symbol=symbol,
-                oi_by_time=recent_open_interest_map.get(symbol, {}),
+                oi=recent_open_interest_map.get(symbol, {}),
                 kline_by_time=recent_klines_map.get(symbol, {}),
-                taker_vol_by_time=recent_taker_vol_map.get(symbol, {}),
                 coverage=coverage_map.get(symbol, {}),
                 funding_rate=funding_rate_map.get(symbol),
             )
@@ -1856,7 +1724,7 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
         target_time = latest_closed_5m_open_time(int(current_time_ms))
-        recent_open_interest_map, recent_klines_map, _, _coverage_map, _ = _load_homepage_series_maps(
+        recent_open_interest_map, recent_klines_map, _coverage_map, _ = _load_homepage_series_maps(
             db,
             target_symbols,
             upper_bound=target_time,

@@ -306,6 +306,26 @@
       box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
     }
 
+    .matrix-head-net-inflow {
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 44px;
+      text-transform: none;
+      letter-spacing: 0;
+      text-align: center;
+    }
+
+    .matrix-head-title {
+      width: 100%;
+      white-space: nowrap;
+      color: var(--gold-bright);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.1;
+      text-align: center;
+    }
     .window-cell {
       justify-content: flex-start;
       color: var(--text-secondary);
@@ -359,6 +379,15 @@
       vertical-align: middle;
     }
 
+    .taker-exchanges-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      width: 100%;
+      min-height: 18px;
+    }
     .taker-tag {
       font-size: 9px;
       font-family: var(--font-mono);
@@ -492,17 +521,17 @@
         <div class="matrix-wrap">
           <div class="matrix">
             <div class="cell matrix-head window-cell">窗口</div>
-            <div class="cell matrix-head">
-              净流入
-              <span v-if="takerExchanges(coin).length > 0 || takerExchangesExcluded(coin).length > 0" class="taker-exchanges">
-                <span v-for="ex in takerExchanges(coin)" :key="ex" class="taker-tag" :class="'taker-' + ex">[[ ex ]]</span>
+            <div class="cell matrix-head matrix-head-net-inflow">
+              <div class="matrix-head-title">净流入</div>
+              <div v-if="allTakerExchanges(coin).length" class="taker-exchanges-line">
                 <span
-                  v-for="item in takerExchangesExcluded(coin)"
-                  :key="'ex-' + item.exchange"
-                  class="taker-tag taker-tag-excluded"
-                  :title="formatExchangeName(item.exchange) + ': ' + item.reason"
-                >[[ item.exchange ]]</span>
-              </span>
+                  v-for="item in allTakerExchanges(coin)"
+                  :key="`${coin.symbol}-taker-${item.exchange}-${item.status || 'unknown'}`"
+                  class="taker-tag"
+                  :class="takerExchangeBadgeClass(item)"
+                  :title="takerExchangeBadgeTitle(item)"
+                >[[ item.label ]]</span>
+              </div>
             </div>
             <div class="cell matrix-head">价格</div>
             <div class="cell matrix-head">价格%</div>
@@ -601,6 +630,52 @@
               exchange: item.exchange,
               reason: formatTakerRejectReason(item),
             }));
+        };
+
+        const allTakerExchanges = (coin) => {
+          return (coin.exchange_statuses || [])
+            .filter((item) => item && item.exchange)
+            .map((item) => ({
+              ...item,
+              label: formatExchangeName(item.exchange),
+            }));
+        };
+
+        const takerExchangeBadgeClass = (item) => {
+          const exchange = String(item?.exchange || '').toLowerCase();
+          const exchangeClass = exchange ? `taker-${exchange}` : '';
+          const inactiveStatuses = new Set(['missing', 'excluded', 'unsupported', 'unreliable', 'cooldown', 'error', 'unavailable']);
+          const inactive = (
+            item?.supported === false ||
+            item?.available === false ||
+            item?.included === false ||
+            item?.enabled === false ||
+            item?.supports_taker === false ||
+            inactiveStatuses.has(String(item?.taker_status || '').toLowerCase())
+          );
+
+          return inactive ? ['taker-tag-excluded', exchangeClass] : [exchangeClass];
+        };
+
+        const formatTakerStatusText = (item) => {
+          const status = String(item?.taker_status || '').toLowerCase();
+          if (status === 'available') return '净流入可用';
+          if (status === 'missing') {
+            const reason = formatTakerRejectReason(item);
+            return reason ? `净流入不可用: ${reason}` : '净流入不可用';
+          }
+          if (status === 'unreliable') return '净流入不可用: 数据源不可靠';
+          if (status === 'excluded') return '净流入不可用: 交易所未纳入聚合';
+          if (status === 'unsupported') return '净流入不可用: 交易所不支持';
+          if (status === 'unknown') return '净流入状态未知';
+          return status ? `净流入状态: ${status}` : '';
+        };
+
+        const takerExchangeBadgeTitle = (item) => {
+          return [
+            formatExchangeName(item?.exchange),
+            formatTakerStatusText(item),
+          ].filter(Boolean).join(' · ');
         };
 
         const shortSymbol = (symbol) => String(symbol || '').replace(/USDT$/, '');
@@ -776,6 +851,10 @@
           matrixRows,
           takerExchanges,
           takerExchangesExcluded,
+          allTakerExchanges,
+          takerExchangeBadgeClass,
+          formatTakerStatusText,
+          takerExchangeBadgeTitle,
           shortSymbol,
           valueClass,
           formatChange,
@@ -795,3 +874,4 @@
   </script>
 </body>
 </html>
+

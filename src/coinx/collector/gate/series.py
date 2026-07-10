@@ -311,6 +311,7 @@ def clear_supported_symbols_cache():
     _supported_symbols_cache['fallback_logged'] = False
     _supported_symbols_cache['symbols'] = None
     _supported_symbols_cache['unsupported_symbols'] = set()
+    _supported_symbols_cache['quanto_multipliers'] = {}
 
 
 def clear_gate_rate_limit_state():
@@ -323,6 +324,9 @@ def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECON
     loaded_at = _supported_symbols_cache.get('loaded_at') or 0
     if cached_symbols is not None and now - loaded_at < ttl_seconds:
         return cached_symbols
+
+    logger.info('GET_SUPPORTED_MISS: ttl=%s session=%s cached=%s loaded_at=%s age=%.1fs',
+                ttl_seconds, session is not None, cached_symbols is not None, loaded_at, now - loaded_at if loaded_at else -1)
 
     rows = _request_gate(f'/api/v4/futures/{GATE_SETTLE}/contracts', {}, session=session)
     symbols = set()
@@ -344,6 +348,7 @@ def get_supported_symbols(session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_SECON
     _supported_symbols_cache['symbols'] = symbols
     _supported_symbols_cache['quanto_multipliers'] = multipliers
     _supported_symbols_cache['loaded_at'] = now
+    logger.info('GET_SUPPORTED_HIT: after write now=%.3f loaded_at=%.3f ttl=%s', now, now, ttl_seconds)
     return symbols
 
 
@@ -352,17 +357,33 @@ def get_quanto_multiplier(symbol):
     return multipliers.get(symbol) or 1.0
 
 
+def warm_supported_symbols_cache(session=None):
+    failed_at = _supported_symbols_cache.get('failed_at') or 0
+    if _supported_symbols_cache.get('symbols') is None and time.time() - failed_at < 60:
+        return None
+
+    try:
+        cached_symbols = get_supported_symbols(session=session)
+    except Exception as exc:
+        _supported_symbols_cache['failed_at'] = time.time()
+        logger.warning('Gate supported symbol cache unavailable, fallback to unsupported during cooldown: %s', exc)
+        return None
+
+    if not _supported_symbols_cache.get('fallback_logged'):
+        logger.info('Gate supported symbol cache loaded from /contracts during precheck')
+        _supported_symbols_cache['fallback_logged'] = True
+    return cached_symbols
+
+
 def is_symbol_supported(symbol, series_type=None, session=None):
     if series_type not in (None, *SUPPORTED_SERIES_TYPES):
         return False
     if is_gate_symbol_unsupported(symbol):
         return False
+
     cached_symbols = _supported_symbols_cache.get('symbols')
     if cached_symbols is None:
-        cached_symbols = get_supported_symbols(session=session)
-        if not _supported_symbols_cache.get('fallback_logged'):
-            logger.info('Gate supported symbol cache loaded from /contracts during precheck')
-            _supported_symbols_cache['fallback_logged'] = True
+        cached_symbols = warm_supported_symbols_cache(session=session)
     if cached_symbols is None:
         return False
     return symbol in cached_symbols

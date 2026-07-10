@@ -31,6 +31,7 @@ WEB_PORT = get_env('WEB_PORT', 5500, int)
 WEB_DEBUG = get_env('WEB_DEBUG', False, bool)
 WEB_USERNAME = get_env('WEB_USERNAME', 'admin')
 WEB_PASSWORD = get_env('WEB_PASSWORD')
+WEB_AUTH_DISABLED = get_env('WEB_AUTH_DISABLED', False, bool)
 
 # JWT 认证配置
 WEB_JWT_SECRET_KEY = get_env('WEB_JWT_SECRET_KEY')

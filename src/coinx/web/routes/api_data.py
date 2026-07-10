@@ -432,6 +432,7 @@ def _format_homepage_coins_payload(coins_data):
             'predicted_rate_formatted': coin.get('predicted_rate_formatted'),
             'next_funding_time': coin.get('next_funding_time'),
             'next_funding_time_formatted': coin.get('next_funding_time_formatted'),
+            'latest_time': coin.get('latest_time'),
         }
 
         changes = []
@@ -579,29 +580,7 @@ def get_coins():
         snapshot_ms = (time.perf_counter() - snapshot_start) * 1000
 
         if active_coins and not _is_complete_homepage_payload(snapshot.get('data') or []):
-            if HOMEPAGE_SERIES_REPAIR_ENABLED:
-                logger.info('首页历史序列不完整，开始后台轻量补全最新点')
-                _start_homepage_refresh_async(
-                    active_coins,
-                    series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                    latest_only=True,
-                )
-                try:
-                    score_symbols = get_market_structure_score_symbols()
-                except Exception as e:
-                    logger.error(f'加载评分修补所需币种失败: {e}')
-                    score_symbols = []
-                active_symbol_set = set(active_coins or [])
-                remaining_score_symbols = [symbol for symbol in score_symbols if symbol not in active_symbol_set]
-                if remaining_score_symbols:
-                    logger.info('首页历史序列不完整，开始后台补全评分所需多交易所最新点')
-                    _start_market_structure_refresh_async(
-                        remaining_score_symbols,
-                        series_types=list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
-                        exchanges=list(ENABLED_EXCHANGES),
-                    )
-            else:
-                logger.info('首页历史序列不完整，但修补任务已禁用，跳过自动补全')
+            logger.info('首页历史序列不完整，跳过后台补全，返回现有数据')
 
         formatted_data = _format_homepage_coins_payload(snapshot['data'])
         payload = {

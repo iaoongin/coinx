@@ -121,14 +121,15 @@ def test_gate_adapter_supports_klines_open_interest_and_taker():
 
 def test_gate_adapter_support_state_uses_contracts_lookup(monkeypatch):
     gate_series.clear_supported_symbols_cache()
+    gate_series.clear_gate_rate_limit_state()
 
     calls = []
 
-    def fake_get_supported_symbols(session=None, ttl_seconds=None):
-        calls.append(session)
-        return {'BTCUSDT'}
+    def fake_is_symbol_supported(symbol, series_type=None, session=None):
+        calls.append((symbol, session))
+        return symbol == 'BTCUSDT'
 
-    monkeypatch.setattr(gate_series, 'get_supported_symbols', fake_get_supported_symbols)
+    monkeypatch.setattr(gate_series, 'is_symbol_supported', fake_is_symbol_supported)
     adapter = get_exchange_adapter('gate')
 
     result = adapter.symbol_support_state('BTCUSDT')
@@ -138,11 +139,12 @@ def test_gate_adapter_support_state_uses_contracts_lookup(monkeypatch):
         'supported': True,
         'known': True,
     }
-    assert calls == [None]
+    assert calls == [('BTCUSDT', None)]
 
 
 def test_gate_is_symbol_supported_fetches_contracts_when_cache_empty(monkeypatch):
     gate_series.clear_supported_symbols_cache()
+    gate_series.clear_gate_rate_limit_state()
 
     calls = []
 
@@ -157,19 +159,40 @@ def test_gate_is_symbol_supported_fetches_contracts_when_cache_empty(monkeypatch
     assert calls == [None, None]
 
 
-def test_gate_is_symbol_supported_raises_when_contract_lookup_fails(monkeypatch):
+def test_gate_is_symbol_supported_returns_false_and_enters_backoff_when_contract_lookup_fails(monkeypatch):
     gate_series.clear_supported_symbols_cache()
+    gate_series.clear_gate_rate_limit_state()
+
+    calls = []
 
     def fail_get_supported_symbols(session=None, ttl_seconds=None):
+        calls.append(session)
         raise RuntimeError('contracts unavailable')
 
     monkeypatch.setattr(gate_series, 'get_supported_symbols', fail_get_supported_symbols)
+    monkeypatch.setattr(gate_series.logger, 'warning', lambda *args, **kwargs: None)
 
-    try:
-        gate_series.is_symbol_supported('BTCUSDT', series_type='klines')
-        assert False, 'expected contract lookup failure'
-    except RuntimeError as exc:
-        assert str(exc) == 'contracts unavailable'
+    assert gate_series.is_symbol_supported('BTCUSDT', series_type='klines') is False
+    assert gate_series.is_symbol_supported('ETHUSDT', series_type='klines') is False
+    assert calls == [None]
+
+
+def test_gate_warm_supported_symbols_cache_swallows_lookup_error_and_enters_backoff(monkeypatch):
+    gate_series.clear_supported_symbols_cache()
+    gate_series.clear_gate_rate_limit_state()
+
+    calls = []
+
+    def fail_get_supported_symbols(session=None, ttl_seconds=None):
+        calls.append(session)
+        raise RuntimeError('contracts unavailable')
+
+    monkeypatch.setattr(gate_series, 'get_supported_symbols', fail_get_supported_symbols)
+    monkeypatch.setattr(gate_series.logger, 'warning', lambda *args, **kwargs: None)
+
+    assert gate_series.warm_supported_symbols_cache() is None
+    assert gate_series.warm_supported_symbols_cache() is None
+    assert calls == [None]
 
 
 def test_gate_403_without_headers_marks_budget_unavailable(monkeypatch):

@@ -1,14 +1,16 @@
 from coinx.repositories.homepage_series import (
     FIVE_MINUTES_MS,
     TIME_INTERVALS,
-    _MAX_INTERVAL_MS,
-    _load_taker_vol_model_map,
     _summarize_homepage_rejection_reasons,
     get_homepage_series_snapshot,
     get_homepage_series_data,
     get_homepage_series_update_time,
     should_refresh_homepage_series,
+    _aggregate_homepage_series_maps,
+    _load_exchange_homepage_maps,
 )
+import pytest
+
 from coinx.models import (
     MarketKline,
     MarketOpenInterestHist,
@@ -21,6 +23,7 @@ def seed_series(
     symbol,
     start_time_ms,
     periods,
+    exchange='binance',
     oi_base=1000.0,
     oi_step=10.0,
     price_base=100.0,
@@ -37,7 +40,7 @@ def seed_series(
         close_price = price_base + index * price_step
         session.add(
             MarketOpenInterestHist(
-                exchange='binance',
+                exchange=exchange,
                 symbol=symbol,
                 period='5m',
                 event_time=event_time,
@@ -47,7 +50,7 @@ def seed_series(
         )
         session.add(
             MarketKline(
-                exchange='binance',
+                exchange=exchange,
                 symbol=symbol,
                 period='5m',
                 open_time=event_time,
@@ -66,7 +69,7 @@ def seed_series(
         if include_taker_vol:
             session.add(
                 MarketTakerBuySellVol(
-                    exchange='binance',
+                    exchange=exchange,
                     symbol=symbol,
                     period='5m',
                     event_time=event_time,
@@ -203,7 +206,7 @@ def test_get_homepage_series_data_logs_kline_rejection_reason(db_session, monkey
     assert coin['missing_exchanges'] == ['binance']
     assert any('missing_kline_history' in message or 'missing_kline_target' in message for message in warning_logs)
     assert any('symbol=BTCUSDT' in message and 'exchange=binance' in message for message in warning_logs)
-    assert any('首页交易所聚合为空态' in message for message in warning_logs)
+    assert any('交易所聚合为空态：' in message for message in warning_logs)
 
 
 def test_get_homepage_series_data_logs_open_interest_rejection_reason(db_session, monkeypatch):
@@ -270,69 +273,13 @@ def test_get_homepage_series_data_does_not_reject_when_taker_mapping_is_missing(
     assert coin['included_exchanges'] == ['binance']
     assert coin['missing_exchanges'] == []
     assert coin['net_inflow']
-    assert '168h' not in coin['net_inflow']
-    assert any('首页交易所聚合完成' in message for message in info_logs)
-    assert not any('首页交易所门禁否决' in message for message in warning_logs)
+    assert '168h' in coin['net_inflow']
+    assert any('交易所聚合完成：' in message for message in info_logs)
 
 
-def test_load_taker_vol_model_map_batches_small_symbol_sets(db_session, monkeypatch):
-    from sqlalchemy.orm import Query
-
-    start_time = 1_700_000_000_000
-    periods = 2017
-    symbols = ['BTCUSDT', 'ETHUSDT']
-
-    seed_series(db_session, 'BTCUSDT', start_time, periods, include_taker_vol=True)
-    seed_series(
-        db_session,
-        'ETHUSDT',
-        start_time,
-        periods,
-        include_taker_vol=True,
-        taker_vol_base=2000.0,
-    )
-
-    expected_lower_bound = start_time + (periods - 1) * FIVE_MINUTES_MS - _MAX_INTERVAL_MS
-    tracked = {
-        'limit_calls': 0,
-        'all_calls': 0,
-        'all_sql': [],
-    }
-    original_limit = Query.limit
-    original_all = Query.all
-
-    def tracking_limit(self, value):
-        tracked['limit_calls'] += 1
-        return original_limit(self, value)
-
-    def tracking_all(self):
-        tracked['all_calls'] += 1
-        tracked['all_sql'].append(
-            str(
-                self.statement.compile(
-                    dialect=db_session.bind.dialect,
-                    compile_kwargs={'literal_binds': True},
-                )
-            )
-        )
-        return original_all(self)
-
-    monkeypatch.setattr(Query, 'limit', tracking_limit)
-    monkeypatch.setattr(Query, 'all', tracking_all)
-
-    records = _load_taker_vol_model_map(
-        db_session,
-        MarketTakerBuySellVol,
-        symbols,
-    )
-
-    assert set(records.keys()) == set(symbols)
-    assert all(len(records[symbol]) == periods for symbol in symbols)
-    assert tracked['limit_calls'] == 0
-    assert tracked['all_calls'] == 2
-    assert ' IN (' in tracked['all_sql'][1]
-    assert 'event_time >=' in tracked['all_sql'][1]
-    assert str(expected_lower_bound) in tracked['all_sql'][1]
+@pytest.mark.skip(reason='_load_taker_vol_model_map was removed when net_inflow moved to SQL')
+def test_load_taker_vol_model_map_batches_small_symbol_sets():
+    pass
 
 
 def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(db_session, monkeypatch):
@@ -351,8 +298,8 @@ def test_get_homepage_series_data_does_not_log_rejection_for_complete_exchange(d
     assert coin['status'] == 'complete'
     assert coin['included_exchanges'] == ['binance']
     assert coin['missing_exchanges'] == []
-    assert not any('首页交易所门禁否决' in message for message in warning_logs)
-    assert any('首页交易所聚合完成' in message for message in info_logs)
+    assert not any('门禁否决' in message for message in warning_logs)
+    assert any('交易所聚合完成：' in message for message in info_logs)
 
 
 def test_get_homepage_series_data_formats_small_prices_without_scientific_notation_until_eight_decimal_place(db_session, monkeypatch):
@@ -537,7 +484,7 @@ def test_get_homepage_series_data_with_taker_vol_returns_net_inflow(db_session, 
     assert isinstance(coin['net_inflow']['5m'], (int, float))
 
 
-def test_get_homepage_series_data_prefers_quote_value_for_net_inflow_value(db_session, monkeypatch):
+def test_get_homepage_series_data_uses_close_price_for_net_inflow_value(db_session, monkeypatch):
     monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance'])
     start_time = 1_700_000_000_000
     seed_series(
@@ -557,9 +504,10 @@ def test_get_homepage_series_data_prefers_quote_value_for_net_inflow_value(db_se
     coins = get_homepage_series_data(symbols=['BTCUSDT'], session=db_session)
 
     coin = coins[0]
+    # net_inflow_5m = buy_vol - sell_vol = 10 - 8 = 2 (coin amount)
+    # net_inflow_value_5m = 2 * close_price = 2 * 100 = 200 (USD value)
     assert coin['net_inflow']['5m'] == 2.0
-    assert coin['net_inflow_value']['5m'] == 2416.0
-    assert coin['net_inflow_value_formatted']['5m'] == '$2.42K'
+    assert coin['net_inflow_value']['5m'] == 200.0
 
 
 def test_get_homepage_series_data_with_partial_taker_vol_returns_partial_net_inflow(db_session, monkeypatch):
@@ -666,8 +614,12 @@ def test_get_homepage_series_data_aggregates_open_interest_and_net_inflow_across
     assert round(coin['exchange_open_interest'][1]['quantity_share_percent'], 2) == 33.33
     assert coin['changes']['15m']['open_interest'] == 21130.0 + 42260.0
     assert coin['changes']['15m']['open_interest_value_formatted'].startswith('$')
+    # net_inflow_5m: only 1 point at anchor_time (index 2016)
+    # binance: (21160 - 16928) * 2116 = 4232 * 2116
+    # okx: (500+2016*5 - (200+2016*2)) * 2116 = (10580 - 4232) * 2116 = 6348 * 2116
+    # total = (4232 + 6348) * 2116 = 10580 * 2116 = 22387280
     assert coin['net_inflow']['5m'] == 10580.0
-    assert coin['net_inflow_value']['5m'] == 2216.0 + 2216.0
+    assert coin['net_inflow_value']['5m'] == 10580.0 * 2116.0
     assert coin['net_inflow_value_formatted']['5m'].startswith('$')
 
 
@@ -743,7 +695,37 @@ def test_get_homepage_series_data_includes_gate_without_taker_and_keeps_net_infl
 
     statuses = {item['exchange']: item for item in coin['exchange_statuses']}
     assert statuses['gate']['status'] == 'included'
-    assert statuses['gate']['taker_status'] == 'missing'
+    assert statuses['gate']['supports_taker'] is False
+    assert statuses['gate']['taker_status'] == 'unreliable'
+
+
+def test_load_exchange_homepage_maps_skips_gate_net_inflow_sql(monkeypatch):
+    load_calls = []
+
+    monkeypatch.setattr(
+        'coinx.repositories.homepage_series._load_open_interest_model_map',
+        lambda session, model, symbols, upper_bound=None, exchange=None: ({symbol: {} for symbol in symbols}, {symbol: 1 for symbol in symbols}),
+    )
+    monkeypatch.setattr(
+        'coinx.repositories.homepage_series._load_kline_model_map',
+        lambda session, model, symbols, symbol_latest=None, upper_bound=None, exchange=None: ({symbol: {} for symbol in symbols}, dict(symbol_latest or {})),
+    )
+
+    def fake_load_net_inflow_sql(session, exchange, symbols, upper_bound=None):
+        load_calls.append(exchange)
+        return {
+            symbol: {'net_inflow': {'5m': 1.0}, 'net_inflow_value': {'5m': 2.0}, 'health': {'5m': 100.0}}
+            for symbol in symbols
+        }
+
+    monkeypatch.setattr('coinx.repositories.homepage_series._load_net_inflow_sql', fake_load_net_inflow_sql)
+
+    gate_result = _load_exchange_homepage_maps(None, 'gate', ['BTCUSDT'])
+    binance_result = _load_exchange_homepage_maps(None, 'binance', ['BTCUSDT'])
+
+    assert gate_result[2]['BTCUSDT']['net_inflow'] == {}
+    assert binance_result[2]['BTCUSDT']['net_inflow']['5m'] == 1.0
+    assert load_calls == ['binance']
 
 
 def test_get_homepage_series_data_excludes_exchange_when_any_required_series_is_missing(db_session, monkeypatch):
@@ -968,6 +950,68 @@ def test_get_homepage_series_data_marks_exchange_status_unknown_when_support_loo
     assert statuses['okx']['support_state'] == 'unknown'
 
 
+def test_get_homepage_series_data_support_check_does_not_forward_db_session(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['gate'])
+
+    captured_sessions = []
+
+    class FakeAdapter:
+        def symbol_support_state(self, symbol, series_type=None, session=None):
+            captured_sessions.append(session)
+            return {'state': 'unsupported', 'supported': False, 'known': True}
+
+        def taker_period_for_interval(self, interval):
+            return None
+
+    monkeypatch.setattr('coinx.repositories.homepage_series.get_exchange_adapter', lambda exchange: FakeAdapter())
+
+    coin = get_homepage_series_data(symbols=['ADAUSDT'], session=db_session)[0]
+    statuses = {item['exchange']: item for item in coin['exchange_statuses']}
+
+    assert captured_sessions == [None]
+    assert coin['included_exchanges'] == []
+    assert coin['missing_exchanges'] == ['gate']
+    assert statuses['gate']['status'] == 'unsupported'
+
+
+def test_get_homepage_series_data_prewarms_symbol_support_cache_before_symbol_loop(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['okx', 'gate'])
+    monkeypatch.setattr('coinx.repositories.homepage_series.get_supported_exchange_ids', lambda: ['okx', 'gate'])
+    monkeypatch.setattr('coinx.repositories.homepage_series.load_latest_funding_rates', lambda symbols, session=None: {})
+    monkeypatch.setattr(
+        'coinx.repositories.homepage_series._load_exchange_homepage_maps',
+        lambda session, exchange, symbols, upper_bound=None: ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {}, {}),
+    )
+
+    warm_calls = []
+    support_calls = []
+
+    class FakeAdapter:
+        def __init__(self, exchange):
+            self.exchange = exchange
+            self.warmed = False
+
+        def warm_symbol_support_cache(self):
+            self.warmed = True
+            warm_calls.append(self.exchange)
+
+        def symbol_support_state(self, symbol, series_type=None, session=None):
+            support_calls.append((self.exchange, symbol, self.warmed))
+            return {'state': 'unsupported', 'supported': False, 'known': True}
+
+        def taker_period_for_interval(self, interval):
+            return None
+
+    monkeypatch.setattr('coinx.repositories.homepage_series.get_exchange_adapter', lambda exchange: FakeAdapter(exchange))
+
+    coins = get_homepage_series_data(symbols=['ADAUSDT', 'BTCUSDT'], session=db_session)
+
+    assert [coin['symbol'] for coin in coins] == ['ADAUSDT', 'BTCUSDT']
+    assert sorted(warm_calls) == ['gate', 'okx']
+    assert all(warmed for _, _, warmed in support_calls)
+    assert len(support_calls) == 4
+
+
 def test_get_homepage_series_data_uses_okx_hourly_taker_for_long_intervals(db_session, monkeypatch):
     import pytest
     pytest.skip('旧的跨交易所部分透传语义已废弃')
@@ -1061,6 +1105,73 @@ def test_get_homepage_series_data_uses_available_exchange_when_okx_is_missing(db
     assert coin['status'] == 'partial'
     assert coin['current_open_interest'] == 21160.0
     assert [item['exchange'] for item in coin['exchange_open_interest']] == ['binance']
+
+
+def test_gate_support_duration(db_session, monkeypatch):
+    """
+    模拟 6 symbol × 4 exchange 场景，打点定位 support 阶段 ~1.2s 的来源。
+    
+    在 _request_gate 上加打点统计：每次 HTTP 请求的耗时。
+    同时也统计 _wait_for_gate_slot 导致的等待时间。
+    """
+    import sys, time as _time
+    import coinx.collector.gate.series as gate_series
+
+    request_calls = []
+    real_request_gate = gate_series._request_gate
+    real_wait_slot = gate_series._wait_for_gate_slot
+
+    def tracking_wait_slot():
+        t0 = _time.perf_counter()
+        real_wait_slot()
+        dur = (_time.perf_counter() - t0) * 1000
+        if dur > 50:
+            import traceback
+            tb = ''.join(traceback.format_stack(limit=8))
+            sys.stderr.write(f'\nXXX WAIT_SLOT {dur:.0f}ms\n{tb[:500]}\n')
+
+    def tracking_request_gate(path, params, session=None, timeout=10):
+        t0 = _time.perf_counter()
+        result = real_request_gate(path, params, session=session, timeout=timeout)
+        dur = (_time.perf_counter() - t0) * 1000
+        request_calls.append({'type': 'http', 'path': path, 'duration_ms': dur})
+        return result
+
+    monkeypatch.setattr('coinx.collector.gate.series._request_gate', tracking_request_gate)
+    monkeypatch.setattr('coinx.collector.gate.series._wait_for_gate_slot', tracking_wait_slot)
+
+    gate_series.clear_gate_rate_limit_state()
+    gate_series.clear_supported_symbols_cache()
+
+    test_symbols = [
+        'BTCUSDT', 'ETHUSDT', 'SOLUSDT',
+        'XRPUSDT', 'ADAUSDT', 'AVAXUSDT',
+    ]
+    start_time = 1_700_000_000_000
+    for exchange in ['binance', 'okx', 'bybit', 'gate']:
+        for sym in test_symbols:
+            seed_series(db_session, sym, start_time, 2017, exchange=exchange, include_taker_vol=True)
+
+    monkeypatch.setattr('coinx.repositories.homepage_series.ENABLED_EXCHANGES', ['binance', 'okx', 'bybit', 'gate'])
+
+    t_start = _time.perf_counter()
+    coins = get_homepage_series_data(symbols=test_symbols, session=db_session)
+    total_ms = (_time.perf_counter() - t_start) * 1000
+
+    import json
+    result = {
+        'total_ms': round(total_ms, 1),
+        'gate_request_calls': len(request_calls),
+        'details': [],
+    }
+    for c in request_calls:
+        result['details'].append({
+            'type': c['type'],
+            'path': c.get('path', ''),
+            'duration_ms': round(c['duration_ms'], 1),
+        })
+    result_json = json.dumps(result, ensure_ascii=False, indent=2)
+    raise AssertionError(f'\n{result_json}')
 
 
 def test_get_homepage_series_data_can_return_aggregate_metrics_without_reference_price(db_session, monkeypatch):

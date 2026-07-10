@@ -4,6 +4,7 @@ import werkzeug
 
 import coinx.config as config_module
 import coinx.web.auth as auth_module
+import coinx.web.app as app_module
 from coinx.web.app import create_app
 
 
@@ -34,6 +35,24 @@ def test_requires_login_for_api():
     assert payload['status'] == 'error'
     assert payload['message'] == '需要先登录'
 
+
+def test_allows_unauthenticated_requests_when_auth_is_disabled(monkeypatch):
+    monkeypatch.setattr(app_module, 'WEB_AUTH_DISABLED', True)
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_homepage_series_snapshot',
+        lambda symbols: {'data': [], 'cache_update_time': None},
+    )
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_active_coins',
+        lambda: ['BTCUSDT'],
+    )
+    client = create_test_client()
+
+    page_response = client.get('/market-rank')
+    api_response = client.get('/api/coins')
+
+    assert page_response.status_code == 200
+    assert api_response.status_code == 200
 
 def test_login_allows_access_to_protected_page():
     client = create_test_client()

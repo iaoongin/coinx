@@ -296,7 +296,7 @@ def test_homepage_real_db_profile(monkeypatch):
     for fn_name, stage, ex_pos in [
         ('_load_open_interest_model_map', 'OI查询', None),
         ('_load_kline_model_map', 'Kline查询', None),
-        ('_load_taker_vol_model_map', 'Taker查询', None),
+        ('_load_net_inflow_sql', '净流入SQL查询', 1),
         ('_load_exchange_homepage_maps', '交易所加载合计', 1),
     ]:
         original = getattr(_hps, fn_name)

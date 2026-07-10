@@ -31,6 +31,7 @@ class ExchangeSeriesAdapter:
     precise_window_series_types: tuple = ()
     is_symbol_supported: object = None
     supported_symbols_fetcher: object = None
+    warm_symbol_support_cache_fn: object = None
     page_limits: dict = None
     series_periods: dict = None
     taker_period_by_interval: dict = None
@@ -84,6 +85,13 @@ class ExchangeSeriesAdapter:
             'supported': is_supported,
             'known': True,
         }
+
+    def warm_symbol_support_cache(self, session=None):
+        if self.warm_symbol_support_cache_fn is not None:
+            return self.warm_symbol_support_cache_fn(session=session)
+        if self.supported_symbols_fetcher is not None:
+            return self.supported_symbols_fetcher(session=session)
+        return None
 
     def page_limit(self, series_type):
         if not self.page_limits:
@@ -164,7 +172,7 @@ def _build_gate_adapter():
         parse_series_payload=gate_series.parse_series_payload,
         precise_window_series_types=tuple(gate_series.SUPPORTED_SERIES_TYPES),
         is_symbol_supported=gate_series.is_symbol_supported,
-        supported_symbols_fetcher=gate_series.get_supported_symbols,
+        warm_symbol_support_cache_fn=gate_series.warm_supported_symbols_cache,
         page_limits={
             'klines': 1000,
             'open_interest_hist': 1000,
