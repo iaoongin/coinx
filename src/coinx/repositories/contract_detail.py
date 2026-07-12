@@ -1,10 +1,13 @@
 from coinx.repositories.funding_rate import load_latest_funding_rates
 from coinx.repositories.homepage_series import get_homepage_series_snapshot
 from coinx.repositories.market_structure_score import get_market_structure_score_snapshot
+from coinx.database import get_session
+from coinx.models import MarketFundingRate, MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.utils import logger
 
 
 INTERVAL_ORDER = ('5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h')
+RANGE_HOURS = {'1h': 1, '4h': 4, '24h': 24, '72h': 72, '7d': 168}
 
 
 def _first_symbol(snapshot, symbol):
@@ -45,7 +48,6 @@ def _build_intervals(homepage):
 def get_contract_detail(
     symbol,
     homepage_loader=get_homepage_series_snapshot,
-    score_loader=get_market_structure_score_snapshot,
     funding_loader=load_latest_funding_rates,
 ):
     """Build a contract detail view from stored snapshots only."""
@@ -55,8 +57,6 @@ def get_contract_detail(
     if homepage is None:
         return None
 
-    score_snapshot = _load_optional(score_loader, [normalized_symbol], '结构评分')
-    structure_score = _first_symbol(score_snapshot, normalized_symbol) if score_snapshot else None
     funding_map = _load_optional(funding_loader, [normalized_symbol], '资金费率') or {}
     funding = funding_map.get(normalized_symbol) or {}
 
@@ -66,7 +66,6 @@ def get_contract_detail(
     timestamps = [
         (homepage_snapshot or {}).get('cache_update_time'),
         funding.get('event_time'),
-        (score_snapshot or {}).get('cache_update_time') if score_snapshot else None,
     ]
     timestamps = [value for value in timestamps if value is not None]
 
@@ -92,5 +91,69 @@ def get_contract_detail(
         },
         'intervals': _build_intervals(homepage),
         'exchange_distribution': homepage.get('exchange_open_interest') or [],
-        'structure_score': structure_score,
     }
+
+
+def get_contract_structure_score(symbol, score_loader=get_market_structure_score_snapshot):
+    normalized_symbol = symbol.upper()
+    snapshot = score_loader([normalized_symbol])
+    return {
+        'symbol': normalized_symbol,
+        'as_of': (snapshot or {}).get('cache_update_time'),
+        'structure_score': _first_symbol(snapshot, normalized_symbol),
+    }
+
+
+def _float(value):
+    return float(value) if value is not None else None
+
+
+def load_contract_chart_series(symbol, range_key='24h', session=None, max_points=300):
+    """Load stored 5m series and aggregate exchanges on one timeline."""
+    hours = RANGE_HOURS[range_key]
+    own_session = session is None
+    db = session or get_session()
+    try:
+        latest_times = [
+            db.query(model_time).filter(model_symbol == symbol, model_period == '5m').order_by(model_time.desc()).limit(1).scalar()
+            for model_time, model_symbol, model_period in (
+                (MarketKline.open_time, MarketKline.symbol, MarketKline.period),
+                (MarketOpenInterestHist.event_time, MarketOpenInterestHist.symbol, MarketOpenInterestHist.period),
+                (MarketTakerBuySellVol.event_time, MarketTakerBuySellVol.symbol, MarketTakerBuySellVol.period),
+            )
+        ]
+        anchor = max((value for value in latest_times if value is not None), default=None)
+        if anchor is None:
+            return {'range': range_key, 'anchor_time': None, 'market': [], 'flow': [], 'funding_rate': []}
+        cutoff = anchor - hours * 60 * 60 * 1000
+
+        klines = db.query(MarketKline).filter(MarketKline.symbol == symbol, MarketKline.period == '5m', MarketKline.open_time >= cutoff, MarketKline.open_time <= anchor).order_by(MarketKline.open_time).all()
+        oi_rows = db.query(MarketOpenInterestHist).filter(MarketOpenInterestHist.symbol == symbol, MarketOpenInterestHist.period == '5m', MarketOpenInterestHist.event_time >= cutoff, MarketOpenInterestHist.event_time <= anchor).order_by(MarketOpenInterestHist.event_time).all()
+        flow_rows = db.query(MarketTakerBuySellVol).filter(MarketTakerBuySellVol.symbol == symbol, MarketTakerBuySellVol.period == '5m', MarketTakerBuySellVol.event_time >= cutoff, MarketTakerBuySellVol.event_time <= anchor).order_by(MarketTakerBuySellVol.event_time).all()
+        funding_rows = db.query(MarketFundingRate).filter(MarketFundingRate.symbol == symbol, MarketFundingRate.period == '5m', MarketFundingRate.event_time >= cutoff, MarketFundingRate.event_time <= anchor).order_by(MarketFundingRate.event_time).all()
+
+        prices = {}
+        for row in klines:
+            current = prices.get(row.open_time)
+            if current is None or row.exchange == 'binance':
+                prices[row.open_time] = {'value': _float(row.close_price), 'exchange': row.exchange}
+        oi = {}
+        for row in oi_rows:
+            item = oi.setdefault(row.event_time, [0.0, False])
+            if row.sum_open_interest_value is not None:
+                item[0] += float(row.sum_open_interest_value); item[1] = True
+        flow = {}
+        for row in flow_rows:
+            item = flow.setdefault(row.event_time, [0.0, 0.0])
+            item[0] += float(row.buy_vol or 0); item[1] += float(row.sell_vol or 0)
+
+        market_times = sorted(set(prices) | set(oi))
+        market = [{'time': t, 'price': (prices.get(t) or {}).get('value'), 'open_interest_value': oi.get(t, [None])[0] if oi.get(t, [None, False])[1] else None} for t in market_times]
+        flow_data = [{'time': t, 'buy_volume': values[0], 'sell_volume': values[1], 'net_inflow': values[0] - values[1]} for t, values in sorted(flow.items())]
+        funding = [{'time': int(row.event_time), 'funding_rate': _float(row.funding_rate), 'predicted_rate': _float(row.predicted_rate)} for row in funding_rows]
+
+        step = max(1, (max(len(market), len(flow_data), len(funding)) + max_points - 1) // max_points)
+        return {'range': range_key, 'anchor_time': anchor, 'market': market[::step], 'flow': flow_data[::step], 'funding_rate': funding[::step]}
+    finally:
+        if own_session:
+            db.close()

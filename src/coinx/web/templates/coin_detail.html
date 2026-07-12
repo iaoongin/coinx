@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>
     body { margin: 0; padding: var(--page-padding); background: var(--bg-primary); color: var(--text-primary); }
     * { box-sizing: border-box; }
@@ -38,7 +39,7 @@
     .section h2 { margin: 0 0 12px; font-size: 16px; letter-spacing: 0; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: 6px; }
     table { width: 100%; border-collapse: collapse; min-width: 760px; }
-    th, td { padding: 11px 12px; border-bottom: 1px solid var(--border-subtle); text-align: right; font-size: 13px; white-space: nowrap; }
+    th, td { padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); text-align: right; font-size: 12px; line-height: 1.25; white-space: nowrap; }
     th { color: var(--text-muted); font-weight: 500; background: var(--bg-secondary); }
     th:first-child, td:first-child { text-align: left; }
     tbody tr:last-child td { border-bottom: 0; }
@@ -49,7 +50,20 @@
     .exchange-share { color: var(--gold-primary); font-family: var(--font-mono); }
     .exchange-value { color: var(--text-secondary); font-family: var(--font-mono); font-size: 13px; }
     .empty { padding: 28px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-default); border-radius: 6px; }
-    @media (max-width: 900px) { .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .range-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .segments { display: flex; border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; }
+    .segment { width: 48px; height: 30px; border: 0; border-right: 1px solid var(--border-default); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; }
+    .segment:last-child { border-right: 0; }.segment.active { color: var(--gold-primary); background: var(--bg-elevated); }
+    .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .chart-panel { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 12px; min-width: 0; }
+    .chart-panel.wide { grid-column: 1 / -1; }.chart-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .chart { height: 260px; width: 100%; }.chart-state { height: 260px; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; }
+    .score-layout { display: grid; grid-template-columns: 230px 1fr; gap: 12px; }
+    .score-summary { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 16px; }
+    .score-total { font: 700 34px var(--font-mono); color: var(--gold-primary); }.score-signal { margin: 6px 0; font-weight: 600; }.score-advice { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+    .score-components { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+    .score-component { padding: 10px; background: var(--bg-secondary); border-radius: 5px; }.score-component span { display: block; color: var(--text-muted); font-size: 11px; }.score-component strong { display: block; margin-top: 5px; font-family: var(--font-mono); }
+    @media (max-width: 900px) { .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts { grid-template-columns: 1fr; }.chart-panel.wide { grid-column: auto; }.score-layout { grid-template-columns: 1fr; }.score-components { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 560px) { .detail-header { flex-direction: column; } .summary-grid, .exchange-grid { grid-template-columns: 1fr; } .actions { width: 100%; } .actions .btn { flex: 1; } }
   </style>
 </head>
@@ -71,58 +85,110 @@
         </div>
       </header>
 
-      <div v-if="loading && !detail" class="state">正在加载合约数据...</div>
-      <div v-else-if="error && !detail" class="state error"><div><div>[[ error ]]</div><button class="btn" @click="loadData">重试</button></div></div>
-      <template v-else-if="detail">
-        <div v-if="detail.data_status !== 'complete'" class="notice">
+      <div v-if="error && !detail" class="state error"><div><div>[[ error ]]</div><button class="btn" @click="loadData">重试</button></div></div>
+      <template v-else>
+        <div v-if="detail && detail.data_status !== 'complete'" class="notice">
           当前数据不完整<span v-if="detail.missing_exchanges.length">，缺少：[[ detail.missing_exchanges.join('、') ]]</span>。页面已保留可用数据。
         </div>
         <div v-if="error" class="notice">刷新失败，当前仍显示上一次数据：[[ error ]]</div>
 
-        <section class="summary-grid" aria-label="核心摘要">
+        <section v-if="detail" class="summary-grid" aria-label="核心摘要">
           <article class="metric"><div class="metric-label">最新价格</div><div class="metric-value">[[ formatPrice(summary.latest_price) ]]</div><div class="metric-sub" :class="tone(summary.price_change_24h_percent)">24h [[ formatPercent(summary.price_change_24h_percent) ]]</div></article>
           <article class="metric"><div class="metric-label">总持仓价值</div><div class="metric-value">[[ formatCompact(summary.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(summary.open_interest) ]]</div></article>
           <article class="metric"><div class="metric-label">资金费率</div><div class="metric-value" :class="tone(summary.funding_rate)">[[ formatRate(summary.funding_rate) ]]</div><div class="metric-sub">预测 [[ formatRate(summary.predicted_funding_rate) ]]</div></article>
           <article class="metric"><div class="metric-label">市场结构评分</div><div class="metric-value">[[ scoreValue ]]</div><div class="metric-sub">[[ scoreDescription ]]</div></article>
         </section>
+        <section v-else class="summary-grid" aria-label="核心摘要加载中">
+          <article class="metric" v-for="label in ['最新价格', '总持仓价值', '资金费率', '市场结构评分']" :key="label"><div class="metric-label">[[ label ]]</div><div class="metric-sub">正在加载摘要...</div></article>
+        </section>
 
         <section class="section">
+          <h2>市场结构评分</h2>
+          <div v-if="scoreLoading" class="empty">正在计算结构评分...</div>
+          <div v-else-if="scoreError" class="notice">[[ scoreError ]] <button class="btn" @click="loadStructureScore">重试</button></div>
+          <div v-else-if="structureScore" class="score-layout">
+            <div class="score-summary"><div class="score-total">[[ scoreValue ]]</div><div class="score-signal">[[ structureScore.trade_signal || 'N/A' ]] · 风险[[ structureScore.risk_level || 'N/A' ]]</div><div class="score-advice">[[ scoreDescription ]]</div></div>
+            <div>
+              <div class="score-components"><div class="score-component" v-for="item in scoreComponents" :key="item.key"><span>[[ item.label ]]</span><strong :class="tone(item.value)">[[ formatScore(item.value) ]]</strong><span>[[ item.description ]]</span></div></div>
+              <div class="table-wrap" style="margin-top:10px" v-if="structureScore.exchange_scores?.length"><table><thead><tr><th>交易所</th><th>权重</th><th>总分</th><th>加权分</th><th>趋势</th><th>动量</th><th>仓位</th></tr></thead><tbody><tr v-for="row in structureScore.exchange_scores" :key="row.exchange"><td>[[ row.exchange ]]</td><td>[[ formatPercent((row.weight || 0) * 100, false) ]]</td><td :class="tone(row.total_score)">[[ formatScore(row.total_score) ]]</td><td>[[ formatScore(row.weighted_total_score) ]]</td><td>[[ row.trend_direction || 'N/A' ]]</td><td>[[ row.momentum_direction || 'N/A' ]]</td><td>[[ row.position_structure || 'N/A' ]]</td></tr></tbody></table></div>
+            </div>
+          </div>
+          <div v-else class="empty">暂无结构评分</div>
+        </section>
+
+        <section class="section">
+          <div class="range-bar"><h2 style="margin:0">历史趋势</h2><div class="segments"><button v-for="item in ranges" :key="item" class="segment" :class="{ active: selectedRange === item }" @click="changeRange(item)">[[ item ]]</button></div></div>
+          <div v-if="seriesError" class="notice">[[ seriesError ]]</div>
+          <div class="charts">
+            <div class="chart-panel wide"><div class="chart-title">价格与持仓价值</div><div v-show="!seriesLoading && hasMarketSeries" ref="marketChartEl" class="chart"></div><div v-if="seriesLoading || !hasMarketSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无价格与持仓历史' ]]</div></div>
+            <div class="chart-panel"><div class="chart-title">主动买卖与净流入</div><div v-show="!seriesLoading && hasFlowSeries" ref="flowChartEl" class="chart"></div><div v-if="seriesLoading || !hasFlowSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无主动买卖历史' ]]</div></div>
+            <div class="chart-panel"><div class="chart-title">资金费率</div><div v-show="!seriesLoading && hasFundingSeries" ref="fundingChartEl" class="chart"></div><div v-if="seriesLoading || !hasFundingSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无资金费率历史' ]]</div></div>
+          </div>
+        </section>
+
+        <section v-if="detail" class="section">
           <h2>多周期变化</h2>
           <div class="table-wrap"><table><thead><tr><th>周期</th><th>价格变化</th><th>持仓量变化</th><th>持仓价值变化</th><th>累计净流入</th></tr></thead><tbody>
             <tr v-for="row in detail.intervals" :key="row.interval"><td>[[ row.interval ]]</td><td :class="tone(row.price_change_percent)">[[ formatPercent(row.price_change_percent) ]]</td><td :class="tone(row.open_interest_change_percent)">[[ formatPercent(row.open_interest_change_percent) ]]</td><td :class="tone(row.open_interest_value_change_percent)">[[ formatPercent(row.open_interest_value_change_percent) ]]</td><td :class="tone(row.net_inflow_value)">[[ formatCompact(row.net_inflow_value, '$') ]]</td></tr>
           </tbody></table></div>
         </section>
+        <section v-else class="section"><h2>多周期变化</h2><div class="empty">正在加载多周期数据...</div></section>
 
-        <section class="section">
+        <section v-if="detail" class="section">
           <h2>交易所持仓分布</h2>
           <div v-if="detail.exchange_distribution.length" class="exchange-grid">
             <article class="exchange" v-for="item in detail.exchange_distribution" :key="item.exchange"><div class="exchange-head"><span class="exchange-name">[[ item.exchange ]]</span><span class="exchange-share">[[ formatPercent(item.share_percent, false) ]]</span></div><div class="exchange-value">[[ formatCompact(item.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(item.open_interest) ]]</div></article>
           </div>
           <div v-else class="empty">暂无交易所持仓分布</div>
         </section>
+        <section v-else class="section"><h2>交易所持仓分布</h2><div class="empty">正在加载交易所数据...</div></section>
       </template>
     </main>
   </div>
   <script>
-    const { createApp, ref, computed, onMounted } = Vue;
+    const { createApp, ref, computed, nextTick, onMounted, onBeforeUnmount } = Vue;
     createApp({
       delimiters: ['[[', ']]'],
       setup() {
         const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref('');
+        const structureScore = ref(null); const scoreLoading = ref(false); const scoreError = ref('');
+        const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
+        const marketChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
         const statusText = computed(() => ({ complete: '数据完整', partial: '部分数据', empty: '暂无数据' }[detail.value?.data_status] || '状态未知'));
-        const scoreValue = computed(() => detail.value?.structure_score?.total_score == null ? 'N/A' : Number(detail.value.structure_score.total_score).toFixed(1));
-        const scoreDescription = computed(() => detail.value?.structure_score?.operation_advice || detail.value?.structure_score?.trade_signal || '暂无评分');
+        const scoreValue = computed(() => structureScore.value?.total_score == null ? 'N/A' : Number(structureScore.value.total_score).toFixed(1));
+        const scoreDescription = computed(() => structureScore.value?.operation_advice || structureScore.value?.trade_signal || '暂无评分');
+        const scoreComponents = computed(() => { const score = structureScore.value || {}; return [{ key:'trend', label:'趋势', value:score.trend_score, description:score.trend_direction }, { key:'momentum', label:'动量', value:score.momentum_score, description:score.momentum_direction }, { key:'position', label:'仓位', value:score.position_score, description:score.position_structure }, { key:'sentiment', label:'情绪', value:score.sentiment_score, description:score.sentiment_state }, { key:'risk', label:'风险', value:score.risk_score, description:score.risk_level }]; });
+        const hasMarketSeries = computed(() => series.value.market?.length); const hasFlowSeries = computed(() => series.value.flow?.length); const hasFundingSeries = computed(() => series.value.funding_rate?.length);
         const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未知';
         const tone = value => value == null || Number(value) === 0 ? '' : Number(value) > 0 ? 'positive' : 'negative';
         const formatPercent = (value, signed = true) => value == null ? 'N/A' : `${signed && Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)}%`;
         const formatRate = value => value == null ? 'N/A' : `${(Number(value) * 100).toFixed(4)}%`;
+        const formatScore = value => value == null ? 'N/A' : Number(value).toFixed(1);
         const formatPrice = value => value == null ? 'N/A' : `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 8 })}`;
         const formatCompact = (value, prefix = '') => { if (value == null) return 'N/A'; const number = Number(value); const abs = Math.abs(number); const units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]; const unit = units.find(([limit]) => abs >= limit); return unit ? `${prefix}${(number / unit[0]).toFixed(2)}${unit[1]}` : `${prefix}${number.toFixed(2)}`; };
-        const loadData = async () => { if (!symbol.value) { error.value = '缺少合约代码'; return; } loading.value = true; error.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); detail.value = result.data; } catch (err) { error.value = err.message === 'contract detail not found' ? '暂无该合约的已存储数据' : `加载数据失败：${err.message}`; } finally { loading.value = false; } };
+        const chartCompact = value => formatCompact(value).replace(/\.00(?=[KMB]?$)/, '');
+        const chartMoney = value => value == null ? 'N/A' : `${Number(value) < 0 ? '-' : ''}$${chartCompact(Math.abs(Number(value)))}`;
+        const chartBase = {
+          animation: false,
+          backgroundColor: 'transparent',
+          textStyle: { color: '#a1a1aa' },
+          tooltip: { trigger: 'axis' },
+          grid: { left: 58, right: 58, top: 34, bottom: 68, containLabel: true },
+          xAxis: { type: 'time', axisLabel: { color: '#71717a', margin: 12 } },
+          legend: { bottom: 4, textStyle: { color: '#a1a1aa' } },
+        };
+        const disposeCharts = () => { while (charts.length) charts.pop().dispose(); };
+        const makeChart = (el, option) => { if (!el || el.clientWidth === 0) return; const chart = echarts.init(el); chart.resize(); chart.setOption({ ...chartBase, ...option }, true); charts.push(chart); };
+        const renderCharts = () => { if (hasMarketSeries.value) makeChart(marketChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}}], series:[{name:'价格',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatPrice(value)},data:series.value.market.map(x=>[x.time,x.price])},{name:'持仓价值',type:'line',showSymbol:false,yAxisIndex:1,tooltip:{valueFormatter:value=>chartMoney(value)},data:series.value.market.map(x=>[x.time,x.open_interest_value])}] }); if (hasFlowSeries.value) makeChart(flowChartEl.value, { yAxis:{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}, series:[{name:'主动买入',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.buy_volume])},{name:'主动卖出',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.sell_volume])},{name:'净流入',type:'bar',tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.net_inflow])}] }); if (hasFundingSeries.value) makeChart(fundingChartEl.value, { yAxis:{type:'value',axisLabel:{formatter:v=>(v*100).toFixed(3)+'%'}}, series:[{name:'结算费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.funding_rate])},{name:'预测费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.predicted_rate])}] }); };
+        const loadSeries = async () => { seriesLoading.value = true; seriesError.value = ''; disposeCharts(); try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}/series?range=${selectedRange.value}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); series.value = result.data; } catch(err) { seriesError.value = `趋势加载失败：${err.message}`; series.value = {market:[],flow:[],funding_rate:[]}; } finally { seriesLoading.value = false; await nextTick(); renderCharts(); } };
+        const changeRange = value => { selectedRange.value = value; loadSeries(); };
+        const loadStructureScore = async () => { scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); structureScore.value = result.data?.structure_score || null; } catch(err) { scoreError.value = `结构评分加载失败：${err.message}`; } finally { scoreLoading.value = false; } };
+        const loadData = async () => { if (!symbol.value) { error.value = '缺少合约代码'; return; } loading.value = true; error.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); detail.value = result.data; await nextTick(); renderCharts(); } catch (err) { error.value = err.message === 'contract detail not found' ? '暂无该合约的已存储数据' : `加载数据失败：${err.message}`; } finally { loading.value = false; } };
         const goBack = () => history.length > 1 ? history.back() : location.assign('/');
-        onMounted(() => { symbol.value = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); loadData(); });
-        return { symbol, detail, loading, error, summary, statusText, scoreValue, scoreDescription, formatTime, tone, formatPercent, formatRate, formatPrice, formatCompact, loadData, goBack };
+        onMounted(() => { symbol.value = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); if (symbol.value) { loadData(); loadStructureScore(); loadSeries(); } else { error.value = '缺少合约代码'; } });
+        const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
+        return { symbol, detail, loading, error, summary, statusText, structureScore, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, seriesLoading, seriesError, marketChartEl, flowChartEl, fundingChartEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, goBack };
       }
     }).mount('#app');
   </script>

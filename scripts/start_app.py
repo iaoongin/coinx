@@ -36,27 +36,37 @@ class FlaskAppManager:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
 
-    def _is_app_command(self, cmdline_args):
+    def _is_app_command(self, cmdline_args, allow_manager_run=True):
         # cmdline_args: 原始的进程参数列表 (proc.cmdline())
         # 仅匹配两种确切场景：
         #   1) python src/coinx/main.py  (后台启动)
         #   2) python scripts/start_app.py run  (前台启动)
         if not cmdline_args or len(cmdline_args) < 2:
             return False
-        app_path_str = str(self.app_path)
-        start_app_path_str = str(project_root / "scripts" / "start_app.py")
         args = cmdline_args  # [python_exe, arg1, arg2, ...]
 
+        def path_matches(value, expected):
+            try:
+                return Path(value).resolve() == expected.resolve()
+            except (OSError, RuntimeError):
+                return False
+
         # 场景 1: python src/coinx/main.py
-        if len(args) >= 2 and args[1] == app_path_str:
+        if len(args) >= 2 and path_matches(args[1], self.app_path):
             return True
 
-        # 场景 2: python scripts/start_app.py [run|start|stop|restart]
-        if len(args) >= 3 and args[1] == start_app_path_str and args[2] in ("run", "start", "stop", "restart"):
+        # 管理命令本身不是应用。run 仅在确认监听端口时才视为服务，
+        # 否则新启动的前台管理命令会在启动检查阶段误判自己。
+        if (
+            allow_manager_run
+            and len(args) >= 3
+            and path_matches(args[1], project_root / "scripts" / "start_app.py")
+            and args[2] == "run"
+        ):
             return True
 
-        # 场景 3: python -m coinx.web.app
-        if len(args) >= 3 and args[1] == "-m" and args[2] == "coinx.web.app":
+        # 场景 3: python -m coinx.main / python -m coinx.web.app
+        if len(args) >= 3 and args[1] == "-m" and args[2] in ("coinx.main", "coinx.web.app"):
             return True
 
         return False
@@ -68,9 +78,58 @@ class FlaskAppManager:
             try:
                 if proc.info["pid"] == current_pid or not proc.info["cmdline"]:
                     continue
-                if self._is_app_command(proc.info["cmdline"]) and "python" in proc.info["name"].lower():
+                if self._is_app_command(proc.info["cmdline"], allow_manager_run=False) and "python" in proc.info["name"].lower():
                     found.append(proc.info["pid"])
             except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
+                pass
+        return found
+
+    def _is_app_process(self, pid):
+        try:
+            process = psutil.Process(pid)
+            return (
+                process.is_running()
+                and self._is_python_process(process)
+                and self._is_app_command(process.cmdline())
+            )
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+
+    def _find_app_listener_processes(self):
+        """Find CoinX Python processes currently listening on WEB_PORT.
+
+        Port ownership alone is not enough to terminate a process: another
+        application may legitimately use the configured port. Require both a
+        listening socket and a recognized CoinX command line before returning
+        a PID.
+        """
+        current_pid = os.getpid()
+        listener_pids = set()
+        try:
+            connections = psutil.net_connections(kind="inet")
+        except (psutil.AccessDenied, OSError) as e:
+            logger.warning(f"无法读取端口 {WEB_PORT} 的监听进程: {e}")
+            return []
+
+        for connection in connections:
+            if (
+                connection.status == psutil.CONN_LISTEN
+                and connection.laddr
+                and connection.laddr.port == WEB_PORT
+                and connection.pid
+                and connection.pid != current_pid
+            ):
+                listener_pids.add(connection.pid)
+
+        found = []
+        for pid in sorted(listener_pids):
+            try:
+                process = psutil.Process(pid)
+                if self._is_python_process(process) and self._is_app_command(process.cmdline()):
+                    found.append(pid)
+                else:
+                    logger.warning(f"端口 {WEB_PORT} 的进程 {pid} 不是已识别的 CoinX 应用，跳过停止")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         return found
 
@@ -79,7 +138,7 @@ class FlaskAppManager:
         logger.info(f"检查应用是否正在运行...")
         logger.info(f"PID文件路径: {self.pid_file}")
 
-        # 首先检查PID文件
+        # 首先检查 PID 文件。启动命令 run 的 PID 只有在确实监听端口时才可信。
         if self.pid_file.exists():
             try:
                 with open(self.pid_file, "r") as f:
@@ -93,23 +152,29 @@ class FlaskAppManager:
                     # 检查命令行参数是否匹配应用入口
                     cmdline_args = process.cmdline()
                     logger.info(f"进程命令行: {' '.join(cmdline_args)}")
-                    if self._is_app_command(cmdline_args):
+                    is_manager_run = len(cmdline_args) >= 3 and cmdline_args[2] == "run"
+                    listener_pids = set(self._find_app_listener_processes()) if is_manager_run else set()
+                    if self._is_app_command(cmdline_args) and (not is_manager_run or pid in listener_pids):
                         logger.info(f"找到匹配的进程，PID: {pid}")
                         return True
                     else:
-                        logger.info(f"进程不匹配: {cmdline}")
+                        logger.info(f"进程不匹配: {' '.join(cmdline_args)}")
                 else:
                     logger.info(f"进程不存在或不是Python进程")
-            except (
-                ValueError,
-                psutil.NoSuchProcess,
-                psutil.AccessDenied,
-                FileNotFoundError,
-            ) as e:
-                logger.error(f"检查PID文件时出错: {e}")
-                pass
+            except psutil.NoSuchProcess:
+                logger.info(f"PID文件中的进程 {pid} 已退出")
+            except (ValueError, psutil.AccessDenied, FileNotFoundError) as e:
+                logger.warning(f"检查PID文件失败: {e}")
 
-        # 如果PID文件检查失败，尝试通过进程名查找
+        # PID 文件可能丢失，优先按端口寻找真正已启动的服务。
+        listener_pids = self._find_app_listener_processes()
+        for pid in listener_pids:
+            logger.info(f"通过端口 {WEB_PORT} 找到应用，PID: {pid}")
+            with open(self.pid_file, "w") as f:
+                f.write(str(pid))
+            return True
+
+        # 最后仅按直接服务入口查找，避免把 start_app.py run 自身误判为服务。
         logger.info("通过进程名查找应用...")
         for pid in self._find_app_processes():
             logger.info(f"通过进程名找到应用，PID: {pid}")
@@ -220,7 +285,16 @@ class FlaskAppManager:
             root = psutil.Process(pid)
         except psutil.NoSuchProcess:
             return []
-        return root.children(recursive=True) + [root]
+        protected_pids = {os.getpid()}
+        try:
+            protected_pids.update(parent.pid for parent in psutil.Process().parents())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return [
+            process
+            for process in root.children(recursive=True) + [root]
+            if process.pid not in protected_pids
+        ]
 
     def _stop_process_tree(self, pid, timeout=10):
         processes = self._collect_process_tree(pid)
@@ -250,18 +324,27 @@ class FlaskAppManager:
         logger.info("开始停止应用...")
         stopped = False
 
+        target_pids = set()
         if self.pid_file.exists():
             try:
                 with open(self.pid_file, "r") as f:
                     pid = int(f.read().strip())
-                if self._stop_process_tree(pid):
-                    stopped = True
+                if self._is_app_process(pid):
+                    target_pids.add(pid)
+                else:
+                    logger.warning(f"PID文件中的进程 {pid} 不是运行中的 CoinX 应用，忽略")
             except (ValueError, FileNotFoundError) as e:
                 logger.error(f"读取PID文件失败: {e}")
 
-        # PID 文件不可用时，通过命令行兜底查找应用进程。
-        for pid in self._find_app_processes():
-            logger.info(f"找到运行中的应用进程，PID: {pid}")
+        # PID 文件失效或不完整时，通过命令行和监听端口兜底查找。
+        target_pids.update(self._find_app_processes())
+        listener_pids = self._find_app_listener_processes()
+        if listener_pids:
+            logger.info(f"通过端口 {WEB_PORT} 找到 CoinX 监听进程: {listener_pids}")
+            target_pids.update(listener_pids)
+
+        for pid in sorted(target_pids):
+            logger.info(f"停止应用进程，PID: {pid}")
             if self._stop_process_tree(pid):
                 stopped = True
 
@@ -286,52 +369,10 @@ class FlaskAppManager:
     def status(self):
         """查看应用状态"""
         logger.info("检查应用状态...")
-        # 检查PID文件
-        if self.pid_file.exists():
-            try:
-                with open(self.pid_file, "r") as f:
-                    pid = int(f.read().strip())
-                logger.info(f"从PID文件读取PID: {pid}")
-
-                # 检查进程是否存在
-                process = psutil.Process(pid)
-                # 确认进程是Python并且正在运行相关文件
-                if process.is_running() and self._is_python_process(process):
-                    # 检查命令行参数是否匹配应用入口
-                    cmdline_args = process.cmdline()
-                    logger.info(f"进程命令行: {' '.join(cmdline_args)}")
-                    if self._is_app_command(cmdline_args):
-                        logger.info(f"应用正在运行，PID: {pid}")
-                        return
-                    else:
-                        logger.info(f"进程不匹配: {cmdline}")
-                else:
-                    logger.info(f"进程不存在或不是Python进程")
-            except (
-                ValueError,
-                psutil.NoSuchProcess,
-                psutil.AccessDenied,
-                FileNotFoundError,
-            ) as e:
-                logger.error(f"检查PID文件时出错: {e}")
-                pass
-
-        # 如果PID文件检查失败，尝试通过进程名查找
-        logger.info("通过进程名查找应用...")
-        for pid in self._find_app_processes():
-            logger.info(f"通过进程名找到应用，PID: {pid}")
-            # 保存PID到文件
-            with open(self.pid_file, "w") as f:
-                f.write(str(pid))
-            logger.info(f"应用正在运行，PID: {pid}")
-            return
-
-        # 删除无效的PID文件
-        if self.pid_file.exists():
-            logger.info("删除无效的PID文件")
-            self.pid_file.unlink()
-
-        logger.info("应用未运行")
+        if self.is_app_running():
+            logger.info("应用正在运行")
+        else:
+            logger.info("应用未运行")
 
 
 def main():

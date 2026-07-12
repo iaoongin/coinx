@@ -14,7 +14,7 @@ from coinx.collector import (
 )
 from coinx.collector.exchange_repair import resolve_repair_worker_count
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
-from coinx.repositories.contract_detail import get_contract_detail
+from coinx.repositories.contract_detail import RANGE_HOURS, get_contract_detail, get_contract_structure_score, load_contract_chart_series
 from coinx.config import (
     ENABLED_EXCHANGES,
     HOMEPAGE_SERIES_REPAIR_ENABLED,
@@ -673,6 +673,37 @@ def get_coin_detail(symbol):
         logger.error(f'加载币种详情失败: {symbol}, 错误: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load coin detail: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/coin-detail/<symbol>/series')
+def get_coin_detail_series(symbol):
+    normalized_symbol = symbol.strip().upper()
+    range_key = request.args.get('range', '24h')
+    if not re.fullmatch(r'[A-Z0-9_-]{2,50}', normalized_symbol):
+        return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
+    if range_key not in RANGE_HOURS:
+        return jsonify({'status': 'error', 'message': 'invalid range'}), 400
+    try:
+        data = load_contract_chart_series(normalized_symbol, range_key=range_key)
+        return jsonify({'status': 'success', 'message': 'contract series loaded', 'data': data})
+    except Exception as e:
+        logger.error('加载合约趋势失败: %s, 错误: %s', normalized_symbol, e)
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load contract series: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/coin-detail/<symbol>/structure-score')
+def get_coin_detail_structure_score(symbol):
+    normalized_symbol = symbol.strip().upper()
+    if not re.fullmatch(r'[A-Z0-9_-]{2,50}', normalized_symbol):
+        return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
+    try:
+        data = get_contract_structure_score(normalized_symbol)
+        return jsonify({'status': 'success', 'message': 'contract structure score loaded', 'data': data})
+    except Exception as e:
+        logger.error('加载合约结构评分失败: %s, 错误: %s', normalized_symbol, e)
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load contract structure score: {str(e)}'}), 500
 
 
 @api_data_bp.route('/api/market-rank')

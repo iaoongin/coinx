@@ -1,7 +1,8 @@
 from flask import Flask
 import werkzeug
 
-from coinx.repositories.contract_detail import get_contract_detail
+from coinx.models import MarketFundingRate, MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
+from coinx.repositories.contract_detail import get_contract_detail, get_contract_structure_score, load_contract_chart_series
 from coinx.web.routes.api_data import api_data_bp
 
 
@@ -49,10 +50,6 @@ def test_contract_detail_combines_existing_snapshots():
     result = get_contract_detail(
         'btcusdt',
         homepage_loader=lambda symbols: _homepage_snapshot(),
-        score_loader=lambda symbols: {
-            'cache_update_time': 1711526400000,
-            'data': [{'symbol': 'BTCUSDT', 'total_score': 72.4, 'trade_signal': 'long'}],
-        },
         funding_loader=lambda symbols: {'BTCUSDT': {'event_time': 1711526400000, 'funding_rate': 0.0001}},
     )
 
@@ -63,20 +60,26 @@ def test_contract_detail_combines_existing_snapshots():
     assert result['intervals'][3]['interval'] == '1h'
     assert result['intervals'][3]['net_inflow_value'] == 6900000.0
     assert result['exchange_distribution'][0]['exchange'] == 'binance'
-    assert result['structure_score']['total_score'] == 72.4
 
 
 def test_contract_detail_preserves_partial_data_without_score():
     result = get_contract_detail(
         'BTCUSDT',
         homepage_loader=lambda symbols: _homepage_snapshot(status='partial'),
-        score_loader=lambda symbols: {'data': [], 'cache_update_time': None},
         funding_loader=lambda symbols: {},
     )
 
     assert result['data_status'] == 'partial'
     assert result['missing_exchanges'] == ['okx']
-    assert result['structure_score'] is None
+
+
+def test_contract_structure_score_is_loaded_independently():
+    result = get_contract_structure_score('btcusdt', score_loader=lambda symbols: {
+        'cache_update_time': 1711526400000,
+        'data': [{'symbol': 'BTCUSDT', 'total_score': 72.4}],
+    })
+    assert result['symbol'] == 'BTCUSDT'
+    assert result['structure_score']['total_score'] == 72.4
 
 
 def _client():
@@ -106,3 +109,42 @@ def test_coin_detail_api_returns_repository_payload(monkeypatch):
     response = _client().get('/api/coin-detail/btcusdt')
     assert response.status_code == 200
     assert response.get_json()['data']['symbol'] == 'BTCUSDT'
+
+
+def test_contract_chart_series_aggregates_exchanges(db_session):
+    timestamp = 1711526400000
+    db_session.add_all([
+        MarketKline(exchange='binance', symbol='BTCUSDT', period='5m', open_time=timestamp, close_time=timestamp + 299999, open_price=100, high_price=102, low_price=99, close_price=101),
+        MarketKline(exchange='bybit', symbol='BTCUSDT', period='5m', open_time=timestamp, close_time=timestamp + 299999, open_price=99, high_price=102, low_price=98, close_price=100),
+        MarketOpenInterestHist(exchange='binance', symbol='BTCUSDT', period='5m', event_time=timestamp, sum_open_interest=10, sum_open_interest_value=1010),
+        MarketOpenInterestHist(exchange='bybit', symbol='BTCUSDT', period='5m', event_time=timestamp, sum_open_interest=20, sum_open_interest_value=2000),
+        MarketTakerBuySellVol(exchange='binance', symbol='BTCUSDT', period='5m', event_time=timestamp, buy_vol=8, sell_vol=3),
+        MarketTakerBuySellVol(exchange='bybit', symbol='BTCUSDT', period='5m', event_time=timestamp, buy_vol=4, sell_vol=6),
+        MarketFundingRate(exchange='binance', symbol='BTCUSDT', period='5m', event_time=timestamp, funding_rate=.0001, predicted_rate=.0002),
+    ])
+    db_session.commit()
+
+    result = load_contract_chart_series('BTCUSDT', range_key='1h', session=db_session)
+
+    assert result['market'][0]['price'] == 101.0
+    assert result['market'][0]['open_interest_value'] == 3010.0
+    assert result['flow'][0]['buy_volume'] == 12.0
+    assert result['flow'][0]['net_inflow'] == 3.0
+    assert result['funding_rate'][0]['predicted_rate'] == .0002
+
+
+def test_coin_detail_series_api_validates_range(monkeypatch):
+    response = _client().get('/api/coin-detail/BTCUSDT/series?range=30d')
+    assert response.status_code == 400
+
+    monkeypatch.setattr('coinx.web.routes.api_data.load_contract_chart_series', lambda symbol, range_key: {'range': range_key, 'market': []})
+    response = _client().get('/api/coin-detail/BTCUSDT/series?range=4h')
+    assert response.status_code == 200
+    assert response.get_json()['data']['range'] == '4h'
+
+
+def test_coin_detail_structure_score_api(monkeypatch):
+    monkeypatch.setattr('coinx.web.routes.api_data.get_contract_structure_score', lambda symbol: {'symbol': symbol, 'structure_score': {'total_score': 66}})
+    response = _client().get('/api/coin-detail/BTCUSDT/structure-score')
+    assert response.status_code == 200
+    assert response.get_json()['data']['structure_score']['total_score'] == 66
