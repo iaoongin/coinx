@@ -206,25 +206,28 @@ const mockMarketRankRefreshed = [
 
 const mockCoinDetail = {
   symbol: 'BTCUSDT',
-  latest_price: 69234.12,
-  funding_rate: {
-    lastFundingRate: 0.0008,
+  as_of: 1711526400000,
+  data_status: 'complete',
+  included_exchanges: ['binance', 'bybit'],
+  missing_exchanges: [],
+  summary: {
+    latest_price: 69234.12,
+    price_change_24h_percent: 2.34,
+    open_interest: 1234567.89,
+    open_interest_value: 85432123.45,
+    funding_rate: 0.0008,
+    predicted_funding_rate: 0.001,
+    next_funding_time: 1711530000000,
   },
-  ticker_data: {
-    priceChangePercent: 2.34,
-  },
-  open_interest_data: {
-    openInterestValue: 85432123.45,
-  },
-  exchange_distribution: {
-    binance: { value: 40000000, percentage: 46.8 },
-    bybit: { value: 25000000, percentage: 29.3 },
-  },
-  net_inflow_data: {
-    '5m': 120000,
-    '1h': 340000,
-    '4h': -120000,
-  },
+  intervals: [
+    { interval: '5m', price_change_percent: 0.08, open_interest_change_percent: 1.2, open_interest_value_change_percent: 1.4, net_inflow_value: 120000 },
+    { interval: '1h', price_change_percent: 1.2, open_interest_change_percent: 3.4, open_interest_value_change_percent: 4.6, net_inflow_value: 340000 },
+  ],
+  exchange_distribution: [
+    { exchange: 'binance', open_interest: 600000, open_interest_value: 40000000, share_percent: 46.8 },
+    { exchange: 'bybit', open_interest: 350000, open_interest_value: 25000000, share_percent: 29.3 },
+  ],
+  structure_score: { total_score: 72.4, trade_signal: '强多', operation_advice: '只找回踩做多，不追高' },
 };
 
 const mockMarketStructureScores = [

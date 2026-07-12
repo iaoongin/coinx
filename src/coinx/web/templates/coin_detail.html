@@ -3,423 +3,128 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>币种详情</title>
+  <title>合约详情 - CoinX</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <style>
-    body {
-      margin: 0;
-      padding: var(--page-padding);
-      font-family: 'Noto Sans SC', sans-serif;
-    }
-
+    body { margin: 0; padding: var(--page-padding); background: var(--bg-primary); color: var(--text-primary); }
+    * { box-sizing: border-box; }
     #app { max-width: var(--page-max-width); margin: 0 auto; }
-
-    .shell {
-      background: var(--bg-card);
-      border: 1px solid var(--border-default);
-      border-radius: var(--card-radius-lg);
-      box-shadow: var(--shadow-card);
-      padding: 20px;
-      margin-bottom: 20px;
-      animation: fadeInUp 0.5s ease;
-    }
-
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .header h1 {
-      margin: 0;
-      font-size: 22px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .header h1 span {
-      color: var(--gold-primary);
-      font-family: var(--font-mono);
-    }
-
-    .btn {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
-      transition: all var(--transition-fast);
-      background: var(--bg-elevated);
-      color: var(--text-secondary);
-      border: 1px solid var(--border-default);
-    }
-
-    .btn:hover {
-      background: var(--bg-hover);
-      color: var(--text-primary);
-    }
-
-    .positive { color: var(--positive) !important; font-weight: 600; font-family: var(--font-mono); }
-    .negative { color: var(--negative) !important; font-weight: 600; font-family: var(--font-mono); }
-
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .info-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-default);
-      border-radius: var(--card-radius);
-      padding: 18px;
-    }
-
-    .info-card h3 {
-      margin: 0 0 14px;
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-      border-bottom: 1px solid var(--border-subtle);
-      padding-bottom: 10px;
-    }
-
-    .price-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-
-    .price-row span:first-child {
-      color: var(--text-muted);
-      font-size: 13px;
-    }
-
-    .price-value {
-      font-size: 20px;
-      font-weight: 600;
-      font-family: var(--font-mono);
-      color: var(--text-primary);
-    }
-
-    .funding-rate {
-      font-size: 16px;
-      font-weight: 600;
-      font-family: var(--font-mono);
-      color: var(--gold-primary);
-    }
-
-    .total-oi {
-      text-align: center;
-      font-size: 18px;
-      font-weight: 600;
-      font-family: var(--font-mono);
-      color: var(--text-primary);
-      margin-bottom: 16px;
-    }
-
-    .oi-changes {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
-      gap: 8px;
-    }
-
-    .oi-item {
-      text-align: center;
-      padding: 10px;
-      background: var(--bg-card);
-      border-radius: 6px;
-      border: 1px solid var(--border-subtle);
-    }
-
-    .oi-label {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
-    }
-
-    .oi-value {
-      font-size: 13px;
-      font-weight: 500;
-      font-family: var(--font-mono);
-      color: var(--text-secondary);
-    }
-
-    .exchange-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-
-    .exchange-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .exchange-item:last-child {
-      border-bottom: none;
-    }
-
-    .exchange-name {
-      font-weight: 500;
-      color: var(--text-primary);
-    }
-
-    .exchange-value {
-      font-weight: 600;
-      font-family: var(--font-mono);
-      color: var(--gold-primary);
-    }
-
-    .exchange-percentage {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-left: 4px;
-    }
-
-    .time-series {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-      gap: 8px;
-    }
-
-    .time-item {
-      text-align: center;
-      padding: 10px;
-      background: var(--bg-card);
-      border-radius: 6px;
-      border: 1px solid var(--border-subtle);
-    }
-
-    .time-label {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
-    }
-
-    .time-value {
-      font-size: 13px;
-      font-weight: 600;
-      font-family: var(--font-mono);
-    }
-
-    .loading-state {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--text-muted);
-      font-size: 14px;
-    }
-
-    .error-state {
-      padding: 16px;
-      background: var(--negative-dim);
-      border: 1px solid rgba(248, 113, 113, 0.2);
-      border-radius: 8px;
-      color: var(--negative);
-      font-size: 14px;
-    }
+    .detail-shell { padding: 20px 0 40px; }
+    .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+    .symbol { color: var(--gold-primary); font-family: var(--font-mono); }
+    .status { padding: 3px 8px; border: 1px solid var(--border-default); border-radius: 4px; font-size: 12px; color: var(--text-secondary); }
+    .status.complete { color: var(--positive); border-color: rgba(74, 222, 128, .35); }
+    .status.partial { color: var(--gold-primary); border-color: rgba(251, 191, 36, .35); }
+    .updated { margin-top: 7px; font-size: 12px; color: var(--text-muted); }
+    .actions { display: flex; gap: 8px; }
+    .btn { min-height: 36px; padding: 7px 13px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .notice { padding: 12px 14px; margin-bottom: 16px; border: 1px solid rgba(251, 191, 36, .3); background: rgba(251, 191, 36, .07); color: var(--gold-primary); border-radius: 6px; font-size: 13px; }
+    .state { min-height: 240px; display: grid; place-items: center; color: var(--text-muted); }
+    .error { color: var(--negative); text-align: center; }
+    .error .btn { margin-top: 14px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .metric { min-height: 112px; padding: 15px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
+    .metric-label { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+    .metric-value { font: 600 20px var(--font-mono); overflow-wrap: anywhere; }
+    .metric-sub { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+    .positive { color: var(--positive); }
+    .negative { color: var(--negative); }
+    .section { margin-top: 18px; border-top: 1px solid var(--border-default); padding-top: 18px; }
+    .section h2 { margin: 0 0 12px; font-size: 16px; letter-spacing: 0; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--border-subtle); text-align: right; font-size: 13px; white-space: nowrap; }
+    th { color: var(--text-muted); font-weight: 500; background: var(--bg-secondary); }
+    th:first-child, td:first-child { text-align: left; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .exchange-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .exchange { padding: 14px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
+    .exchange-head { display: flex; justify-content: space-between; margin-bottom: 12px; }
+    .exchange-name { font-weight: 600; text-transform: capitalize; }
+    .exchange-share { color: var(--gold-primary); font-family: var(--font-mono); }
+    .exchange-value { color: var(--text-secondary); font-family: var(--font-mono); font-size: 13px; }
+    .empty { padding: 28px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-default); border-radius: 6px; }
+    @media (max-width: 900px) { .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 560px) { .detail-header { flex-direction: column; } .summary-grid, .exchange-grid { grid-template-columns: 1fr; } .actions { width: 100%; } .actions .btn { flex: 1; } }
   </style>
 </head>
 <body>
   <div id="app">
     {% include 'components/nav.html' %}
-
-    <div class="shell">
-      <div class="header">
-        <h1><span>CoinX</span> {{ symbol }} 合约详情</h1>
-        <button class="btn" @click="goBack">← 返回</button>
-      </div>
-
-      <div class="loading-state" v-if="loading">正在加载数据...</div>
-      <div class="error-state" v-else-if="error">{{ error }}</div>
-
-      <template v-else-if="data">
-{% raw %}
-        <div class="info-grid">
-          <div class="info-card">
-            <h3>基础信息</h3>
-            <div class="price-row">
-              <span>最近交易价</span>
-              <span class="price-value">{{ formatPrice(data.latest_price) }}</span>
-            </div>
-            <div class="price-row">
-              <span>资金费率</span>
-              <span class="funding-rate">{{ formatFundingRate() }}</span>
-            </div>
-            <div class="price-row" v-if="data.ticker_data">
-              <span>24h涨跌</span>
-              <span :class="data.ticker_data.priceChangePercent >= 0 ? 'positive' : 'negative'">
-                {{ formatPercentage(data.ticker_data.priceChangePercent) }}
-              </span>
-            </div>
+    <main class="detail-shell">
+      <header class="detail-header">
+        <div>
+          <div class="title-row">
+            <h1><span class="symbol">[[ symbol || '合约' ]]</span> 合约详情</h1>
+            <span v-if="detail" class="status" :class="detail.data_status">[[ statusText ]]</span>
           </div>
-
-          <div class="info-card">
-            <h3>持仓信息</h3>
-            <div class="total-oi" v-if="data.open_interest_data">
-              总持仓: {{ formatNumber(data.open_interest_data.openInterestValue) }}
-            </div>
-            <div class="oi-changes">
-              <div class="oi-item" v-for="interval in intervals" :key="interval">
-                <div class="oi-label">{{ interval }}</div>
-                <div class="oi-value">{{ formatNumber(data.open_interest_data?.openInterestValue || 0) }}</div>
-                <div class="oi-label" :class="getIntervalChange(interval).includes('-') ? 'negative' : 'positive'">{{ getIntervalChange(interval) }}</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="info-card">
-            <h3>交易所持仓分布</h3>
-            <ul class="exchange-list">
-              <li class="exchange-item" v-for="(info, exchange) in data.exchange_distribution" :key="exchange">
-                <span class="exchange-name">{{ formatExchangeName(exchange) }}</span>
-                <span class="exchange-value">
-                  {{ formatNumber(info.value) }}
-                  <span class="exchange-percentage">({{ info.percentage }}%)</span>
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          <div class="info-card">
-            <h3>主力净流入</h3>
-            <div class="time-series">
-              <div class="time-item" v-for="(value, time) in data.net_inflow_data" :key="time">
-                <div class="time-label">{{ time }}</div>
-                <div class="time-value" :class="value >= 0 ? 'positive' : 'negative'">
-                  {{ formatNumber(value) }}
-                </div>
-              </div>
-            </div>
-          </div>
+          <div v-if="detail" class="updated">数据时间：[[ formatTime(detail.as_of) ]]</div>
         </div>
-{% endraw %}
+        <div class="actions">
+          <button class="btn" type="button" @click="goBack">返回</button>
+          <button class="btn" type="button" @click="loadData" :disabled="loading">[[ loading ? '加载中' : '刷新' ]]</button>
+        </div>
+      </header>
+
+      <div v-if="loading && !detail" class="state">正在加载合约数据...</div>
+      <div v-else-if="error && !detail" class="state error"><div><div>[[ error ]]</div><button class="btn" @click="loadData">重试</button></div></div>
+      <template v-else-if="detail">
+        <div v-if="detail.data_status !== 'complete'" class="notice">
+          当前数据不完整<span v-if="detail.missing_exchanges.length">，缺少：[[ detail.missing_exchanges.join('、') ]]</span>。页面已保留可用数据。
+        </div>
+        <div v-if="error" class="notice">刷新失败，当前仍显示上一次数据：[[ error ]]</div>
+
+        <section class="summary-grid" aria-label="核心摘要">
+          <article class="metric"><div class="metric-label">最新价格</div><div class="metric-value">[[ formatPrice(summary.latest_price) ]]</div><div class="metric-sub" :class="tone(summary.price_change_24h_percent)">24h [[ formatPercent(summary.price_change_24h_percent) ]]</div></article>
+          <article class="metric"><div class="metric-label">总持仓价值</div><div class="metric-value">[[ formatCompact(summary.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(summary.open_interest) ]]</div></article>
+          <article class="metric"><div class="metric-label">资金费率</div><div class="metric-value" :class="tone(summary.funding_rate)">[[ formatRate(summary.funding_rate) ]]</div><div class="metric-sub">预测 [[ formatRate(summary.predicted_funding_rate) ]]</div></article>
+          <article class="metric"><div class="metric-label">市场结构评分</div><div class="metric-value">[[ scoreValue ]]</div><div class="metric-sub">[[ scoreDescription ]]</div></article>
+        </section>
+
+        <section class="section">
+          <h2>多周期变化</h2>
+          <div class="table-wrap"><table><thead><tr><th>周期</th><th>价格变化</th><th>持仓量变化</th><th>持仓价值变化</th><th>累计净流入</th></tr></thead><tbody>
+            <tr v-for="row in detail.intervals" :key="row.interval"><td>[[ row.interval ]]</td><td :class="tone(row.price_change_percent)">[[ formatPercent(row.price_change_percent) ]]</td><td :class="tone(row.open_interest_change_percent)">[[ formatPercent(row.open_interest_change_percent) ]]</td><td :class="tone(row.open_interest_value_change_percent)">[[ formatPercent(row.open_interest_value_change_percent) ]]</td><td :class="tone(row.net_inflow_value)">[[ formatCompact(row.net_inflow_value, '$') ]]</td></tr>
+          </tbody></table></div>
+        </section>
+
+        <section class="section">
+          <h2>交易所持仓分布</h2>
+          <div v-if="detail.exchange_distribution.length" class="exchange-grid">
+            <article class="exchange" v-for="item in detail.exchange_distribution" :key="item.exchange"><div class="exchange-head"><span class="exchange-name">[[ item.exchange ]]</span><span class="exchange-share">[[ formatPercent(item.share_percent, false) ]]</span></div><div class="exchange-value">[[ formatCompact(item.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(item.open_interest) ]]</div></article>
+          </div>
+          <div v-else class="empty">暂无交易所持仓分布</div>
+        </section>
       </template>
-    </div>
+    </main>
   </div>
-
   <script>
-    const { createApp, ref, reactive, computed, onMounted } = Vue;
-
-    const App = {
+    const { createApp, ref, computed, onMounted } = Vue;
+    createApp({
+      delimiters: ['[[', ']]'],
       setup() {
-        const symbol = ref('');
-        const data = ref(null);
-        const loading = ref(true);
-        const error = ref('');
-        const intervals = ref(['5m', '15m', '30m', '1h', '4h', '8h', '12h', '24h', '72h', '168h']);
-
-        const activeMenu = computed(() => '/coin-detail');
-        const intervalChanges = {
-          '5m': '+0.26%', '15m': '+0.13%', '30m': '-0.20%',
-          '1h': '-2.28%', '4h': '-4.96%', '8h': '-1.36%',
-          '12h': '-3.41%', '24h': '+26.82%', '72h': '+57.17%', '168h': '+147.93%'
-        };
-
-        const getSymbolFromUrl = () => {
-          const urlParams = new URLSearchParams(window.location.search);
-          return urlParams.get('symbol') || 'SPKUSDT';
-        };
-
-        const formatNumber = (num) => {
-          if (num === null || num === undefined) return 'N/A';
-          const absNum = Math.abs(num);
-          if (absNum >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-          if (absNum >= 1e6) return (num / 1e6).toFixed(2) + 'M';
-          if (absNum >= 1e3) return (num / 1e3).toFixed(2) + 'K';
-          return num.toFixed(2);
-        };
-
-        const formatPrice = (price) => {
-          if (price === null || price === undefined) return 'N/A';
-          return '$' + price.toFixed(8);
-        };
-
-        const formatPercentage = (percent) => {
-          if (percent === null || percent === undefined) return 'N/A';
-          return (percent > 0 ? '+' : '') + percent.toFixed(2) + '%';
-        };
-
-        const formatFundingRate = () => {
-          if (!data.value?.funding_rate) return 'N/A';
-          return formatPercentage(data.value.funding_rate.lastFundingRate * 100);
-        };
-
-        const formatExchangeName = (exchange) => {
-          return exchange.charAt(0).toUpperCase() + exchange.slice(1);
-        };
-
-        const getIntervalChange = (interval) => {
-          return intervalChanges[interval] || 'N/A';
-        };
-
-        const goBack = () => {
-          window.history.back();
-        };
-
-        const loadData = async () => {
-          symbol.value = getSymbolFromUrl();
-          loading.value = true;
-          error.value = '';
-
-          try {
-            const response = await fetch(`/api/coin-detail/${symbol.value}`);
-            const result = await response.json();
-            if (result.status === 'success') {
-              data.value = result.data;
-            } else {
-              error.value = result.message;
-            }
-          } catch (err) {
-            error.value = '加载数据失败: ' + err.message;
-          } finally {
-            loading.value = false;
-          }
-        };
-
-        onMounted(() => {
-          loadData();
-        });
-
-        const handleMenuSelect = (index) => {
-          window.location.href = index;
-        };
-
-        return {
-          symbol,
-          data,
-          loading,
-          error,
-          intervals,
-          activeMenu,
-          handleMenuSelect,
-          formatNumber,
-          formatPrice,
-          formatPercentage,
-          formatFundingRate,
-          formatExchangeName,
-          getIntervalChange,
-          goBack
-        };
+        const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref('');
+        const summary = computed(() => detail.value?.summary || {});
+        const statusText = computed(() => ({ complete: '数据完整', partial: '部分数据', empty: '暂无数据' }[detail.value?.data_status] || '状态未知'));
+        const scoreValue = computed(() => detail.value?.structure_score?.total_score == null ? 'N/A' : Number(detail.value.structure_score.total_score).toFixed(1));
+        const scoreDescription = computed(() => detail.value?.structure_score?.operation_advice || detail.value?.structure_score?.trade_signal || '暂无评分');
+        const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未知';
+        const tone = value => value == null || Number(value) === 0 ? '' : Number(value) > 0 ? 'positive' : 'negative';
+        const formatPercent = (value, signed = true) => value == null ? 'N/A' : `${signed && Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)}%`;
+        const formatRate = value => value == null ? 'N/A' : `${(Number(value) * 100).toFixed(4)}%`;
+        const formatPrice = value => value == null ? 'N/A' : `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 8 })}`;
+        const formatCompact = (value, prefix = '') => { if (value == null) return 'N/A'; const number = Number(value); const abs = Math.abs(number); const units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]; const unit = units.find(([limit]) => abs >= limit); return unit ? `${prefix}${(number / unit[0]).toFixed(2)}${unit[1]}` : `${prefix}${number.toFixed(2)}`; };
+        const loadData = async () => { if (!symbol.value) { error.value = '缺少合约代码'; return; } loading.value = true; error.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); detail.value = result.data; } catch (err) { error.value = err.message === 'contract detail not found' ? '暂无该合约的已存储数据' : `加载数据失败：${err.message}`; } finally { loading.value = false; } };
+        const goBack = () => history.length > 1 ? history.back() : location.assign('/');
+        onMounted(() => { symbol.value = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); loadData(); });
+        return { symbol, detail, loading, error, summary, statusText, scoreValue, scoreDescription, formatTime, tone, formatPercent, formatRate, formatPrice, formatCompact, loadData, goBack };
       }
-    };
-
-    const app = createApp(App);
-    app.mount('#app');
+    }).mount('#app');
   </script>
 </body>
 </html>

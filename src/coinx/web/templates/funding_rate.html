@@ -713,7 +713,7 @@
                 <td>
                   <span class="expand-indicator" :class="{ open: expandedSymbol === item.symbol }">&#9654;</span>
                 </td>
-                <td class="symbol-cell">{{ '{{ item.symbol }}' }}</td>
+                <td class="symbol-cell"><a :href="`/coin-detail?symbol=${item.symbol}`" @click.stop>{{ '{{ item.symbol }}' }}</a></td>
                 <td class="sparkline-cell" v-html="renderSparkline(item.sparkline)"></td>
                 <td class="rate-cell" :class="{ positive: item.funding_rate > 0, negative: item.funding_rate < 0, abnormal: item.is_abnormal }">
                   {{ '{{ item.funding_rate_formatted }}' }}

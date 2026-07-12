@@ -1,17 +1,12 @@
 import threading
 import time
+import re
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector import (
-    get_24hr_ticker,
-    get_exchange_distribution_real,
-    get_funding_rate,
-    get_latest_price,
-    get_long_short_ratio,
-    get_open_interest,
     refresh_market_tickers,
     repair_rolling_tracked_symbols,
     repair_latest_tracked_symbols,
@@ -19,6 +14,7 @@ from coinx.collector import (
 )
 from coinx.collector.exchange_repair import resolve_repair_worker_count
 from coinx.repositories.market_tickers import get_market_tickers, get_latest_close_time
+from coinx.repositories.contract_detail import get_contract_detail
 from coinx.config import (
     ENABLED_EXCHANGES,
     HOMEPAGE_SERIES_REPAIR_ENABLED,
@@ -663,17 +659,15 @@ def update_data():
 
 @api_data_bp.route('/api/coin-detail/<symbol>')
 def get_coin_detail(symbol):
-    logger.info(f'开始加载币种详情: {symbol}')
+    normalized_symbol = symbol.strip().upper()
+    if not re.fullmatch(r'[A-Z0-9_-]{2,50}', normalized_symbol):
+        return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
+
+    logger.info('开始加载合约详情: %s', normalized_symbol)
     try:
-        detail_data = {
-            'symbol': symbol,
-            'latest_price': get_latest_price(symbol),
-            'funding_rate': get_funding_rate(symbol),
-            'ticker_data': get_24hr_ticker(symbol),
-            'open_interest_data': get_open_interest(symbol),
-            'long_short_ratio': get_long_short_ratio(symbol),
-            'exchange_distribution': get_exchange_distribution_real(symbol),
-        }
+        detail_data = get_contract_detail(normalized_symbol)
+        if detail_data is None:
+            return jsonify({'status': 'error', 'message': 'contract detail not found'}), 404
         return jsonify({'status': 'success', 'message': 'coin detail loaded', 'data': detail_data})
     except Exception as e:
         logger.error(f'加载币种详情失败: {symbol}, 错误: {e}')
