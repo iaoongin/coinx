@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/fab-button.css') }}">
   <style>
     :root {
@@ -201,8 +202,24 @@
       color: rgba(148, 163, 184, 0.85);
       font-size: 12px;
       font-weight: 500;
-      cursor: help;
+      cursor: pointer;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      font-family: inherit;
     }
+
+    .coin-meta-funding:hover,
+    .coin-meta-funding:focus-visible { color: var(--gold-bright); }
+
+    .funding-modal-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, 0.72); }
+    .funding-modal { width: min(860px, 100%); border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-secondary); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48); }
+    .funding-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border-subtle); }
+    .funding-modal-title { margin: 0; font-size: 16px; }
+    .funding-modal-close { width: 34px; height: 34px; border: 0; background: transparent; color: var(--text-secondary); font-size: 25px; cursor: pointer; }
+    .funding-chart-wrap { position: relative; height: 420px; padding: 12px; }
+    .funding-chart { width: 100%; height: 100%; }
+    .funding-chart-state { position: absolute; inset: 12px; display: grid; place-items: center; color: var(--text-muted); }
 
     .coin-meta-funding b.positive { color: var(--positive); }
     .coin-meta-funding b.negative { color: var(--negative); }
@@ -464,6 +481,9 @@
       .search-input {
         width: 100%;
       }
+
+      .funding-modal-backdrop { padding: 12px; }
+      .funding-chart-wrap { height: 320px; }
     }
   </style>
 </head>
@@ -514,7 +534,7 @@
             >
               [[ formatExchangeEntry(item) ]]
             </span>
-            <span v-if="coin.funding_rate_formatted" class="coin-meta-funding" :title="'下次结算: ' + (coin.next_funding_time_formatted || 'N/A')">费率 <b :class="valueClass(coin.funding_rate)">[[ coin.funding_rate_formatted ]]</b></span>
+            <button v-if="coin.funding_rate_formatted" type="button" class="coin-meta-funding" :title="'下次结算: ' + (coin.next_funding_time_formatted || 'N/A')" @click.stop="openFundingModal(coin, $event)">费率 <b :class="valueClass(coin.funding_rate)">[[ coin.funding_rate_formatted ]]</b></button>
           </div>
         </div>
 
@@ -569,13 +589,25 @@
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
       </svg>
     </button>
-    <coin-config-modal :visible="showCoinConfig" @close="showCoinConfig = false" @update:tracked="onTrackedUpdate" />
+    <coin-config-modal :visible="showCoinConfig" @close="showCoinConfig = false" @update:tracked="onTrackedUpdate"></coin-config-modal>
+    <div v-if="fundingModalOpen" class="funding-modal-backdrop" @click.self="closeFundingModal">
+      <section class="funding-modal" role="dialog" aria-modal="true" :aria-label="fundingModalSymbol + ' 近 24 小时资费走势'">
+        <header class="funding-modal-header">
+          <h2 id="funding-modal-title" class="funding-modal-title">[[ fundingModalSymbol ]] 近 24 小时资费走势</h2>
+          <button ref="fundingCloseButton" type="button" class="funding-modal-close" aria-label="关闭" @click="closeFundingModal">&times;</button>
+        </header>
+        <div class="funding-chart-wrap">
+          <div v-if="fundingChartState !== 'ready'" class="funding-chart-state">[[ fundingChartMessage ]]</div>
+          <div v-show="fundingChartState === 'ready'" ref="fundingChartElement" class="funding-chart"></div>
+        </div>
+      </section>
+    </div>
   </div>
   </div>
 
   <script src="{{ url_for('static', filename='js/components/CoinConfigModal.js') }}"></script>
   <script>
-    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+    const { createApp, ref, computed, nextTick, onMounted, onUnmounted } = Vue;
 
     const app = createApp({
       delimiters: ['[[', ']]'],
@@ -591,12 +623,25 @@
         let countdownTimer = null;
         let lastAutoRefreshTarget = null;
         const showCoinConfig = ref(false);
+        const fundingModalOpen = ref(false);
+        const fundingModalSymbol = ref('');
+        const fundingChartState = ref('loading');
+        const fundingChartElement = ref(null);
+        const fundingCloseButton = ref(null);
+        let fundingChart = null;
+        let fundingTrigger = null;
 
         const filteredCoins = computed(() => {
           const term = keyword.value.toUpperCase();
           if (!term) return coins.value;
           return coins.value.filter((coin) => String(coin.symbol).toUpperCase().includes(term));
         });
+
+        const fundingChartMessage = computed(() => ({
+          loading: '加载中...',
+          empty: '暂无历史数据',
+          error: '加载失败，请稍后重试',
+        }[fundingChartState.value] || ''));
 
         const normalizeChanges = (coin) => {
           if (!Array.isArray(coin.changes)) return coin.changes || {};
@@ -816,6 +861,90 @@
           countdownTimer = setInterval(updateCountdown, 1000);
         };
 
+        const disposeFundingChart = () => {
+          if (fundingChart) {
+            fundingChart.dispose();
+            fundingChart = null;
+          }
+        };
+
+        const renderFundingChart = (container, historyData) => {
+          disposeFundingChart();
+          fundingChart = echarts.init(container, null, { renderer: 'canvas' });
+          const times = historyData.map((item) => new Date(item.event_time));
+          const settled = historyData.map((item) => item.funding_rate ?? null);
+          const predicted = historyData.map((item) => item.predicted_rate ?? null);
+          const values = [...settled, ...predicted].filter((value) => value !== null);
+          const minValue = Math.min(...values);
+          const maxValue = Math.max(...values);
+          const padding = Math.max(Math.abs(maxValue - minValue) * 0.2, 0.00005);
+          fundingChart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 60, right: 20, top: 42, bottom: 34 },
+            legend: { data: ['结算费率', '预测费率'], top: 4, right: 4, textStyle: { color: '#9ca3af' } },
+            tooltip: {
+              trigger: 'axis',
+              valueFormatter: (value) => value == null ? '--' : `${(value * 100).toFixed(4)}%`,
+            },
+            xAxis: {
+              type: 'category',
+              data: times.map((time) => `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`),
+              axisLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+              axisLabel: { color: '#6b7280' },
+            },
+            yAxis: {
+              type: 'value',
+              min: minValue - padding,
+              max: maxValue + padding,
+              axisLabel: { color: '#6b7280', formatter: (value) => `${(value * 100).toFixed(3)}%` },
+              splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+            },
+            series: [
+              { name: '结算费率', type: 'line', data: settled, smooth: true, lineStyle: { color: '#2dd4bf', width: 2 }, itemStyle: { color: '#2dd4bf' } },
+              { name: '预测费率', type: 'line', data: predicted, smooth: true, lineStyle: { color: '#d4af37', width: 2 }, itemStyle: { color: '#d4af37' } },
+            ],
+          });
+        };
+
+        const closeFundingModal = () => {
+          fundingModalOpen.value = false;
+          disposeFundingChart();
+          nextTick(() => fundingTrigger?.focus());
+        };
+
+        const openFundingModal = async (coin, event) => {
+          const symbol = String(coin?.symbol || '');
+          fundingTrigger = event?.currentTarget || null;
+          fundingModalSymbol.value = symbol;
+          fundingChartState.value = 'loading';
+          fundingModalOpen.value = true;
+          disposeFundingChart();
+          await nextTick();
+          fundingCloseButton.value?.focus();
+          try {
+            const response = await fetch('/api/funding-rate/history/' + encodeURIComponent(symbol) + '?hours=24');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+            if (result.status !== 'success') throw new Error(result.message || 'request failed');
+            if (!Array.isArray(result.data) || result.data.length === 0) {
+              fundingChartState.value = 'empty';
+              return;
+            }
+            fundingChartState.value = 'ready';
+            await nextTick();
+            if (fundingChartElement.value) renderFundingChart(fundingChartElement.value, result.data);
+          } catch (error) {
+            console.error('加载资费走势数据失败:', error);
+            fundingChartState.value = 'error';
+          }
+        };
+
+        const handleFundingKeydown = (event) => {
+          if (event.key === 'Escape' && fundingModalOpen.value) closeFundingModal();
+        };
+
+        const handleFundingResize = () => fundingChart?.resize();
+
         const loadData = async (force = false) => {
           loading.value = true;
           try {
@@ -836,9 +965,16 @@
           }
         };
 
-        onMounted(() => loadData());
+        onMounted(() => {
+          loadData();
+          window.addEventListener('keydown', handleFundingKeydown);
+          window.addEventListener('resize', handleFundingResize);
+        });
         onUnmounted(() => {
           if (countdownTimer) clearInterval(countdownTimer);
+          window.removeEventListener('keydown', handleFundingKeydown);
+          window.removeEventListener('resize', handleFundingResize);
+          disposeFundingChart();
         });
 
         return {
@@ -848,6 +984,12 @@
           filteredCoins,
           lastUpdateTime,
           countdown,
+          fundingModalOpen,
+          fundingModalSymbol,
+          fundingChartState,
+          fundingChartMessage,
+          fundingChartElement,
+          fundingCloseButton,
           matrixRows,
           takerExchanges,
           takerExchangesExcluded,
@@ -864,6 +1006,8 @@
           formatExchangeEntry,
           coinMetaLine,
           loadData,
+          openFundingModal,
+          closeFundingModal,
           showCoinConfig,
           onTrackedUpdate: () => loadData(true),
         };

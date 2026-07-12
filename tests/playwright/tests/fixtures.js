@@ -12,6 +12,9 @@ const mockHomepageCoins = [
     current_open_interest_value_formatted: '$85.43M',
     current_price: 69234.12,
     current_price_formatted: '69,234.12',
+    funding_rate: 0.0008,
+    funding_rate_formatted: '0.0800%',
+    next_funding_time_formatted: '2h 10m',
     price_change: 2.34,
     price_change_percent: 2.34,
     price_change_formatted: '+2.34%',
@@ -387,6 +390,17 @@ const test = base.extend({
             cache_update_time: '2026-04-07T01:00:00',
           })
         );
+        return;
+      }
+
+      if (pathname === '/api/funding-rate/history/BTCUSDT') {
+        await route.fulfill(jsonResponse({
+          status: 'success',
+          data: [
+            { symbol: 'BTCUSDT', event_time: 1711522800000, funding_rate: 0.0006, predicted_rate: 0.0007 },
+            { symbol: 'BTCUSDT', event_time: 1711526400000, funding_rate: 0.0008, predicted_rate: 0.0009 },
+          ],
+        }));
         return;
       }
 

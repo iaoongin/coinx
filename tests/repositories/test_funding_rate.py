@@ -1,6 +1,6 @@
 """Tests for funding rate repository"""
 import pytest
-from datetime import datetime, timedelta
+import time
 from unittest.mock import Mock, patch, MagicMock
 from coinx.repositories.funding_rate import (
     save_funding_rates,
@@ -10,6 +10,16 @@ from coinx.repositories.funding_rate import (
     collect_funding_rates,
 )
 from coinx.models import MarketFundingRate
+from coinx.repositories import funding_rate as funding_rate_repository
+
+
+def test_funding_history_cutoff_uses_unix_time_without_timezone_offset(monkeypatch):
+    now_seconds = 1_783_839_735.0
+    monkeypatch.setattr(funding_rate_repository.time, 'time', lambda: now_seconds)
+
+    cutoff = funding_rate_repository._history_cutoff_time_ms(24)
+
+    assert cutoff == int(now_seconds * 1000) - 24 * 60 * 60 * 1000
 
 
 class TestSaveFundingRates:
@@ -201,7 +211,7 @@ class TestLoadFundingRateHistory:
 
     def test_load_history_with_data(self, db_session):
         """Test loading history with multiple records"""
-        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        now_ms = int(time.time() * 1000)
         records = [
             {
                 'symbol': 'BTCUSDT',
@@ -244,7 +254,7 @@ class TestLoadFundingRateHistory:
 
     def test_load_history_different_symbol(self, db_session):
         """Test that history only returns data for specified symbol"""
-        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        now_ms = int(time.time() * 1000)
         records = [
             {
                 'symbol': 'BTCUSDT',

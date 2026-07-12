@@ -1,5 +1,5 @@
 """资金费率数据存储和查询模块"""
-from datetime import datetime, timedelta
+import time
 
 from sqlalchemy import func, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -10,6 +10,10 @@ from coinx.config import DB_TYPE
 from coinx.database import get_session
 from coinx.models import MarketFundingRate
 from coinx.utils import logger
+
+
+def _history_cutoff_time_ms(hours):
+    return int(time.time() * 1000) - hours * 60 * 60 * 1000
 
 
 def save_funding_rates(records, session=None):
@@ -281,7 +285,7 @@ def load_funding_rate_history(symbol, hours=1, exchange='binance', session=None)
     db = session or get_session()
 
     try:
-        cutoff_time = int((datetime.utcnow() - timedelta(hours=hours)).timestamp() * 1000)
+        cutoff_time = _history_cutoff_time_ms(hours)
 
         records = db.query(
             MarketFundingRate.symbol,
@@ -397,7 +401,7 @@ def load_funding_rate_sparklines(symbols, hours=1, exchange='binance', session=N
     db = session or get_session()
 
     try:
-        cutoff_time = int((datetime.utcnow() - timedelta(hours=hours)).timestamp() * 1000)
+        cutoff_time = _history_cutoff_time_ms(hours)
 
         records = db.query(
             MarketFundingRate.symbol,
