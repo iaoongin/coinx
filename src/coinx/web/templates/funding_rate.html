@@ -184,6 +184,10 @@
       white-space: nowrap;
     }
 
+    .filter-label::after {
+      content: ':';
+    }
+
     .filter-select {
       padding: 5px 8px;
       border: 1px solid var(--border-default);
@@ -272,17 +276,18 @@
       cursor: not-allowed;
     }
 
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--text-secondary);
+    .filter-checkbox {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--gold-primary);
       cursor: pointer;
     }
 
-    .checkbox-label input[type="checkbox"] {
-      accent-color: var(--gold-primary);
+    .filter-threshold {
+      color: var(--text-muted);
+      font-size: 11px;
+      white-space: nowrap;
     }
 
     .stats-bar {
@@ -418,6 +423,11 @@
       font-weight: 600;
       color: var(--text-primary);
       font-family: var(--font-mono);
+    }
+
+    .symbol-cell a {
+      color: var(--text-primary);
+      text-decoration: none;
     }
 
     .rate-cell {
@@ -579,24 +589,100 @@
     }
 
     @media (max-width: 768px) {
+      body {
+        padding: 8px;
+      }
+
+      .shell {
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+
       .header-row {
-        flex-direction: column;
-        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 8px;
+        padding-bottom: 8px;
+      }
+
+      .header-left {
+        gap: 6px 10px;
+      }
+
+      .header-left h1 {
+        font-size: 16px;
+      }
+
+      .header-subtitle {
+        font-size: 10px;
       }
 
       .header-right {
         width: 100%;
-        justify-content: flex-start;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: nowrap;
+      }
+
+      .time-info {
+        flex: 0 1 auto;
+        flex-direction: column;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 3px;
+        text-align: right;
+        font-size: 10px;
+      }
+
+      .btn {
+        padding: 6px 10px;
       }
 
       .filters-bar {
-        flex-direction: column;
-        align-items: flex-start;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 8px;
+        margin-bottom: 8px;
+        align-items: center;
+      }
+
+      .filter-group {
+        min-width: 0;
+        gap: 4px;
+      }
+
+      .filter-select {
+        min-width: 0;
+        flex: 1;
+        padding: 5px 6px;
+      }
+
+      .search-input {
+        width: 100%;
+        padding: 5px 8px;
+      }
+
+      .filter-checkbox {
+        justify-self: start;
       }
 
       .stats-bar {
-        flex-direction: column;
-        gap: 10px;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+
+      .stat-item {
+        gap: 0;
+      }
+
+      .stat-label {
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      .stat-value {
+        font-size: 13px;
       }
     }
   </style>
@@ -612,7 +698,7 @@
         <div class="header-left">
           <h1><span>资金费率</span>监控</h1>
           <div class="header-subtitle">
-            Binance U本位合约资金费率 · 异常阈值: {{ '{{ thresholdPercent }}' }}%
+            Binance U本位合约资金费率
           </div>
         </div>
         <div class="header-right">
@@ -628,7 +714,6 @@
           </div>
           <button
             class="btn btn-icon"
-            :class="{ 'btn-primary': loading }"
             :disabled="loading"
             @click="refreshData"
           >
@@ -641,26 +726,28 @@
       <!-- Filters -->
       <div class="filters-bar">
         <div class="filter-group">
-          <span class="filter-label">排序:</span>
-          <select class="filter-select" v-model="sortBy" @change="onFilterChange">
+          <label class="filter-label" for="funding-sort">排序</label>
+          <select id="funding-sort" class="filter-select" v-model="sortBy" @change="onFilterChange">
             <option value="funding_rate">实时费率</option>
             <option value="abs_funding_rate">实时费率(绝对值)</option>
           </select>
         </div>
         <div class="filter-group">
-          <span class="filter-label">方向:</span>
-          <select class="filter-select" v-model="sortOrder" @change="onFilterChange">
+          <label class="filter-label" for="funding-order">方向</label>
+          <select id="funding-order" class="filter-select" v-model="sortOrder" @change="onFilterChange">
             <option value="desc">降序</option>
             <option value="asc">升序</option>
           </select>
         </div>
         <div class="filter-group">
-          <input class="search-input" v-model.trim="keyword" placeholder="搜索币种..." @input="onSearchInput">
+          <label class="filter-label" for="funding-keyword">币种</label>
+          <input id="funding-keyword" class="search-input" v-model.trim="keyword" placeholder="搜索币种..." @input="onSearchInput">
         </div>
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="showAbnormalOnly" @change="onFilterChange">
-          仅显示异常
-        </label>
+        <div class="filter-group">
+          <label class="filter-label" for="funding-abnormal-only">仅异常</label>
+          <input id="funding-abnormal-only" class="filter-checkbox" type="checkbox" v-model="showAbnormalOnly" @change="onFilterChange">
+          <span class="filter-threshold">阈值 {{ '{{ thresholdPercent }}' }}%</span>
+        </div>
       </div>
 
       <!-- Stats -->
@@ -713,7 +800,7 @@
                 <td>
                   <span class="expand-indicator" :class="{ open: expandedSymbol === item.symbol }">&#9654;</span>
                 </td>
-                <td class="symbol-cell"><a :href="`/coin-detail?symbol=${item.symbol}`" @click.stop>{{ '{{ item.symbol }}' }}</a></td>
+                <td class="symbol-cell"><a :href="`/coin-detail?symbol=${item.symbol}`" @click.stop>{{ '{{ displaySymbol(item.symbol) }}' }}</a></td>
                 <td class="sparkline-cell" v-html="renderSparkline(item.sparkline)"></td>
                 <td class="rate-cell" :class="{ positive: item.funding_rate > 0, negative: item.funding_rate < 0, abnormal: item.is_abnormal }">
                   {{ '{{ item.funding_rate_formatted }}' }}
@@ -727,7 +814,7 @@
                 <td colspan="8">
                   <div class="chart-expand">
                     <div class="chart-expand-header">
-                      <div class="chart-expand-title"><span>{{ '{{ item.symbol }}' }}</span> 近 24 小时资费走势</div>
+                      <div class="chart-expand-title"><span>{{ '{{ displaySymbol(item.symbol) }}' }}</span> 近 24 小时资费走势</div>
                     </div>
                     <div v-if="chartLoading" class="chart-inline-loading">
                       <span class="loading-spinner loading-spinner-sm"></span> 加载中...
@@ -898,6 +985,8 @@
           if (price >= 1) return price.toFixed(4);
           return price.toFixed(6);
         };
+
+        const displaySymbol = (symbol) => String(symbol || '').replace(/USDT$/, '');
 
         const formatEventTime = (timestamp) => {
           if (!timestamp) return '--';
@@ -1155,6 +1244,7 @@
           changePage,
           toggleSort,
           formatPrice,
+          displaySymbol,
           formatEventTime,
           refreshData,
           expandedSymbol,
