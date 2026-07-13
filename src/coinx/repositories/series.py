@@ -169,6 +169,36 @@ def _sort_values_list(series_type, values_list):
     return sorted(values_list, key=lambda values: tuple(values[field] for field in key_fields))
 
 
+def _normalize_open_interest_records(exchange, records, db):
+    groups = {}
+    for record in records:
+        if record.get('sum_open_interest_value') is None:
+            continue
+        key = (record.get('symbol'), record.get('period'))
+        event_time = record.get('event_time')
+        if key[0] and key[1] and event_time is not None:
+            groups.setdefault(key, set()).add(event_time)
+
+    prices = {}
+    for (symbol, period), event_times in groups.items():
+        rows = db.query(MarketKline.open_time, MarketKline.close_price).filter(
+            MarketKline.exchange == exchange,
+            MarketKline.symbol == symbol,
+            MarketKline.period == period,
+            MarketKline.open_time.in_(event_times),
+        ).all()
+        prices.update({(symbol, period, int(open_time)): float(close_price) for open_time, close_price in rows if close_price not in (None, 0)})
+
+    normalized = []
+    for record in records:
+        value = record.get('sum_open_interest_value')
+        price = prices.get((record.get('symbol'), record.get('period'), record.get('event_time')))
+        if value is not None and price:
+            record = {**record, 'sum_open_interest': float(value) / price}
+        normalized.append(record)
+    return normalized
+
+
 def _upsert_values_on_mysql_compatible(model, exchange, series_type, values_list, db, commit=True):
     """MySQL: INSERT ... ON DUPLICATE KEY UPDATE; StarRocks: INSERT（主键自动覆盖）"""
     columns = [c.name for c in model.__table__.columns]
@@ -237,6 +267,8 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
     effective_batch_size = max(1, int(batch_size or 1))
 
     try:
+        if series_type == 'open_interest_hist':
+            records = _normalize_open_interest_records(exchange, records, db)
         if _is_mysql_compatible_dialect(db):
             def _write_batches(connection):
                 try:
@@ -283,6 +315,8 @@ def upsert_series_records(exchange, series_type, records, session=None):
     own_session = session is None
     db = session or get_session()
     try:
+        if series_type == 'open_interest_hist':
+            records = _normalize_open_interest_records(exchange, records, db)
         values_list = _sort_values_list(series_type, _build_values_list(model, exchange, records))
 
         if _is_mysql_compatible_dialect(db):

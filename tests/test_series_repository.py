@@ -3,6 +3,28 @@ from types import SimpleNamespace
 from sqlalchemy.exc import InvalidRequestError, OperationalError
 
 from coinx.repositories.series import upsert_series_records, upsert_series_records_in_batches
+from coinx.models import MarketKline, MarketOpenInterestHist
+
+
+def test_open_interest_is_normalized_from_value_and_matching_kline_before_insert(db_session):
+    timestamp = 1711526400000
+    db_session.add(MarketKline(
+        exchange='gate', symbol='BTCUSDT', period='5m', open_time=timestamp,
+        close_time=timestamp + 299999, open_price=100, high_price=101,
+        low_price=99, close_price=100, volume=1,
+    ))
+    db_session.commit()
+
+    upsert_series_records('gate', 'open_interest_hist', [{
+        'symbol': 'BTCUSDT',
+        'period': '5m',
+        'event_time': timestamp,
+        'sum_open_interest': 1_000_000,
+        'sum_open_interest_value': 2_500,
+    }], session=db_session)
+
+    row = db_session.query(MarketOpenInterestHist).one()
+    assert float(row.sum_open_interest) == 25.0
 
 
 class _FakeMysqlSession:

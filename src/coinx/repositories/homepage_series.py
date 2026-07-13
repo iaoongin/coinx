@@ -534,19 +534,7 @@ def _with_estimated_open_interest_value(point, reference_kline):
             sum_open_interest=point.sum_open_interest,
             sum_open_interest_value=float(point.sum_open_interest) * price,
         )
-    if point.sum_open_interest in (None, 0) and point.sum_open_interest_value is not None:
-        return HomepageOpenInterestPoint(
-            symbol=point.symbol,
-            event_time=point.event_time,
-            sum_open_interest=float(point.sum_open_interest_value) / price,
-            sum_open_interest_value=point.sum_open_interest_value,
-        )
-    return HomepageOpenInterestPoint(
-        symbol=point.symbol,
-        event_time=point.event_time,
-        sum_open_interest=point.sum_open_interest,
-        sum_open_interest_value=point.sum_open_interest_value,
-    )
+    return point
 
 
 def _build_exchange_open_interest_rows(exchange_points, total_value, total_open_interest):

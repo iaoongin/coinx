@@ -1,7 +1,10 @@
 from coinx.repositories.homepage_series import (
     FIVE_MINUTES_MS,
     TIME_INTERVALS,
+    HomepageKlinePoint,
+    HomepageOpenInterestPoint,
     _summarize_homepage_rejection_reasons,
+    _with_estimated_open_interest_value,
     get_homepage_series_snapshot,
     get_homepage_series_data,
     get_homepage_series_update_time,
@@ -16,6 +19,29 @@ from coinx.models import (
     MarketOpenInterestHist,
     MarketTakerBuySellVol,
 )
+
+
+def test_open_interest_uses_stored_quantity_when_value_is_also_available():
+    point = HomepageOpenInterestPoint(
+        symbol='BTCUSDT',
+        event_time=1,
+        sum_open_interest=632_109_112.0,
+        sum_open_interest_value=3_985_675_510.44,
+    )
+    kline = HomepageKlinePoint(
+        symbol='BTCUSDT',
+        open_time=1,
+        high_price=None,
+        low_price=None,
+        close_price=63_041.9,
+        quote_volume=None,
+        taker_buy_quote_volume=None,
+    )
+
+    normalized = _with_estimated_open_interest_value(point, kline)
+
+    assert normalized.sum_open_interest == point.sum_open_interest
+    assert normalized.sum_open_interest_value == point.sum_open_interest_value
 
 
 def seed_series(
