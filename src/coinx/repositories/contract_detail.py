@@ -133,22 +133,38 @@ def load_contract_chart_series(symbol, range_key='24h', session=None, max_points
         funding_rows = db.query(MarketFundingRate).filter(MarketFundingRate.symbol == symbol, MarketFundingRate.period == '5m', MarketFundingRate.event_time >= cutoff, MarketFundingRate.event_time <= anchor).order_by(MarketFundingRate.event_time).all()
 
         prices = {}
+        volumes = {}
         for row in klines:
             current = prices.get(row.open_time)
             if current is None or row.exchange == 'binance':
                 prices[row.open_time] = {'value': _float(row.close_price), 'exchange': row.exchange}
+            if row.volume is not None:
+                volumes[row.open_time] = volumes.get(row.open_time, 0.0) + float(row.volume)
         oi = {}
         for row in oi_rows:
-            item = oi.setdefault(row.event_time, [0.0, False])
+            item = oi.setdefault(row.event_time, [0.0, False, 0.0, False])
             if row.sum_open_interest_value is not None:
                 item[0] += float(row.sum_open_interest_value); item[1] = True
+            if row.sum_open_interest is not None:
+                item[2] += float(row.sum_open_interest); item[3] = True
         flow = {}
         for row in flow_rows:
             item = flow.setdefault(row.event_time, [0.0, 0.0])
             item[0] += float(row.buy_vol or 0); item[1] += float(row.sell_vol or 0)
 
-        market_times = sorted(set(prices) | set(oi))
-        market = [{'time': t, 'price': (prices.get(t) or {}).get('value'), 'open_interest_value': oi.get(t, [None])[0] if oi.get(t, [None, False])[1] else None} for t in market_times]
+        market_times = sorted(set(prices) | set(volumes) | set(oi))
+        market = []
+        for t in market_times:
+            price = (prices.get(t) or {}).get('value')
+            oi_item = oi.get(t, [None, False, None, False])
+            open_interest_value = oi_item[0] if oi_item[1] else None
+            market.append({
+                'time': t,
+                'price': price,
+                'volume': volumes.get(t),
+                'open_interest_value': open_interest_value,
+                'open_interest': oi_item[2] if oi_item[3] else None,
+            })
         flow_data = [{'time': t, 'buy_volume': values[0], 'sell_volume': values[1], 'net_inflow': values[0] - values[1]} for t, values in sorted(flow.items())]
         funding = [{'time': int(row.event_time), 'funding_rate': _float(row.funding_rate), 'predicted_rate': _float(row.predicted_rate)} for row in funding_rows]
 

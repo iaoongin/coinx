@@ -512,7 +512,7 @@ const test = base.extend({
         if (pathname.endsWith('/series')) {
           await route.fulfill(jsonResponse({ status: 'success', data: {
             range: new URL(request.url()).searchParams.get('range') || '24h', anchor_time: 1711526400000,
-            market: [{ time: 1711526400000, price: 69234.12, open_interest_value: 85432123.45 }, { time: 1711526700000, price: 69300, open_interest_value: 86000000 }],
+            market: [{ time: 1711526400000, price: 69234.12, volume: 125000, open_interest_value: 85432123.45, open_interest: 1234.57 }, { time: 1711526700000, price: 69300, volume: 132000, open_interest_value: 86000000, open_interest: 1240.26 }],
             flow: [{ time: 1711526400000, buy_volume: 120000, sell_volume: 90000, net_inflow: 30000 }],
             funding_rate: [{ time: 1711526400000, funding_rate: 0.0008, predicted_rate: 0.001 }],
           }}));

@@ -7,17 +7,25 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'SPKUSDT' not in template
     assert 'detail.intervals' in template
     assert 'detail.exchange_distribution' in template
+    assert '<h2 class="overview-heading">基础信息</h2>' in template
+    assert template.index('<h2 class="overview-heading">交易所持仓分布</h2>') < template.index('<h2>市场结构评分</h2>')
+    assert 'grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;' in template
     assert 'structureScore.value?.total_score' in template
     assert 'detail.data_status' in template
     assert '/series?range=${selectedRange.value}' in template
-    assert 'marketChartEl' in template
+    assert 'priceChartEl' in template
+    assert 'openInterestChartEl' in template
     assert 'flowChartEl' in template
     assert 'fundingChartEl' in template
     assert 'scoreComponents' in template
     assert 'chartCompact' in template
     assert 'chartMoney' in template
+    assert '.chart { height: 360px; width: 100%; }' in template
     assert 'tooltip:{valueFormatter:value=>chartMoney(value)}' in template
     assert 'tooltip:{valueFormatter:value=>chartCompact(value)}' in template
+    assert "name:'成交量',type:'bar',yAxisIndex:1" in template
+    assert "name:'持仓量',type:'line',showSymbol:false,yAxisIndex:1" in template
+    assert 'x.open_interest])' in template
     assert 'tooltip:{valueFormatter:value=>formatRate(value)}' in template
     assert '/structure-score`' in template
     assert 'loadStructureScore(); loadSeries();' in template

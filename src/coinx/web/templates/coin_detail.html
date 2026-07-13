@@ -12,8 +12,8 @@
     body { margin: 0; padding: var(--page-padding); background: var(--bg-primary); color: var(--text-primary); }
     * { box-sizing: border-box; }
     #app { max-width: var(--page-max-width); margin: 0 auto; }
-    .detail-shell { padding: 20px 0 40px; }
-    .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .detail-shell { padding: 16px 0 28px; }
+    .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
     .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     .symbol { color: var(--gold-primary); font-family: var(--font-mono); }
@@ -28,15 +28,19 @@
     .state { min-height: 240px; display: grid; place-items: center; color: var(--text-muted); }
     .error { color: var(--negative); text-align: center; }
     .error .btn { margin-top: 14px; }
-    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .metric { min-height: 112px; padding: 15px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
-    .metric-label { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+    .overview-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+    .overview-heading { margin: 0 0 10px; font-size: 16px; letter-spacing: 0; }
+    .overview-panel .summary-grid { margin-bottom: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-panel .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .metric { min-height: 96px; padding: 12px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
+    .metric-label { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
     .metric-value { font: 600 20px var(--font-mono); overflow-wrap: anywhere; }
-    .metric-sub { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+    .metric-sub { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
     .positive { color: var(--positive); }
     .negative { color: var(--negative); }
-    .section { margin-top: 18px; border-top: 1px solid var(--border-default); padding-top: 18px; }
-    .section h2 { margin: 0 0 12px; font-size: 16px; letter-spacing: 0; }
+    .section { margin-top: 14px; border-top: 1px solid var(--border-default); padding-top: 14px; }
+    .section h2 { margin: 0 0 10px; font-size: 16px; letter-spacing: 0; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: 6px; }
     table { width: 100%; border-collapse: collapse; min-width: 760px; }
     th, td { padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); text-align: right; font-size: 12px; line-height: 1.25; white-space: nowrap; }
@@ -44,8 +48,8 @@
     th:first-child, td:first-child { text-align: left; }
     tbody tr:last-child td { border-bottom: 0; }
     .exchange-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .exchange { padding: 14px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
-    .exchange-head { display: flex; justify-content: space-between; margin-bottom: 12px; }
+    .exchange { padding: 12px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
+    .exchange-head { display: flex; justify-content: space-between; margin-bottom: 8px; }
     .exchange-name { font-weight: 600; text-transform: capitalize; }
     .exchange-share { color: var(--gold-primary); font-family: var(--font-mono); }
     .exchange-value { color: var(--text-secondary); font-family: var(--font-mono); font-size: 13px; }
@@ -55,15 +59,15 @@
     .segment { width: 48px; height: 30px; border: 0; border-right: 1px solid var(--border-default); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; }
     .segment:last-child { border-right: 0; }.segment.active { color: var(--gold-primary); background: var(--bg-elevated); }
     .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .chart-panel { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 12px; min-width: 0; }
-    .chart-panel.wide { grid-column: 1 / -1; }.chart-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
-    .chart { height: 260px; width: 100%; }.chart-state { height: 260px; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; }
+    .chart-panel { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 10px; min-width: 0; }
+    .chart-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .chart { height: 360px; width: 100%; }.chart-state { height: 360px; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; }
     .score-layout { display: grid; grid-template-columns: 230px 1fr; gap: 12px; }
     .score-summary { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 16px; }
     .score-total { font: 700 34px var(--font-mono); color: var(--gold-primary); }.score-signal { margin: 6px 0; font-weight: 600; }.score-advice { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
     .score-components { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
     .score-component { padding: 10px; background: var(--bg-secondary); border-radius: 5px; }.score-component span { display: block; color: var(--text-muted); font-size: 11px; }.score-component strong { display: block; margin-top: 5px; font-family: var(--font-mono); }
-    @media (max-width: 900px) { .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts { grid-template-columns: 1fr; }.chart-panel.wide { grid-column: auto; }.score-layout { grid-template-columns: 1fr; }.score-components { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 900px) { .overview-layout { grid-template-columns: 1fr; } .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts { grid-template-columns: 1fr; }.score-layout { grid-template-columns: 1fr; }.score-components { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 560px) { .detail-header { flex-direction: column; } .summary-grid, .exchange-grid { grid-template-columns: 1fr; } .actions { width: 100%; } .actions .btn { flex: 1; } }
   </style>
 </head>
@@ -92,15 +96,31 @@
         </div>
         <div v-if="error" class="notice">刷新失败，当前仍显示上一次数据：[[ error ]]</div>
 
-        <section v-if="detail" class="summary-grid" aria-label="核心摘要">
+        <div class="overview-layout">
+          <section class="overview-panel">
+            <h2 class="overview-heading">基础信息</h2>
+            <section v-if="detail" class="summary-grid" aria-label="核心摘要">
           <article class="metric"><div class="metric-label">最新价格</div><div class="metric-value">[[ formatPrice(summary.latest_price) ]]</div><div class="metric-sub" :class="tone(summary.price_change_24h_percent)">24h [[ formatPercent(summary.price_change_24h_percent) ]]</div></article>
           <article class="metric"><div class="metric-label">总持仓价值</div><div class="metric-value">[[ formatCompact(summary.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(summary.open_interest) ]]</div></article>
           <article class="metric"><div class="metric-label">资金费率</div><div class="metric-value" :class="tone(summary.funding_rate)">[[ formatRate(summary.funding_rate) ]]</div><div class="metric-sub">预测 [[ formatRate(summary.predicted_funding_rate) ]]</div></article>
           <article class="metric"><div class="metric-label">市场结构评分</div><div class="metric-value">[[ scoreValue ]]</div><div class="metric-sub">[[ scoreDescription ]]</div></article>
-        </section>
-        <section v-else class="summary-grid" aria-label="核心摘要加载中">
+            </section>
+            <section v-else class="summary-grid" aria-label="核心摘要加载中">
           <article class="metric" v-for="label in ['最新价格', '总持仓价值', '资金费率', '市场结构评分']" :key="label"><div class="metric-label">[[ label ]]</div><div class="metric-sub">正在加载摘要...</div></article>
-        </section>
+            </section>
+          </section>
+
+          <section class="overview-panel">
+          <h2 class="overview-heading">交易所持仓分布</h2>
+          <div v-if="detail">
+          <div v-if="detail.exchange_distribution.length" class="exchange-grid">
+            <article class="exchange" v-for="item in detail.exchange_distribution" :key="item.exchange"><div class="exchange-head"><span class="exchange-name">[[ item.exchange ]]</span><span class="exchange-share">[[ formatPercent(item.share_percent, false) ]]</span></div><div class="exchange-value">[[ formatCompact(item.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(item.open_interest) ]]</div></article>
+          </div>
+          <div v-else class="empty">暂无交易所持仓分布</div>
+          </div>
+          <div v-else class="empty">正在加载交易所数据...</div>
+          </section>
+        </div>
 
         <section class="section">
           <h2>市场结构评分</h2>
@@ -120,7 +140,8 @@
           <div class="range-bar"><h2 style="margin:0">历史趋势</h2><div class="segments"><button v-for="item in ranges" :key="item" class="segment" :class="{ active: selectedRange === item }" @click="changeRange(item)">[[ item ]]</button></div></div>
           <div v-if="seriesError" class="notice">[[ seriesError ]]</div>
           <div class="charts">
-            <div class="chart-panel wide"><div class="chart-title">价格与持仓价值</div><div v-show="!seriesLoading && hasMarketSeries" ref="marketChartEl" class="chart"></div><div v-if="seriesLoading || !hasMarketSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无价格与持仓历史' ]]</div></div>
+            <div class="chart-panel"><div class="chart-title">价格</div><div v-show="!seriesLoading && hasMarketSeries" ref="priceChartEl" class="chart"></div><div v-if="seriesLoading || !hasMarketSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无价格历史' ]]</div></div>
+            <div class="chart-panel"><div class="chart-title">持仓价值</div><div v-show="!seriesLoading && hasMarketSeries" ref="openInterestChartEl" class="chart"></div><div v-if="seriesLoading || !hasMarketSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无持仓价值历史' ]]</div></div>
             <div class="chart-panel"><div class="chart-title">主动买卖与净流入</div><div v-show="!seriesLoading && hasFlowSeries" ref="flowChartEl" class="chart"></div><div v-if="seriesLoading || !hasFlowSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无主动买卖历史' ]]</div></div>
             <div class="chart-panel"><div class="chart-title">资金费率</div><div v-show="!seriesLoading && hasFundingSeries" ref="fundingChartEl" class="chart"></div><div v-if="seriesLoading || !hasFundingSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无资金费率历史' ]]</div></div>
           </div>
@@ -134,14 +155,6 @@
         </section>
         <section v-else class="section"><h2>多周期变化</h2><div class="empty">正在加载多周期数据...</div></section>
 
-        <section v-if="detail" class="section">
-          <h2>交易所持仓分布</h2>
-          <div v-if="detail.exchange_distribution.length" class="exchange-grid">
-            <article class="exchange" v-for="item in detail.exchange_distribution" :key="item.exchange"><div class="exchange-head"><span class="exchange-name">[[ item.exchange ]]</span><span class="exchange-share">[[ formatPercent(item.share_percent, false) ]]</span></div><div class="exchange-value">[[ formatCompact(item.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(item.open_interest) ]]</div></article>
-          </div>
-          <div v-else class="empty">暂无交易所持仓分布</div>
-        </section>
-        <section v-else class="section"><h2>交易所持仓分布</h2><div class="empty">正在加载交易所数据...</div></section>
       </template>
     </main>
   </div>
@@ -153,7 +166,7 @@
         const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref('');
         const structureScore = ref(null); const scoreLoading = ref(false); const scoreError = ref('');
         const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
-        const marketChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const charts = [];
+        const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
         const statusText = computed(() => ({ complete: '数据完整', partial: '部分数据', empty: '暂无数据' }[detail.value?.data_status] || '状态未知'));
         const scoreValue = computed(() => structureScore.value?.total_score == null ? 'N/A' : Number(structureScore.value.total_score).toFixed(1));
@@ -180,7 +193,7 @@
         };
         const disposeCharts = () => { while (charts.length) charts.pop().dispose(); };
         const makeChart = (el, option) => { if (!el || el.clientWidth === 0) return; const chart = echarts.init(el); chart.resize(); chart.setOption({ ...chartBase, ...option }, true); charts.push(chart); };
-        const renderCharts = () => { if (hasMarketSeries.value) makeChart(marketChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}}], series:[{name:'价格',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatPrice(value)},data:series.value.market.map(x=>[x.time,x.price])},{name:'持仓价值',type:'line',showSymbol:false,yAxisIndex:1,tooltip:{valueFormatter:value=>chartMoney(value)},data:series.value.market.map(x=>[x.time,x.open_interest_value])}] }); if (hasFlowSeries.value) makeChart(flowChartEl.value, { yAxis:{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}, series:[{name:'主动买入',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.buy_volume])},{name:'主动卖出',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.sell_volume])},{name:'净流入',type:'bar',tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.net_inflow])}] }); if (hasFundingSeries.value) makeChart(fundingChartEl.value, { yAxis:{type:'value',axisLabel:{formatter:v=>(v*100).toFixed(3)+'%'}}, series:[{name:'结算费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.funding_rate])},{name:'预测费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.predicted_rate])}] }); };
+        const renderCharts = () => { if (hasMarketSeries.value) { makeChart(priceChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'价格',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatPrice(value)},data:series.value.market.map(x=>[x.time,x.price])},{name:'成交量',type:'bar',yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.volume])}] }); makeChart(openInterestChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'持仓价值',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartMoney(value)},data:series.value.market.map(x=>[x.time,x.open_interest_value])},{name:'持仓量',type:'line',showSymbol:false,yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.open_interest])}] }); } if (hasFlowSeries.value) makeChart(flowChartEl.value, { yAxis:{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}, series:[{name:'主动买入',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.buy_volume])},{name:'主动卖出',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.sell_volume])},{name:'净流入',type:'bar',tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.net_inflow])}] }); if (hasFundingSeries.value) makeChart(fundingChartEl.value, { yAxis:{type:'value',axisLabel:{formatter:v=>(v*100).toFixed(3)+'%'}}, series:[{name:'结算费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.funding_rate])},{name:'预测费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.predicted_rate])}] }); };
         const loadSeries = async () => { seriesLoading.value = true; seriesError.value = ''; disposeCharts(); try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}/series?range=${selectedRange.value}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); series.value = result.data; } catch(err) { seriesError.value = `趋势加载失败：${err.message}`; series.value = {market:[],flow:[],funding_rate:[]}; } finally { seriesLoading.value = false; await nextTick(); renderCharts(); } };
         const changeRange = value => { selectedRange.value = value; loadSeries(); };
         const loadStructureScore = async () => { scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); structureScore.value = result.data?.structure_score || null; } catch(err) { scoreError.value = `结构评分加载失败：${err.message}`; } finally { scoreLoading.value = false; } };
@@ -188,7 +201,7 @@
         const goBack = () => history.length > 1 ? history.back() : location.assign('/');
         onMounted(() => { symbol.value = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); if (symbol.value) { loadData(); loadStructureScore(); loadSeries(); } else { error.value = '缺少合约代码'; } });
         const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
-        return { symbol, detail, loading, error, summary, statusText, structureScore, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, seriesLoading, seriesError, marketChartEl, flowChartEl, fundingChartEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, goBack };
+        return { symbol, detail, loading, error, summary, statusText, structureScore, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, goBack };
       }
     }).mount('#app');
   </script>

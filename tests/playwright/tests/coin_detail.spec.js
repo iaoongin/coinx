@@ -23,7 +23,7 @@ test.describe('币种详情测试', () => {
     await visit(page, '/coin-detail?symbol=BTCUSDT');
     await expect(page.getByText('市场结构评分', { exact: true })).toBeVisible();
     await expect(page.getByText('趋势', { exact: true }).first()).toBeVisible();
-    await expect(page.locator('.chart canvas')).toHaveCount(3);
+    await expect(page.locator('.chart canvas')).toHaveCount(4);
     const chartWidths = await page.locator('.chart canvas').evaluateAll(canvases => canvases.map(canvas => canvas.getBoundingClientRect().width));
     expect(chartWidths.every(width => width > 300)).toBeTruthy();
 

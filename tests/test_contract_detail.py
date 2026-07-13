@@ -114,8 +114,8 @@ def test_coin_detail_api_returns_repository_payload(monkeypatch):
 def test_contract_chart_series_aggregates_exchanges(db_session):
     timestamp = 1711526400000
     db_session.add_all([
-        MarketKline(exchange='binance', symbol='BTCUSDT', period='5m', open_time=timestamp, close_time=timestamp + 299999, open_price=100, high_price=102, low_price=99, close_price=101),
-        MarketKline(exchange='bybit', symbol='BTCUSDT', period='5m', open_time=timestamp, close_time=timestamp + 299999, open_price=99, high_price=102, low_price=98, close_price=100),
+        MarketKline(exchange='binance', symbol='BTCUSDT', period='5m', open_time=timestamp, close_time=timestamp + 299999, open_price=100, high_price=102, low_price=99, close_price=101, volume=100),
+        MarketKline(exchange='bybit', symbol='BTCUSDT', period='5m', open_time=timestamp, close_time=timestamp + 299999, open_price=99, high_price=102, low_price=98, close_price=100, volume=200),
         MarketOpenInterestHist(exchange='binance', symbol='BTCUSDT', period='5m', event_time=timestamp, sum_open_interest=10, sum_open_interest_value=1010),
         MarketOpenInterestHist(exchange='bybit', symbol='BTCUSDT', period='5m', event_time=timestamp, sum_open_interest=20, sum_open_interest_value=2000),
         MarketTakerBuySellVol(exchange='binance', symbol='BTCUSDT', period='5m', event_time=timestamp, buy_vol=8, sell_vol=3),
@@ -127,7 +127,9 @@ def test_contract_chart_series_aggregates_exchanges(db_session):
     result = load_contract_chart_series('BTCUSDT', range_key='1h', session=db_session)
 
     assert result['market'][0]['price'] == 101.0
+    assert result['market'][0]['volume'] == 300.0
     assert result['market'][0]['open_interest_value'] == 3010.0
+    assert result['market'][0]['open_interest'] == 30.0
     assert result['flow'][0]['buy_volume'] == 12.0
     assert result['flow'][0]['net_inflow'] == 3.0
     assert result['funding_rate'][0]['predicted_rate'] == .0002
