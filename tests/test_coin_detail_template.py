@@ -25,6 +25,10 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'tooltip:{valueFormatter:value=>chartCompact(value)}' in template
     assert "name:'成交量',type:'bar',yAxisIndex:1" in template
     assert "name:'持仓量',type:'line',showSymbol:false,yAxisIndex:1" in template
+    assert "name:'主动买入',type:'line',showSymbol:false,lineStyle:{color:'#4ade80'}" in template
+    assert "name:'主动卖出',type:'line',showSymbol:false,lineStyle:{color:'#f87171'}" in template
+    assert "color:x.net_inflow >= 0 ? '#4ade80' : '#f87171'" in template
+    assert "visualMap:{show:false,dimension:1,seriesIndex:[0]" in template
     assert 'x.open_interest])' in template
     assert 'tooltip:{valueFormatter:value=>formatRate(value)}' in template
     assert '/structure-score`' in template
