@@ -45,7 +45,7 @@ test.describe('首页测试', () => {
 
     const dialog = page.getByRole('dialog', { name: /BTCUSDT.*24/ });
     await expect(dialog).toBeVisible();
-    await expect(dialog.locator('canvas')).toBeVisible();
+    await expect(dialog.locator('svg')).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();

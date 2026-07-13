@@ -16,3 +16,12 @@ def test_homepage_funding_label_opens_24_hour_chart_modal():
     assert "'/api/funding-rate/history/' + encodeURIComponent(symbol) + '?hours=24'" in template
     assert "name: '结算费率'" in template
     assert "name: '预测费率'" in template
+    assert "renderer: 'svg'" in template
+    assert "visualViewport.addEventListener('resize', handleFundingResize)" in template
+
+
+def test_homepage_loads_pinned_echarts_from_unpkg():
+    template = Path('src/coinx/web/templates/index.html').read_text(encoding='utf-8')
+
+    assert "https://unpkg.com/echarts@6.0.0/dist/echarts.min.js" in template
+    assert "cdn.jsdelivr.net/npm/echarts" not in template

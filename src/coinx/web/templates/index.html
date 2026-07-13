@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://unpkg.com/echarts@6.0.0/dist/echarts.min.js"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/fab-button.css') }}">
   <style>
     :root {
@@ -630,6 +630,7 @@
         const fundingCloseButton = ref(null);
         let fundingChart = null;
         let fundingTrigger = null;
+        let fundingChartRequestId = 0;
 
         const filteredCoins = computed(() => {
           const term = keyword.value.toUpperCase();
@@ -868,9 +869,19 @@
           }
         };
 
+        const waitForFundingChartLayout = () => new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        });
+
         const renderFundingChart = (container, historyData) => {
           disposeFundingChart();
-          fundingChart = echarts.init(container, null, { renderer: 'canvas' });
+          if (!window.echarts) throw new Error('ECharts failed to load');
+          if (container.clientWidth === 0 || container.clientHeight === 0) {
+            throw new Error('Funding chart container has no size');
+          }
+
+          // SVG avoids the iOS Canvas sizing issue when a dialog has just become visible.
+          fundingChart = echarts.init(container, null, { renderer: 'svg' });
           const times = historyData.map((item) => new Date(item.event_time));
           const settled = historyData.map((item) => item.funding_rate ?? null);
           const predicted = historyData.map((item) => item.predicted_rate ?? null);
@@ -904,15 +915,18 @@
               { name: '预测费率', type: 'line', data: predicted, smooth: true, lineStyle: { color: '#d4af37', width: 2 }, itemStyle: { color: '#d4af37' } },
             ],
           });
+          fundingChart.resize();
         };
 
         const closeFundingModal = () => {
+          fundingChartRequestId += 1;
           fundingModalOpen.value = false;
           disposeFundingChart();
           nextTick(() => fundingTrigger?.focus());
         };
 
         const openFundingModal = async (coin, event) => {
+          const requestId = ++fundingChartRequestId;
           const symbol = String(coin?.symbol || '');
           fundingTrigger = event?.currentTarget || null;
           fundingModalSymbol.value = symbol;
@@ -925,6 +939,7 @@
             const response = await fetch('/api/funding-rate/history/' + encodeURIComponent(symbol) + '?hours=24');
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const result = await response.json();
+            if (requestId !== fundingChartRequestId || !fundingModalOpen.value) return;
             if (result.status !== 'success') throw new Error(result.message || 'request failed');
             if (!Array.isArray(result.data) || result.data.length === 0) {
               fundingChartState.value = 'empty';
@@ -932,8 +947,15 @@
             }
             fundingChartState.value = 'ready';
             await nextTick();
-            if (fundingChartElement.value) renderFundingChart(fundingChartElement.value, result.data);
+            await waitForFundingChartLayout();
+            if (requestId !== fundingChartRequestId || !fundingModalOpen.value) return;
+            if (fundingChartElement.value) {
+              renderFundingChart(fundingChartElement.value, result.data);
+              await waitForFundingChartLayout();
+              if (requestId === fundingChartRequestId) fundingChart?.resize();
+            }
           } catch (error) {
+            if (requestId !== fundingChartRequestId) return;
             console.error('加载资费走势数据失败:', error);
             fundingChartState.value = 'error';
           }
@@ -943,7 +965,10 @@
           if (event.key === 'Escape' && fundingModalOpen.value) closeFundingModal();
         };
 
-        const handleFundingResize = () => fundingChart?.resize();
+        const handleFundingResize = () => {
+          if (!fundingChart) return;
+          requestAnimationFrame(() => fundingChart?.resize());
+        };
 
         const loadData = async (force = false) => {
           loading.value = true;
@@ -969,11 +994,13 @@
           loadData();
           window.addEventListener('keydown', handleFundingKeydown);
           window.addEventListener('resize', handleFundingResize);
+          if (window.visualViewport) window.visualViewport.addEventListener('resize', handleFundingResize);
         });
         onUnmounted(() => {
           if (countdownTimer) clearInterval(countdownTimer);
           window.removeEventListener('keydown', handleFundingKeydown);
           window.removeEventListener('resize', handleFundingResize);
+          if (window.visualViewport) window.visualViewport.removeEventListener('resize', handleFundingResize);
           disposeFundingChart();
         });
 
