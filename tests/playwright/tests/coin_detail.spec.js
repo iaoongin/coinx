@@ -19,6 +19,40 @@ test.describe('币种详情测试', () => {
     await expect(button(page, '返回')).toBeVisible();
   });
 
+  test('可通过搜索下拉框切换合约并记录最近浏览', async ({ page }) => {
+    await visit(page, '/coin-detail?symbol=BTCUSDT');
+    await page.getByRole('button', { name: '搜索并切换合约' }).click();
+    const picker = page.getByRole('searchbox', { name: '搜索合约' });
+    await picker.fill('SOL');
+    await page.getByRole('button', { name: 'SOLUSDT', exact: true }).click();
+    await expect(page).toHaveURL(/\/coin-detail\?symbol=SOLUSDT$/);
+    await expect(page.locator('h1')).toContainText('SOLUSDT');
+
+    await page.getByRole('button', { name: '搜索并切换合约' }).click();
+    await expect(page.getByText('最近浏览', { exact: true })).toBeVisible();
+    await expect(page.locator('.symbol-picker-menu')).toContainText('SOLUSDT');
+  });
+
+  test('移动端布局不产生横向溢出', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await visit(page, '/coin-detail?symbol=BTCUSDT');
+    const dimensions = await page.locator('html').evaluate(element => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+    await expect(page.locator('.detail-header')).toHaveCSS('flex-direction', 'column');
+    await expect(page.locator('.actions .btn')).toHaveCount(2);
+    await expect(page.locator('.chart')).toHaveCSS('height', '260px');
+    await page.getByRole('button', { name: '搜索并切换合约' }).click();
+    const menuBounds = await page.locator('.symbol-picker-menu').evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, viewportWidth: window.innerWidth };
+    });
+    expect(menuBounds.left).toBeGreaterThanOrEqual(0);
+    expect(menuBounds.right).toBeLessThanOrEqual(menuBounds.viewportWidth);
+  });
+
   test('渲染结构评分与历史趋势并支持切换范围', async ({ page }) => {
     await visit(page, '/coin-detail?symbol=BTCUSDT');
     await expect(page.getByText('市场结构评分', { exact: true })).toBeVisible();

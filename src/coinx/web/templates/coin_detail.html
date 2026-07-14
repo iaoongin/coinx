@@ -15,6 +15,16 @@
     .detail-shell { padding: 16px 0 28px; }
     .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
     .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .symbol-picker { position: relative; }
+    .symbol-picker-input { width: 100%; height: 36px; padding: 7px 11px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-card); color: var(--text-primary); font: 13px var(--font-mono); outline: none; }
+    .symbol-picker-input:focus { border-color: var(--gold-primary); }
+    .symbol-picker-toggle { width: 30px; height: 30px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-card); color: var(--text-secondary); cursor: pointer; }
+    .symbol-picker-toggle:hover { color: var(--gold-primary); border-color: var(--gold-primary); }
+    .symbol-picker-menu { position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; width: 280px; max-height: 320px; overflow-y: auto; padding: 5px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-elevated); box-shadow: var(--shadow-card); }
+    .symbol-picker-label { padding: 6px 7px 4px; color: var(--text-muted); font-size: 11px; }
+    .symbol-picker-option { display: block; width: 100%; padding: 8px 7px; border: 0; border-radius: 4px; background: transparent; color: var(--text-primary); text-align: left; font: 13px var(--font-mono); cursor: pointer; }
+    .symbol-picker-option:hover, .symbol-picker-option.active { background: var(--bg-hover); color: var(--gold-primary); }
+    .symbol-picker-empty { padding: 10px 7px; color: var(--text-muted); font-size: 12px; }
     h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
     .symbol { color: var(--gold-primary); font-family: var(--font-mono); }
     .status { padding: 3px 8px; border: 1px solid var(--border-default); border-radius: 4px; font-size: 12px; color: var(--text-secondary); }
@@ -41,7 +51,7 @@
     .negative { color: var(--negative); }
     .section { margin-top: 14px; border-top: 1px solid var(--border-default); padding-top: 14px; }
     .section h2 { margin: 0 0 10px; font-size: 16px; letter-spacing: 0; }
-    .table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: 6px; }
+    .table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-default); border-radius: 6px; }
     table { width: 100%; border-collapse: collapse; min-width: 760px; }
     th, td { padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); text-align: right; font-size: 12px; line-height: 1.25; white-space: nowrap; }
     th { color: var(--text-muted); font-weight: 500; background: var(--bg-secondary); }
@@ -63,12 +73,41 @@
     .chart-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
     .chart { height: 360px; width: 100%; }.chart-state { height: 360px; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; }
     .score-layout { display: grid; grid-template-columns: 230px 1fr; gap: 12px; }
+    .score-layout > div { min-width: 0; }
     .score-summary { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 16px; }
     .score-total { font: 700 34px var(--font-mono); color: var(--gold-primary); }.score-signal { margin: 6px 0; font-weight: 600; }.score-advice { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
     .score-components { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
     .score-component { padding: 10px; background: var(--bg-secondary); border-radius: 5px; }.score-component span { display: block; color: var(--text-muted); font-size: 11px; }.score-component strong { display: block; margin-top: 5px; font-family: var(--font-mono); }
     @media (max-width: 900px) { .overview-layout { grid-template-columns: 1fr; } .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts { grid-template-columns: 1fr; }.score-layout { grid-template-columns: 1fr; }.score-components { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 560px) { .detail-header { flex-direction: column; } .summary-grid, .exchange-grid { grid-template-columns: 1fr; } .actions { width: 100%; } .actions .btn { flex: 1; } }
+    @media (max-width: 768px) {
+      .detail-shell { padding: 12px 0 20px; }
+      .nav-container { scrollbar-width: none; }
+      .nav-container::-webkit-scrollbar { display: none; }
+      .detail-header { align-items: stretch; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+      .title-row { gap: 8px; }
+      h1 { font-size: 20px; overflow-wrap: anywhere; }
+      .symbol-picker-menu { left: 50%; right: auto; width: min(320px, calc(100vw - 32px)); max-width: none; transform: translateX(-50%); }
+      .updated { margin-top: 5px; }
+      .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+      .actions .btn { flex: 1; min-height: 40px; }
+      .notice { padding: 10px 12px; margin-bottom: 12px; }
+      .overview-layout { gap: 12px; margin-bottom: 12px; }
+      .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .metric, .exchange { min-height: 84px; padding: 10px; }
+      .metric-label { margin-bottom: 6px; }
+      .metric-value { font-size: 17px; }
+      .metric-sub { margin-top: 4px; }
+      .section { margin-top: 12px; padding-top: 12px; }
+      .range-bar { align-items: stretch; flex-direction: column; gap: 8px; }
+      .segments { width: 100%; }
+      .segment { flex: 1; min-width: 0; }
+      .charts { gap: 10px; }
+      .chart-panel { padding: 8px; }
+      .chart, .chart-state { height: 260px; }
+      .score-summary { padding: 12px; }
+      .score-components { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+      .score-component { padding: 8px; }
+    }
   </style>
 </head>
 <body>
@@ -79,7 +118,22 @@
         <div>
           <div class="title-row">
             <h1><span class="symbol">[[ symbol || '合约' ]]</span> 合约详情</h1>
-            <span v-if="detail" class="status" :class="detail.data_status">[[ statusText ]]</span>
+            <div class="symbol-picker" @focusout="closeSymbolMenu">
+              <button class="symbol-picker-toggle" type="button" aria-label="搜索并切换合约" @mousedown.prevent @click="toggleSymbolMenu">⌄</button>
+              <div v-if="showSymbolMenu" class="symbol-picker-menu">
+                <input ref="symbolSearchEl" class="symbol-picker-input" type="search" v-model="symbolQuery" placeholder="搜索合约，例如 BTCUSDT" aria-label="搜索合约" @keydown.enter.prevent="selectFirstSymbol" @keydown.escape="showSymbolMenu = false">
+                <template v-if="!symbolQuery && recentSymbols.length">
+                  <div class="symbol-picker-label">最近浏览</div>
+                  <button v-for="item in recentSymbols" :key="`recent-${item}`" class="symbol-picker-option" :class="{ active: item === symbol }" type="button" @mousedown.prevent @click="switchSymbol(item)">[[ item ]]</button>
+                </template>
+                <template v-if="filteredSymbols.length">
+                  <div class="symbol-picker-label">[[ symbolQuery ? '搜索结果' : '全部合约' ]]</div>
+                  <button v-for="item in filteredSymbols" :key="item" class="symbol-picker-option" :class="{ active: item === symbol }" type="button" @mousedown.prevent @click="switchSymbol(item)">[[ item ]]</button>
+                </template>
+                <div v-else-if="symbolQuery" class="symbol-picker-empty">未找到匹配的合约</div>
+                <div v-else-if="!recentSymbols.length" class="symbol-picker-empty">正在加载可用合约</div>
+              </div>
+            </div>
           </div>
           <div v-if="detail" class="updated">数据时间：[[ formatTime(detail.as_of) ]]</div>
         </div>
@@ -89,10 +143,11 @@
         </div>
       </header>
 
-      <div v-if="error && !detail" class="state error"><div><div>[[ error ]]</div><button class="btn" @click="loadData">重试</button></div></div>
+      <div v-if="selectionRequired" class="state"><div>请选择合约</div></div>
+      <div v-else-if="error && !detail" class="state error"><div><div>[[ error ]]</div><button class="btn" @click="loadData">重试</button></div></div>
       <template v-else>
         <div v-if="detail && detail.data_status !== 'complete'" class="notice">
-          当前数据不完整<span v-if="detail.missing_exchanges.length">，缺少：[[ detail.missing_exchanges.join('、') ]]</span>。页面已保留可用数据。
+          当前合约状态：[[ statusText ]]<span v-if="detail.missing_exchanges.length">，缺少：[[ detail.missing_exchanges.join('、') ]]</span>。页面已保留可用数据。
         </div>
         <div v-if="error" class="notice">刷新失败，当前仍显示上一次数据：[[ error ]]</div>
 
@@ -163,11 +218,13 @@
     createApp({
       delimiters: ['[[', ']]'],
       setup() {
-        const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref('');
+        const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref(''); const selectionRequired = ref(false);
+        const symbolQuery = ref(''); const symbolOptions = ref([]); const recentSymbols = ref([]); const showSymbolMenu = ref(false);
         const structureScore = ref(null); const scoreLoading = ref(false); const scoreError = ref('');
         const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
-        const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const charts = [];
+        const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const symbolSearchEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
+        const filteredSymbols = computed(() => { const query = symbolQuery.value.trim().toUpperCase(); return symbolOptions.value.filter(item => !query || item.includes(query)).slice(0, 100); });
         const statusText = computed(() => ({ complete: '数据完整', partial: '部分数据', empty: '暂无数据' }[detail.value?.data_status] || '状态未知'));
         const scoreValue = computed(() => structureScore.value?.total_score == null ? 'N/A' : Number(structureScore.value.total_score).toFixed(1));
         const scoreDescription = computed(() => structureScore.value?.operation_advice || structureScore.value?.trade_signal || '暂无评分');
@@ -187,21 +244,30 @@
           backgroundColor: 'transparent',
           textStyle: { color: '#a1a1aa' },
           tooltip: { trigger: 'axis' },
-          grid: { left: 58, right: 58, top: 34, bottom: 68, containLabel: true },
+          grid: { left: 12, right: 12, top: 34, bottom: 68, containLabel: true },
           xAxis: { type: 'time', axisLabel: { color: '#71717a', margin: 12 } },
           legend: { bottom: 4, textStyle: { color: '#a1a1aa' } },
         };
         const disposeCharts = () => { while (charts.length) charts.pop().dispose(); };
         const makeChart = (el, option) => { if (!el || el.clientWidth === 0) return; const chart = echarts.init(el); chart.resize(); chart.setOption({ ...chartBase, ...option }, true); charts.push(chart); };
         const renderCharts = () => { if (hasMarketSeries.value) { makeChart(priceChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'价格',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatPrice(value)},data:series.value.market.map(x=>[x.time,x.price])},{name:'成交量',type:'bar',yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.volume])}] }); makeChart(openInterestChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'持仓价值',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartMoney(value)},data:series.value.market.map(x=>[x.time,x.open_interest_value])},{name:'持仓量',type:'line',showSymbol:false,yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.open_interest])}] }); } if (hasFlowSeries.value) makeChart(flowChartEl.value, { yAxis:{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}, series:[{name:'主动买入',type:'line',showSymbol:false,lineStyle:{color:'#4ade80'},itemStyle:{color:'#4ade80'},tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.buy_volume])},{name:'主动卖出',type:'line',showSymbol:false,lineStyle:{color:'#f87171'},itemStyle:{color:'#f87171'},tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.sell_volume])},{name:'净流入',type:'bar',tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>({value:[x.time,x.net_inflow],itemStyle:{color:x.net_inflow >= 0 ? '#4ade80' : '#f87171'}}))}] }); if (hasFundingSeries.value) makeChart(fundingChartEl.value, { visualMap:{show:false,dimension:1,seriesIndex:[0],pieces:[{gt:0,color:'#4ade80'},{lt:0,color:'#f87171'},{value:0,color:'#a1a1aa'}]}, yAxis:{type:'value',scale:true,axisLabel:{formatter:v=>(v*100).toFixed(3)+'%'}}, series:[{name:'结算费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.funding_rate])}] }); };
-        const loadSeries = async () => { seriesLoading.value = true; seriesError.value = ''; disposeCharts(); try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}/series?range=${selectedRange.value}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); series.value = result.data; } catch(err) { seriesError.value = `趋势加载失败：${err.message}`; series.value = {market:[],flow:[],funding_rate:[]}; } finally { seriesLoading.value = false; await nextTick(); renderCharts(); } };
+        const loadSeries = async () => { const requestedSymbol = symbol.value; const requestedRange = selectedRange.value; seriesLoading.value = true; seriesError.value = ''; disposeCharts(); try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/series?range=${requestedRange}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value || requestedRange !== selectedRange.value) return; series.value = result.data; } catch(err) { if (requestedSymbol !== symbol.value || requestedRange !== selectedRange.value) return; seriesError.value = `趋势加载失败：${err.message}`; series.value = {market:[],flow:[],funding_rate:[]}; } finally { if (requestedSymbol === symbol.value && requestedRange === selectedRange.value) { seriesLoading.value = false; await nextTick(); renderCharts(); } } };
         const changeRange = value => { selectedRange.value = value; loadSeries(); };
-        const loadStructureScore = async () => { scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); structureScore.value = result.data?.structure_score || null; } catch(err) { scoreError.value = `结构评分加载失败：${err.message}`; } finally { scoreLoading.value = false; } };
-        const loadData = async () => { if (!symbol.value) { error.value = '缺少合约代码'; return; } loading.value = true; error.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(symbol.value)}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); detail.value = result.data; await nextTick(); renderCharts(); } catch (err) { error.value = err.message === 'contract detail not found' ? '暂无该合约的已存储数据' : `加载数据失败：${err.message}`; } finally { loading.value = false; } };
+        const loadStructureScore = async () => { const requestedSymbol = symbol.value; scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; structureScore.value = result.data?.structure_score || null; } catch(err) { if (requestedSymbol !== symbol.value) return; scoreError.value = `结构评分加载失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) scoreLoading.value = false; } };
+        const isValidSymbol = value => /^[A-Z0-9_-]{2,50}$/.test(value);
+        const readRecentSymbols = () => { try { const saved = JSON.parse(localStorage.getItem('coinx.contract-detail.recent') || '[]'); recentSymbols.value = Array.isArray(saved) ? saved.map(item => typeof item === 'string' ? item.trim().toUpperCase() : '').filter(isValidSymbol).slice(0, 10) : []; } catch (_) { recentSymbols.value = []; } };
+        const recordRecentSymbol = value => { const normalized = value.trim().toUpperCase(); recentSymbols.value = [normalized, ...recentSymbols.value.filter(item => item !== normalized)].slice(0, 10); try { localStorage.setItem('coinx.contract-detail.recent', JSON.stringify(recentSymbols.value)); } catch (_) {} };
+        const loadSymbolOptions = async () => { try { const response = await fetch('/api/coins-config'); const result = await response.json(); if (!response.ok || result.status !== 'success') return; const symbols = Object.keys(result.data || {}).map(item => item.trim().toUpperCase()).filter(isValidSymbol); symbolOptions.value = [...new Set([...symbols, ...recentSymbols.value])].sort(); } catch (_) {} };
+        const resetDetailState = () => { detail.value = null; structureScore.value = null; series.value = { market: [], flow: [], funding_rate: [] }; seriesError.value = ''; scoreError.value = ''; disposeCharts(); };
+        const switchSymbol = value => { const normalized = (value || '').trim().toUpperCase(); if (!normalized || normalized === symbol.value) { showSymbolMenu.value = false; return; } symbol.value = normalized; selectionRequired.value = false; symbolQuery.value = ''; showSymbolMenu.value = false; resetDetailState(); history.pushState({}, '', `/coin-detail?symbol=${encodeURIComponent(normalized)}`); loadData(); loadStructureScore(); loadSeries(); };
+        const selectFirstSymbol = () => { if (filteredSymbols.value.length) switchSymbol(filteredSymbols.value[0]); };
+        const toggleSymbolMenu = async () => { showSymbolMenu.value = !showSymbolMenu.value; if (showSymbolMenu.value) { await nextTick(); symbolSearchEl.value?.focus(); } };
+        const closeSymbolMenu = event => { if (!event.currentTarget.contains(event.relatedTarget)) showSymbolMenu.value = false; };
+        const loadData = async () => { const requestedSymbol = symbol.value; if (!requestedSymbol) { selectionRequired.value = true; return; } loading.value = true; error.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; detail.value = result.data; recordRecentSymbol(requestedSymbol); await nextTick(); renderCharts(); } catch (err) { if (requestedSymbol !== symbol.value) return; error.value = err.message === 'contract detail not found' ? '暂无该合约的已存储数据' : `加载数据失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) loading.value = false; } };
         const goBack = () => history.length > 1 ? history.back() : location.assign('/');
-        onMounted(() => { symbol.value = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); if (symbol.value) { loadData(); loadStructureScore(); loadSeries(); } else { error.value = '缺少合约代码'; } });
+        onMounted(() => { readRecentSymbols(); loadSymbolOptions(); const requestedSymbol = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); symbol.value = requestedSymbol || recentSymbols.value[0] || ''; if (symbol.value) { if (!requestedSymbol) history.replaceState({}, '', `/coin-detail?symbol=${encodeURIComponent(symbol.value)}`); loadData(); loadStructureScore(); loadSeries(); } else { selectionRequired.value = true; } });
         const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
-        return { symbol, detail, loading, error, summary, statusText, structureScore, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, goBack };
+        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, statusText, structureScore, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
       }
     }).mount('#app');
   </script>

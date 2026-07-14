@@ -12,7 +12,23 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;' in template
     assert 'structureScore.value?.total_score' in template
     assert 'detail.data_status' in template
-    assert '/series?range=${selectedRange.value}' in template
+    assert '当前合约状态：[[ statusText ]]' in template
+    assert '<span v-if="detail" class="status"' not in template
+    assert 'coinx.contract-detail.recent' in template
+    assert 'loadSymbolOptions' in template
+    assert "fetch('/api/coins-config')" in template
+    assert 'switchSymbol' in template
+    assert '搜索并切换合约' in template
+    assert 'recentSymbols.value[0]' in template
+    assert 'selectionRequired.value = true' in template
+    assert '.chart, .chart-state { height: 260px; }' in template
+    assert '.range-bar { align-items: stretch; flex-direction: column; gap: 8px; }' in template
+    assert '.score-layout > div { min-width: 0; }' in template
+    assert '.table-wrap { max-width: 100%; overflow-x: auto;' in template
+    assert '@media (max-width: 768px)' in template
+    assert '.detail-header { align-items: stretch; flex-direction: column;' in template
+    assert 'width: min(320px, calc(100vw - 32px));' in template
+    assert '/series?range=${requestedRange}' in template
     assert 'priceChartEl' in template
     assert 'openInterestChartEl' in template
     assert 'flowChartEl' in template
@@ -34,10 +50,11 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert '/structure-score`' in template
     assert 'loadStructureScore(); loadSeries();' in template
     assert "bottom: 68" in template
+    assert 'grid: { left: 12, right: 12, top: 34, bottom: 68, containLabel: true }' in template
     assert "legend: { bottom: 4" in template
     assert 'const disposeCharts' in template
     assert 'el.clientWidth === 0' in template
-    assert 'detail.value = result.data; await nextTick(); renderCharts();' in template
+    assert 'detail.value = result.data; recordRecentSymbol(requestedSymbol); await nextTick(); renderCharts();' in template
     assert 'v-if="loading && !detail"' not in template
     assert '历史趋势' in template
     assert '正在加载摘要...' in template
