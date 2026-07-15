@@ -8,7 +8,13 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'detail.intervals' in template
     assert 'detail.exchange_distribution' in template
     assert '<h2 class="overview-heading">基础信息</h2>' in template
+    assert '<h2 class="overview-heading">交易所持仓分布</h2>' in template
     assert template.index('<h2 class="overview-heading">交易所持仓分布</h2>') < template.index('<h2>市场结构评分</h2>')
+    assert template.count('数据时间：') == 6
+    assert 'formatTime(detail.as_of)' in template
+    assert 'formatTime(structureScoreAsOf)' in template
+    assert 'formatTime(series.anchor_time)' in template
+    assert 'structureScoreAsOf.value = result.data?.as_of || null' in template
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;' in template
     assert 'structureScore.value?.total_score' in template
     assert 'detail.data_status' in template
@@ -19,6 +25,8 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert "fetch('/api/coins-config')" in template
     assert 'switchSymbol' in template
     assert '搜索并切换合约' in template
+    assert '.symbol-picker-toggle::after' in template
+    assert 'transform: rotate(45deg);' in template
     assert 'recentSymbols.value[0]' in template
     assert 'selectionRequired.value = true' in template
     assert '.chart, .chart-state { height: 260px; }' in template

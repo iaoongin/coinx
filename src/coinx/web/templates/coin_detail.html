@@ -18,7 +18,8 @@
     .symbol-picker { position: relative; }
     .symbol-picker-input { width: 100%; height: 36px; padding: 7px 11px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-card); color: var(--text-primary); font: 13px var(--font-mono); outline: none; }
     .symbol-picker-input:focus { border-color: var(--gold-primary); }
-    .symbol-picker-toggle { width: 30px; height: 30px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-card); color: var(--text-secondary); cursor: pointer; }
+    .symbol-picker-toggle { position: relative; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-card); color: var(--text-secondary); cursor: pointer; }
+    .symbol-picker-toggle::after { content: ''; position: absolute; top: 10px; left: 10px; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
     .symbol-picker-toggle:hover { color: var(--gold-primary); border-color: var(--gold-primary); }
     .symbol-picker-menu { position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; width: 280px; max-height: 320px; overflow-y: auto; padding: 5px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-elevated); box-shadow: var(--shadow-card); }
     .symbol-picker-label { padding: 6px 7px 4px; color: var(--text-muted); font-size: 11px; }
@@ -39,7 +40,9 @@
     .error { color: var(--negative); text-align: center; }
     .error .btn { margin-top: 14px; }
     .overview-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
-    .overview-heading { margin: 0 0 10px; font-size: 16px; letter-spacing: 0; }
+    .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .section-heading h2, .overview-heading { margin: 0; font-size: 16px; letter-spacing: 0; }
+    .section-updated { flex: 0 0 auto; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
     .overview-panel .summary-grid { margin-bottom: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .overview-panel .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
@@ -119,7 +122,7 @@
           <div class="title-row">
             <h1><span class="symbol">[[ symbol || '合约' ]]</span> 合约详情</h1>
             <div class="symbol-picker" @focusout="closeSymbolMenu">
-              <button class="symbol-picker-toggle" type="button" aria-label="搜索并切换合约" @mousedown.prevent @click="toggleSymbolMenu">⌄</button>
+              <button class="symbol-picker-toggle" type="button" aria-label="搜索并切换合约" @mousedown.prevent @click="toggleSymbolMenu"></button>
               <div v-if="showSymbolMenu" class="symbol-picker-menu">
                 <input ref="symbolSearchEl" class="symbol-picker-input" type="search" v-model="symbolQuery" placeholder="搜索合约，例如 BTCUSDT" aria-label="搜索合约" @keydown.enter.prevent="selectFirstSymbol" @keydown.escape="showSymbolMenu = false">
                 <template v-if="!symbolQuery && recentSymbols.length">
@@ -153,7 +156,7 @@
 
         <div class="overview-layout">
           <section class="overview-panel">
-            <h2 class="overview-heading">基础信息</h2>
+            <div class="section-heading"><h2 class="overview-heading">基础信息</h2><span v-if="detail" class="section-updated">数据时间：[[ formatTime(detail.as_of) ]]</span></div>
             <section v-if="detail" class="summary-grid" aria-label="核心摘要">
           <article class="metric"><div class="metric-label">最新价格</div><div class="metric-value">[[ formatPrice(summary.latest_price) ]]</div><div class="metric-sub" :class="tone(summary.price_change_24h_percent)">24h [[ formatPercent(summary.price_change_24h_percent) ]]</div></article>
           <article class="metric"><div class="metric-label">总持仓价值</div><div class="metric-value">[[ formatCompact(summary.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(summary.open_interest) ]]</div></article>
@@ -166,7 +169,7 @@
           </section>
 
           <section class="overview-panel">
-          <h2 class="overview-heading">交易所持仓分布</h2>
+          <div class="section-heading"><h2 class="overview-heading">交易所持仓分布</h2><span v-if="detail" class="section-updated">数据时间：[[ formatTime(detail.as_of) ]]</span></div>
           <div v-if="detail">
           <div v-if="detail.exchange_distribution.length" class="exchange-grid">
             <article class="exchange" v-for="item in detail.exchange_distribution" :key="item.exchange"><div class="exchange-head"><span class="exchange-name">[[ item.exchange ]]</span><span class="exchange-share">[[ formatPercent(item.share_percent, false) ]]</span></div><div class="exchange-value">[[ formatCompact(item.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(item.open_interest) ]]</div></article>
@@ -178,7 +181,7 @@
         </div>
 
         <section class="section">
-          <h2>市场结构评分</h2>
+          <div class="section-heading"><h2>市场结构评分</h2><span v-if="structureScoreAsOf" class="section-updated">数据时间：[[ formatTime(structureScoreAsOf) ]]</span></div>
           <div v-if="scoreLoading" class="empty">正在计算结构评分...</div>
           <div v-else-if="scoreError" class="notice">[[ scoreError ]] <button class="btn" @click="loadStructureScore">重试</button></div>
           <div v-else-if="structureScore" class="score-layout">
@@ -192,7 +195,7 @@
         </section>
 
         <section class="section">
-          <div class="range-bar"><h2 style="margin:0">历史趋势</h2><div class="segments"><button v-for="item in ranges" :key="item" class="segment" :class="{ active: selectedRange === item }" @click="changeRange(item)">[[ item ]]</button></div></div>
+          <div class="range-bar"><div class="section-heading"><h2>历史趋势</h2><span v-if="series.anchor_time" class="section-updated">数据时间：[[ formatTime(series.anchor_time) ]]</span></div><div class="segments"><button v-for="item in ranges" :key="item" class="segment" :class="{ active: selectedRange === item }" @click="changeRange(item)">[[ item ]]</button></div></div>
           <div v-if="seriesError" class="notice">[[ seriesError ]]</div>
           <div class="charts">
             <div class="chart-panel"><div class="chart-title">价格</div><div v-show="!seriesLoading && hasMarketSeries" ref="priceChartEl" class="chart"></div><div v-if="seriesLoading || !hasMarketSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无价格历史' ]]</div></div>
@@ -203,12 +206,12 @@
         </section>
 
         <section v-if="detail" class="section">
-          <h2>多周期变化</h2>
+          <div class="section-heading"><h2>多周期变化</h2><span class="section-updated">数据时间：[[ formatTime(detail.as_of) ]]</span></div>
           <div class="table-wrap"><table><thead><tr><th>周期</th><th>价格变化</th><th>持仓量变化</th><th>持仓价值变化</th><th>累计净流入</th></tr></thead><tbody>
             <tr v-for="row in detail.intervals" :key="row.interval"><td>[[ row.interval ]]</td><td :class="tone(row.price_change_percent)">[[ formatPercent(row.price_change_percent) ]]</td><td :class="tone(row.open_interest_change_percent)">[[ formatPercent(row.open_interest_change_percent) ]]</td><td :class="tone(row.open_interest_value_change_percent)">[[ formatPercent(row.open_interest_value_change_percent) ]]</td><td :class="tone(row.net_inflow_value)">[[ formatCompact(row.net_inflow_value, '$') ]]</td></tr>
           </tbody></table></div>
         </section>
-        <section v-else class="section"><h2>多周期变化</h2><div class="empty">正在加载多周期数据...</div></section>
+        <section v-else class="section"><div class="section-heading"><h2>多周期变化</h2></div><div class="empty">正在加载多周期数据...</div></section>
 
       </template>
     </main>
@@ -220,7 +223,7 @@
       setup() {
         const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref(''); const selectionRequired = ref(false);
         const symbolQuery = ref(''); const symbolOptions = ref([]); const recentSymbols = ref([]); const showSymbolMenu = ref(false);
-        const structureScore = ref(null); const scoreLoading = ref(false); const scoreError = ref('');
+        const structureScore = ref(null); const structureScoreAsOf = ref(null); const scoreLoading = ref(false); const scoreError = ref('');
         const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
         const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const symbolSearchEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
@@ -253,12 +256,12 @@
         const renderCharts = () => { if (hasMarketSeries.value) { makeChart(priceChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'价格',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatPrice(value)},data:series.value.market.map(x=>[x.time,x.price])},{name:'成交量',type:'bar',yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.volume])}] }); makeChart(openInterestChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'持仓价值',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartMoney(value)},data:series.value.market.map(x=>[x.time,x.open_interest_value])},{name:'持仓量',type:'line',showSymbol:false,yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.open_interest])}] }); } if (hasFlowSeries.value) makeChart(flowChartEl.value, { yAxis:{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}, series:[{name:'主动买入',type:'line',showSymbol:false,lineStyle:{color:'#4ade80'},itemStyle:{color:'#4ade80'},tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.buy_volume])},{name:'主动卖出',type:'line',showSymbol:false,lineStyle:{color:'#f87171'},itemStyle:{color:'#f87171'},tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.sell_volume])},{name:'净流入',type:'bar',tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>({value:[x.time,x.net_inflow],itemStyle:{color:x.net_inflow >= 0 ? '#4ade80' : '#f87171'}}))}] }); if (hasFundingSeries.value) makeChart(fundingChartEl.value, { visualMap:{show:false,dimension:1,seriesIndex:[0],pieces:[{gt:0,color:'#4ade80'},{lt:0,color:'#f87171'},{value:0,color:'#a1a1aa'}]}, yAxis:{type:'value',scale:true,axisLabel:{formatter:v=>(v*100).toFixed(3)+'%'}}, series:[{name:'结算费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.funding_rate])}] }); };
         const loadSeries = async () => { const requestedSymbol = symbol.value; const requestedRange = selectedRange.value; seriesLoading.value = true; seriesError.value = ''; disposeCharts(); try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/series?range=${requestedRange}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value || requestedRange !== selectedRange.value) return; series.value = result.data; } catch(err) { if (requestedSymbol !== symbol.value || requestedRange !== selectedRange.value) return; seriesError.value = `趋势加载失败：${err.message}`; series.value = {market:[],flow:[],funding_rate:[]}; } finally { if (requestedSymbol === symbol.value && requestedRange === selectedRange.value) { seriesLoading.value = false; await nextTick(); renderCharts(); } } };
         const changeRange = value => { selectedRange.value = value; loadSeries(); };
-        const loadStructureScore = async () => { const requestedSymbol = symbol.value; scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; structureScore.value = result.data?.structure_score || null; } catch(err) { if (requestedSymbol !== symbol.value) return; scoreError.value = `结构评分加载失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) scoreLoading.value = false; } };
+        const loadStructureScore = async () => { const requestedSymbol = symbol.value; scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; structureScore.value = result.data?.structure_score || null; structureScoreAsOf.value = result.data?.as_of || null; } catch(err) { if (requestedSymbol !== symbol.value) return; scoreError.value = `结构评分加载失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) scoreLoading.value = false; } };
         const isValidSymbol = value => /^[A-Z0-9_-]{2,50}$/.test(value);
         const readRecentSymbols = () => { try { const saved = JSON.parse(localStorage.getItem('coinx.contract-detail.recent') || '[]'); recentSymbols.value = Array.isArray(saved) ? saved.map(item => typeof item === 'string' ? item.trim().toUpperCase() : '').filter(isValidSymbol).slice(0, 10) : []; } catch (_) { recentSymbols.value = []; } };
         const recordRecentSymbol = value => { const normalized = value.trim().toUpperCase(); recentSymbols.value = [normalized, ...recentSymbols.value.filter(item => item !== normalized)].slice(0, 10); try { localStorage.setItem('coinx.contract-detail.recent', JSON.stringify(recentSymbols.value)); } catch (_) {} };
         const loadSymbolOptions = async () => { try { const response = await fetch('/api/coins-config'); const result = await response.json(); if (!response.ok || result.status !== 'success') return; const symbols = Object.keys(result.data || {}).map(item => item.trim().toUpperCase()).filter(isValidSymbol); symbolOptions.value = [...new Set([...symbols, ...recentSymbols.value])].sort(); } catch (_) {} };
-        const resetDetailState = () => { detail.value = null; structureScore.value = null; series.value = { market: [], flow: [], funding_rate: [] }; seriesError.value = ''; scoreError.value = ''; disposeCharts(); };
+        const resetDetailState = () => { detail.value = null; structureScore.value = null; structureScoreAsOf.value = null; series.value = { market: [], flow: [], funding_rate: [] }; seriesError.value = ''; scoreError.value = ''; disposeCharts(); };
         const switchSymbol = value => { const normalized = (value || '').trim().toUpperCase(); if (!normalized || normalized === symbol.value) { showSymbolMenu.value = false; return; } symbol.value = normalized; selectionRequired.value = false; symbolQuery.value = ''; showSymbolMenu.value = false; resetDetailState(); history.pushState({}, '', `/coin-detail?symbol=${encodeURIComponent(normalized)}`); loadData(); loadStructureScore(); loadSeries(); };
         const selectFirstSymbol = () => { if (filteredSymbols.value.length) switchSymbol(filteredSymbols.value[0]); };
         const toggleSymbolMenu = async () => { showSymbolMenu.value = !showSymbolMenu.value; if (showSymbolMenu.value) { await nextTick(); symbolSearchEl.value?.focus(); } };
@@ -267,7 +270,7 @@
         const goBack = () => history.length > 1 ? history.back() : location.assign('/');
         onMounted(() => { readRecentSymbols(); loadSymbolOptions(); const requestedSymbol = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); symbol.value = requestedSymbol || recentSymbols.value[0] || ''; if (symbol.value) { if (!requestedSymbol) history.replaceState({}, '', `/coin-detail?symbol=${encodeURIComponent(symbol.value)}`); loadData(); loadStructureScore(); loadSeries(); } else { selectionRequired.value = true; } });
         const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
-        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, statusText, structureScore, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
+        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, statusText, structureScore, structureScoreAsOf, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, changeRange, loadData, loadStructureScore, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
       }
     }).mount('#app');
   </script>
