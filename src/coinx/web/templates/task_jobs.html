@@ -132,6 +132,12 @@
       background: rgba(255, 255, 255, 0.02);
     }
 
+    .scheduler-state.disabled {
+      color: #e1a85f;
+      border-color: rgba(225, 168, 95, 0.35);
+      background: rgba(225, 168, 95, 0.08);
+    }
+
     .toolbar {
       margin-top: 12px;
       display: flex;
@@ -341,6 +347,10 @@
       color: #95f2bc;
     }
 
+    .message-box.warning {
+      color: #e1a85f;
+    }
+
     .empty-state {
       padding: 28px 18px;
       text-align: center;
@@ -418,8 +428,8 @@
           <div>
             <div class="eyebrow">调度器状态</div>
             <h2 style="margin:10px 0 8px;font-size:18px;">调度器概况</h2>
-            <div :class="['scheduler-state', schedulerRunning ? 'running' : 'stopped']">
-              <span>[[ schedulerRunning ? '运行中' : '未启动' ]]</span>
+            <div :class="['scheduler-state', schedulerEnabled ? (schedulerRunning ? 'running' : 'stopped') : 'disabled']">
+              <span>[[ !schedulerEnabled ? '已禁用' : (schedulerRunning ? '运行中' : '未启动') ]]</span>
             </div>
           </div>
           <div class="subtitle">
@@ -427,6 +437,10 @@
           </div>
         </div>
       </section>
+
+      <div v-if="!schedulerEnabled" class="message-box warning" style="margin-top:10px;">
+        定时任务已由环境变量 SCHEDULER_ENABLED=false 禁用：任务不会注册或执行，启动补采和任务管理操作也不可用。
+      </div>
 
       <div class="toolbar">
         <div class="toolbar-left">
@@ -522,7 +536,7 @@
       </div>
 
       <div v-else class="empty-state">
-        没有匹配到任务。可以调整筛选条件，或确认调度器是否已经启动。
+        [[ schedulerEnabled ? '没有匹配到任务。可以调整筛选条件，或确认调度器是否已经启动。' : '定时任务已禁用，因此没有注册任务。' ]]
       </div>
     </div>
   </div>
@@ -537,6 +551,7 @@
         const loading = ref(false);
         const keyword = ref('');
         const statusFilter = ref('all');
+        const schedulerEnabled = ref(true);
         const schedulerRunning = ref(false);
         const autoRefresh = ref(true);
         const flash = ref({ type: '', message: '' });
@@ -644,6 +659,7 @@
             const result = await response.json();
             if (result.status !== 'success') throw new Error(result.message || 'failed to load jobs');
             jobs.value = result.data?.jobs || [];
+            schedulerEnabled.value = result.data?.scheduler_enabled !== false;
             schedulerRunning.value = !!result.data?.scheduler_running;
           } catch (error) {
             console.error(error);
@@ -700,6 +716,7 @@
           loading,
           keyword,
           statusFilter,
+          schedulerEnabled,
           schedulerRunning,
           autoRefresh,
           flash,

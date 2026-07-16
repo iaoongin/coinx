@@ -23,6 +23,7 @@ from coinx.config import (
     REPAIR_HISTORY_INTERVAL,
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
     REPAIR_ROLLING_POINTS,
+    SCHEDULER_ENABLED,
     TIME_INTERVALS,
 )
 from coinx.repositories.homepage_series import (
@@ -786,6 +787,7 @@ def list_task_jobs():
                 'status': 'success',
                 'message': 'scheduler jobs loaded',
                 'data': {
+                    'scheduler_enabled': SCHEDULER_ENABLED,
                     'scheduler_running': bool(scheduler.running),
                     'jobs': jobs,
                 },
@@ -803,6 +805,8 @@ def control_task_job(job_id):
     action = (payload.get('action') or '').strip().lower()
     if action not in TASK_JOB_ACTIONS:
         return jsonify({'status': 'error', 'message': f'unsupported action: {action}'}), 400
+    if not SCHEDULER_ENABLED:
+        return jsonify({'status': 'error', 'message': 'scheduler is disabled by SCHEDULER_ENABLED=false'}), 409
 
     job = scheduler.get_job(job_id)
     if job is None:

@@ -38,6 +38,13 @@ JOB_METADATA_LOCK = threading.Lock()
 JOB_METADATA = {}
 
 
+def scheduled_job(*args, **kwargs):
+    """仅在启用调度器时向 APScheduler 注册任务。"""
+    if SCHEDULER_ENABLED:
+        return scheduler.scheduled_job(*args, **kwargs)
+    return lambda func: func
+
+
 def _update_job_metadata(job_id, **fields):
     with JOB_METADATA_LOCK:
         metadata = JOB_METADATA.setdefault(job_id, {})
@@ -104,7 +111,7 @@ def _merge_repair_summaries(stage_summaries):
     }
 
 
-@scheduler.scheduled_job(
+@scheduled_job(
     'interval',
     seconds=UPDATE_INTERVAL,
     id='market_rank_refresh_job',
@@ -138,7 +145,7 @@ def scheduled_market_rank_refresh():
 
 
 if HOMEPAGE_SERIES_REPAIR_ENABLED:
-    @scheduler.scheduled_job(
+    @scheduled_job(
         'interval',
         seconds=REPAIR_TRACKED_INTERVAL,
         id='repair_market_rolling_job',
@@ -240,7 +247,7 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
 
 
 if REPAIR_HISTORY_ENABLED:
-    @scheduler.scheduled_job(
+    @scheduled_job(
         'interval',
         seconds=REPAIR_HISTORY_INTERVAL,
         id='repair_market_history_job',
@@ -336,7 +343,7 @@ if REPAIR_HISTORY_ENABLED:
 
 
 if FUNDING_RATE_COLLECT_ENABLED:
-    @scheduler.scheduled_job(
+    @scheduled_job(
         'interval',
         seconds=REPAIR_TRACKED_INTERVAL,
         id='collect_funding_rates_job',
@@ -361,7 +368,7 @@ if FUNDING_RATE_COLLECT_ENABLED:
             logger.error('资金费率采集失败: %s', e)
 
 
-@scheduler.scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')
+@scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')
 def scheduled_coins_config_update():
     """Refresh tracked coin configuration once per day."""
     started_at = time.perf_counter()

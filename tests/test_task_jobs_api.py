@@ -59,6 +59,7 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
             }
         },
     )
+    monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', True)
 
     client = create_test_client()
     response = client.get('/api/task-jobs')
@@ -67,6 +68,7 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     payload = response.get_json()
     assert payload['status'] == 'success'
     assert payload['data']['scheduler_running'] is True
+    assert payload['data']['scheduler_enabled'] is True
     assert payload['data']['jobs'][0]['id'] == 'job-a'
     assert payload['data']['jobs'][0]['registered'] is True
     assert payload['data']['jobs'][0]['paused'] is False
@@ -85,6 +87,7 @@ def test_control_task_job_runs_job(monkeypatch):
         wakeup=lambda: wakeup_calls.append('wakeup'),
     ))
     monkeypatch.setattr('coinx.web.routes.api_data.get_all_job_runtime_metadata', lambda: {})
+    monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', True)
 
     client = create_test_client()
     response = client.post('/api/task-jobs/job-a/action', json={'action': 'run'})
@@ -103,3 +106,15 @@ def test_control_task_job_rejects_unsupported_action():
     assert response.status_code == 400
     payload = response.get_json()
     assert payload['status'] == 'error'
+
+
+def test_control_task_job_rejects_actions_when_scheduler_disabled(monkeypatch):
+    monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', False)
+
+    client = create_test_client()
+    response = client.post('/api/task-jobs/job-a/action', json={'action': 'run'})
+
+    assert response.status_code == 409
+    payload = response.get_json()
+    assert payload['status'] == 'error'
+    assert 'SCHEDULER_ENABLED=false' in payload['message']
