@@ -19,8 +19,8 @@
     </a>
 
     <div class="nav-menu">
-      <button class="nav-menu-trigger{% if request.path.startswith('/legacy-home') or request.path.startswith('/market-rank') or request.path.startswith('/funding-rate') %} active{% endif %}" type="button" aria-haspopup="true">市场</button>
-      <div class="nav-menu-list" aria-label="市场">
+      <button class="nav-menu-trigger{% if request.path.startswith('/legacy-home') or request.path.startswith('/market-rank') or request.path.startswith('/funding-rate') %} active{% endif %}" type="button" aria-controls="nav-menu-market" aria-expanded="false" aria-haspopup="true">市场</button>
+      <div id="nav-menu-market" class="nav-menu-list" aria-label="市场">
         <a class="nav-menu-item{% if request.path.startswith('/market-rank') %} active{% endif %}" href="/market-rank"{% if request.path.startswith('/market-rank') %} aria-current="page"{% endif %}>行情榜</a>
         <a class="nav-menu-item{% if request.path.startswith('/funding-rate') %} active{% endif %}" href="/funding-rate"{% if request.path.startswith('/funding-rate') %} aria-current="page"{% endif %}>资金费率</a>
         <a class="nav-menu-item{% if request.path.startswith('/legacy-home') %} active{% endif %}" href="/legacy-home"{% if request.path.startswith('/legacy-home') %} aria-current="page"{% endif %}>旧首页</a>
@@ -28,8 +28,8 @@
     </div>
 
     <div class="nav-menu">
-      <button class="nav-menu-trigger{% if request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') %} active{% endif %}" type="button" aria-haspopup="true">分析</button>
-      <div class="nav-menu-list" aria-label="分析">
+      <button class="nav-menu-trigger{% if request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') %} active{% endif %}" type="button" aria-controls="nav-menu-analysis" aria-expanded="false" aria-haspopup="true">分析</button>
+      <div id="nav-menu-analysis" class="nav-menu-list" aria-label="分析">
       <a class="nav-menu-item{% if request.path.startswith('/market-structure-score') %} active{% endif %}" href="/market-structure-score"{% if request.path.startswith('/market-structure-score') %} aria-current="page"{% endif %}>
         结构评分
       </a>
@@ -43,8 +43,8 @@
     </div>
 
     <div class="nav-menu">
-      <button class="nav-menu-trigger{% if request.path.startswith('/coins-config') or request.path.startswith('/task-jobs') %} active{% endif %}" type="button" aria-haspopup="true">管理</button>
-      <div class="nav-menu-list" aria-label="管理">
+      <button class="nav-menu-trigger{% if request.path.startswith('/coins-config') or request.path.startswith('/task-jobs') %} active{% endif %}" type="button" aria-controls="nav-menu-management" aria-expanded="false" aria-haspopup="true">管理</button>
+      <div id="nav-menu-management" class="nav-menu-list" aria-label="管理">
       <a class="nav-menu-item{% if request.path.startswith('/coins-config') %} active{% endif %}" href="/coins-config"{% if request.path.startswith('/coins-config') %} aria-current="page"{% endif %}>
         币种配置
       </a>
@@ -55,3 +55,30 @@
     </div>
   </nav>
 </div>
+<script>
+  (() => {
+    const menus = [...document.querySelectorAll('.nav-menu')];
+    const closeMenus = (except = null) => menus.forEach((menu) => {
+      if (menu === except) return;
+      menu.classList.remove('is-open');
+      menu.querySelector('.nav-menu-trigger').setAttribute('aria-expanded', 'false');
+    });
+
+    menus.forEach((menu) => {
+      const trigger = menu.querySelector('.nav-menu-trigger');
+      trigger.addEventListener('click', () => {
+        const isOpen = menu.classList.toggle('is-open');
+        closeMenus(isOpen ? menu : null);
+        trigger.setAttribute('aria-expanded', String(isOpen));
+      });
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('.nav-menu')) closeMenus();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeMenus();
+    });
+  })();
+</script>

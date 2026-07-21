@@ -178,10 +178,15 @@ body::after {
 }
 
 .nav-menu-trigger::after {
-  content: '⌄';
-  margin-left: 6px;
+  content: '';
+  display: block;
+  width: 5px;
+  height: 5px;
+  margin: 0 1px 3px 7px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
   color: var(--text-muted);
-  font-size: 12px;
+  transform: rotate(45deg);
 }
 
 .nav-menu-trigger:hover,
@@ -204,7 +209,8 @@ body::after {
 }
 
 .nav-menu:hover .nav-menu-list,
-.nav-menu:focus-within .nav-menu-list {
+.nav-menu:focus-within .nav-menu-list,
+.nav-menu.is-open .nav-menu-list {
   display: grid;
 }
 
@@ -957,6 +963,19 @@ textarea:focus {
     display: none;
   }
 
+  .nav-container {
+    gap: 8px;
+    padding: 0 12px;
+    overflow: visible;
+  }
+
+  .nav {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 0;
+  }
+
   .nav-menu-trigger {
     padding: 0 12px;
     font-size: 13px;
@@ -988,5 +1007,18 @@ textarea:focus {
 
   .nav-menu-trigger {
     padding: 0 10px;
+  }
+}
+
+@media (max-width: 360px) {
+  .nav-container {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .nav {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
   }
 }
