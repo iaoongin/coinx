@@ -3,6 +3,26 @@ const { NAV_ITEMS, navLinks, visit } = require('./contracts');
 
 const pages = ['/', '/legacy-home', '/market-rank', '/market-structure-score', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs', '/funding-rate'];
 
+const NAV_MENU_BY_PATH = {
+  '/legacy-home': '市场',
+  '/market-rank': '市场',
+  '/funding-rate': '市场',
+  '/market-structure-score': '分析',
+  '/coin-detail': '分析',
+  '/hedge-calculator': '分析',
+  '/coins-config': '管理',
+  '/task-jobs': '管理',
+};
+
+async function revealNavItem(page, item) {
+  const menuName = NAV_MENU_BY_PATH[item.href];
+  if (!menuName) return;
+
+  const trigger = page.locator(`.nav-menu:has(.nav-menu-list[aria-label="${menuName}"]) .nav-menu-trigger`);
+  await expect(trigger).toHaveCount(1);
+  await trigger.click();
+}
+
 async function navToContentGap(page) {
   const metrics = await page.evaluate(() => {
     const nav = document.querySelector('.nav-container');
@@ -67,6 +87,15 @@ async function navToContentGap(page) {
 }
 
 test.describe('导航栏契约', () => {
+  test('导航入口按市场、分析和管理下拉菜单归类', async ({ page }) => {
+    await visit(page, '/');
+
+    await expect(page.locator('.nav-menu')).toHaveCount(3);
+    await expect(page.locator('.nav-menu-list[aria-label="市场"]')).toContainText('旧首页');
+    await expect(page.locator('.nav-menu-list[aria-label="分析"]')).toContainText('结构评分');
+    await expect(page.locator('.nav-menu-list[aria-label="管理"]')).toContainText('币种配置');
+  });
+
   test('导航链接文本和 href 稳定', async ({ page }) => {
     await visit(page, '/');
 
@@ -74,7 +103,7 @@ test.describe('导航栏契约', () => {
     expect(items).toHaveLength(NAV_ITEMS.length);
 
     for (const item of items) {
-      await expect(item.locator).toBeVisible();
+      await expect(item.locator).toHaveCount(1);
       await expect(item.locator).toHaveAttribute('href', item.href);
       await expect(item.locator).toContainText(item.name);
     }
@@ -84,6 +113,8 @@ test.describe('导航栏契约', () => {
     await visit(page, '/');
 
     for (const item of navLinks(page)) {
+      await revealNavItem(page, item);
+      await expect(item.locator).toBeVisible();
       await item.locator.click();
       await expect(page).toHaveURL(new RegExp(`${item.href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|\\?)`));
     }
@@ -94,7 +125,7 @@ test.describe('导航栏契约', () => {
       await visit(page, path);
 
       for (const item of navLinks(page)) {
-        await expect(item.locator).toBeVisible();
+        await expect(item.locator).toHaveCount(1);
       }
     }
   });

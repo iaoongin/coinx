@@ -65,6 +65,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: var(--font-sans);
   font-size: 15px;
@@ -109,6 +113,11 @@ body::after {
 }
 
 /* ==================== 容器 ==================== */
+.page-frame {
+  width: min(var(--page-max-width), 100%);
+  margin: 0 auto;
+}
+
 .container {
   max-width: var(--page-max-width);
   margin: 0 auto;
@@ -122,6 +131,8 @@ body::after {
 
 /* ==================== 导航栏 ==================== */
 .nav-container {
+  position: relative;
+  z-index: 100;
   background: var(--bg-card);
   border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
@@ -145,6 +156,82 @@ body::after {
   min-height: var(--nav-height);
   margin-left: auto;
   flex: 0 0 auto;
+}
+
+.nav-menu {
+  position: relative;
+  height: var(--nav-height);
+}
+
+.nav-menu-trigger {
+  display: flex;
+  align-items: center;
+  height: var(--nav-height);
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.nav-menu-trigger::after {
+  content: '⌄';
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.nav-menu-trigger:hover,
+.nav-menu-trigger.active {
+  color: var(--gold-primary);
+}
+
+.nav-menu-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% - 4px);
+  left: 0;
+  display: none;
+  min-width: 132px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  box-shadow: var(--shadow-elevated);
+}
+
+.nav-menu:hover .nav-menu-list,
+.nav-menu:focus-within .nav-menu-list {
+  display: grid;
+}
+
+.nav-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.nav-menu-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.nav-menu-item.active {
+  color: var(--gold-primary);
+}
+
+@media (min-width: 769px) {
+  .nav-container {
+    overflow: visible;
+  }
 }
 
 .brand-lockup {
@@ -206,13 +293,6 @@ body::after {
 .nav-item.active {
   color: var(--gold-primary);
   border-bottom-color: var(--gold-primary);
-}
-
-.nav-icon {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--gold-primary);
-  letter-spacing: 0.08em;
 }
 
 /* ==================== 标题 ==================== */
@@ -877,6 +957,11 @@ textarea:focus {
     display: none;
   }
 
+  .nav-menu-trigger {
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
   h1 {
     font-size: 20px;
   }
@@ -899,5 +984,9 @@ textarea:focus {
   .nav-item {
     padding: 0 12px;
     font-size: 13px;
+  }
+
+  .nav-menu-trigger {
+    padding: 0 10px;
   }
 }

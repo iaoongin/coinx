@@ -13,33 +13,45 @@
     </span>
   </a>
 
-  <div class="nav">
+  <nav class="nav" aria-label="主导航">
     <a class="nav-item{% if request.path == '/' %} active{% endif %}" href="/"{% if request.path == '/' %} aria-current="page"{% endif %}>
       首页
     </a>
-    <a class="nav-item{% if request.path.startswith('/legacy-home') %} active{% endif %}" href="/legacy-home"{% if request.path.startswith('/legacy-home') %} aria-current="page"{% endif %}>
-      旧首页
-    </a>
-    <a class="nav-item{% if request.path.startswith('/market-rank') %} active{% endif %}" href="/market-rank"{% if request.path.startswith('/market-rank') %} aria-current="page"{% endif %}>
-      行情榜
-    </a>
-    <a class="nav-item{% if request.path.startswith('/market-structure-score') %} active{% endif %}" href="/market-structure-score"{% if request.path.startswith('/market-structure-score') %} aria-current="page"{% endif %}>
-      <span class="nav-icon">◎</span> 结构评分
-    </a>
-    <a class="nav-item{% if request.path.startswith('/coin-detail') %} active{% endif %}" href="/coin-detail"{% if request.path.startswith('/coin-detail') %} aria-current="page"{% endif %}>
-      合约详情
-    </a>
-    <a class="nav-item{% if request.path.startswith('/hedge-calculator') %} active{% endif %}" href="/hedge-calculator"{% if request.path.startswith('/hedge-calculator') %} aria-current="page"{% endif %}>
-      对冲计算器
-    </a>
-    <a class="nav-item{% if request.path.startswith('/coins-config') %} active{% endif %}" href="/coins-config"{% if request.path.startswith('/coins-config') %} aria-current="page"{% endif %}>
-      币种配置
-    </a>
-    <a class="nav-item{% if request.path.startswith('/task-jobs') %} active{% endif %}" href="/task-jobs"{% if request.path.startswith('/task-jobs') %} aria-current="page"{% endif %}>
-       任务管理
-    </a>
-    <a class="nav-item{% if request.path.startswith('/funding-rate') %} active{% endif %}" href="/funding-rate"{% if request.path.startswith('/funding-rate') %} aria-current="page"{% endif %}>
-       资金费率
-    </a>
-  </div>
+
+    <div class="nav-menu">
+      <button class="nav-menu-trigger{% if request.path.startswith('/legacy-home') or request.path.startswith('/market-rank') or request.path.startswith('/funding-rate') %} active{% endif %}" type="button" aria-haspopup="true">市场</button>
+      <div class="nav-menu-list" aria-label="市场">
+        <a class="nav-menu-item{% if request.path.startswith('/market-rank') %} active{% endif %}" href="/market-rank"{% if request.path.startswith('/market-rank') %} aria-current="page"{% endif %}>行情榜</a>
+        <a class="nav-menu-item{% if request.path.startswith('/funding-rate') %} active{% endif %}" href="/funding-rate"{% if request.path.startswith('/funding-rate') %} aria-current="page"{% endif %}>资金费率</a>
+        <a class="nav-menu-item{% if request.path.startswith('/legacy-home') %} active{% endif %}" href="/legacy-home"{% if request.path.startswith('/legacy-home') %} aria-current="page"{% endif %}>旧首页</a>
+      </div>
+    </div>
+
+    <div class="nav-menu">
+      <button class="nav-menu-trigger{% if request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') %} active{% endif %}" type="button" aria-haspopup="true">分析</button>
+      <div class="nav-menu-list" aria-label="分析">
+      <a class="nav-menu-item{% if request.path.startswith('/market-structure-score') %} active{% endif %}" href="/market-structure-score"{% if request.path.startswith('/market-structure-score') %} aria-current="page"{% endif %}>
+        结构评分
+      </a>
+      <a class="nav-menu-item{% if request.path.startswith('/coin-detail') %} active{% endif %}" href="/coin-detail"{% if request.path.startswith('/coin-detail') %} aria-current="page"{% endif %}>
+        合约详情
+      </a>
+      <a class="nav-menu-item{% if request.path.startswith('/hedge-calculator') %} active{% endif %}" href="/hedge-calculator"{% if request.path.startswith('/hedge-calculator') %} aria-current="page"{% endif %}>
+        对冲计算器
+      </a>
+      </div>
+    </div>
+
+    <div class="nav-menu">
+      <button class="nav-menu-trigger{% if request.path.startswith('/coins-config') or request.path.startswith('/task-jobs') %} active{% endif %}" type="button" aria-haspopup="true">管理</button>
+      <div class="nav-menu-list" aria-label="管理">
+      <a class="nav-menu-item{% if request.path.startswith('/coins-config') %} active{% endif %}" href="/coins-config"{% if request.path.startswith('/coins-config') %} aria-current="page"{% endif %}>
+        币种配置
+      </a>
+      <a class="nav-menu-item{% if request.path.startswith('/task-jobs') %} active{% endif %}" href="/task-jobs"{% if request.path.startswith('/task-jobs') %} aria-current="page"{% endif %}>
+        任务管理
+      </a>
+      </div>
+    </div>
+  </nav>
 </div>
