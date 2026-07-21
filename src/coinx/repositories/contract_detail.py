@@ -25,6 +25,12 @@ def _load_optional(loader, symbols, label):
         return None
 
 
+def _difference(current, previous):
+    if current is None or previous is None:
+        return None
+    return float(current) - float(previous)
+
+
 def _build_intervals(homepage):
     changes = homepage.get('changes') or {}
     net_inflow = homepage.get('net_inflow') or {}
@@ -35,8 +41,11 @@ def _build_intervals(homepage):
         change = changes.get(interval) or {}
         rows.append({
             'interval': interval,
+            'price_change': change.get('price_change'),
             'price_change_percent': change.get('price_change_percent'),
+            'open_interest_change': _difference(homepage.get('current_open_interest'), change.get('open_interest')),
             'open_interest_change_percent': change.get('ratio'),
+            'open_interest_value_change': _difference(homepage.get('current_open_interest_value'), change.get('open_interest_value')),
             'open_interest_value_change_percent': change.get('value_ratio'),
             'net_inflow': net_inflow.get(interval),
             'net_inflow_value': net_inflow_value.get(interval),

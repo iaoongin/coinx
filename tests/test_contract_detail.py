@@ -39,8 +39,8 @@ def _homepage_snapshot(status='complete'):
             'net_inflow_value': {'5m': 690000.0, '1h': 6900000.0},
             'net_inflow_value_formatted': {'5m': '$690.00K', '1h': '$6.90M'},
             'changes': {
-                '5m': {'ratio': 1.0, 'value_ratio': 1.5, 'price_change_percent': 0.5},
-                '1h': {'ratio': 4.0, 'value_ratio': 6.0, 'price_change_percent': 2.0},
+                '5m': {'ratio': 1.0, 'value_ratio': 1.5, 'open_interest': 990.0, 'open_interest_value': 67965000.0, 'price_change': 100.0, 'price_change_percent': 0.5},
+                '1h': {'ratio': 4.0, 'value_ratio': 6.0, 'open_interest': 960.0, 'open_interest_value': 65000000.0, 'price_change': 1200.0, 'price_change_percent': 2.0},
             },
         }],
     }
@@ -59,6 +59,9 @@ def test_contract_detail_combines_existing_snapshots():
     assert result['summary']['quote_volume_24h'] is None
     assert result['intervals'][3]['interval'] == '1h'
     assert result['intervals'][3]['net_inflow_value'] == 6900000.0
+    assert result['intervals'][3]['price_change'] == 1200.0
+    assert result['intervals'][3]['open_interest_change'] == 40.0
+    assert result['intervals'][3]['open_interest_value_change'] == 4000000.0
     assert result['exchange_distribution'][0]['exchange'] == 'binance'
 
 

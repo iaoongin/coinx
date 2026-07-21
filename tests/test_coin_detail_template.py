@@ -44,6 +44,9 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'scoreComponents' in template
     assert 'chartCompact' in template
     assert 'chartMoney' in template
+    assert 'formatSignedPrice(row.price_change)' in template
+    assert 'formatSignedCompact(row.open_interest_change)' in template
+    assert "formatSignedCompact(row.open_interest_value_change, '$')" in template
     assert '.chart { height: 360px; width: 100%; }' in template
     assert 'tooltip:{valueFormatter:value=>chartMoney(value)}' in template
     assert 'tooltip:{valueFormatter:value=>chartCompact(value)}' in template
@@ -61,6 +64,13 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'grid: { left: 12, right: 12, top: 34, bottom: 68, containLabel: true }' in template
     assert "legend: { bottom: 4" in template
     assert 'const disposeCharts' in template
+    assert 'class="btn section-refresh"' in template
+    assert '@click="loadStructureScore" :disabled="scoreLoading"' in template
+    assert '@click="loadSeries" :disabled="seriesLoading"' in template
+    assert "axisPointer: { type: 'cross' }" in template
+    assert 'const syncChartPointers' in template
+    assert 'chartSyncGroup = echarts.connect(charts)' in template
+    assert 'echarts.disconnect(chartSyncGroup)' in template
     assert 'el.clientWidth === 0' in template
     assert 'detail.value = result.data; recordRecentSymbol(requestedSymbol); await nextTick(); renderCharts();' in template
     assert 'v-if="loading && !detail"' not in template
