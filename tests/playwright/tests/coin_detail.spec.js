@@ -19,6 +19,20 @@ test.describe('币种详情测试', () => {
     await expect(button(page, '返回')).toBeVisible();
   });
 
+  test('多周期变化沿用首页矩阵列序', async ({ page }) => {
+    await visit(page, '/coin-detail?symbol=BTCUSDT');
+    const matrix = page.locator('.period-matrix');
+    await expect(matrix).toBeVisible();
+    await expect(matrix).toContainText('窗口');
+    await expect(matrix).toContainText('净流入');
+    await expect(matrix).toContainText('价格');
+    await expect(matrix).toContainText('价格%');
+    await expect(matrix).toContainText('量');
+    await expect(matrix).toContainText('量%');
+    await expect(matrix).toContainText('价值');
+    await expect(matrix).toContainText('价值%');
+  });
+
   test('可通过搜索下拉框切换合约并记录最近浏览', async ({ page }) => {
     await visit(page, '/coin-detail?symbol=BTCUSDT');
     await page.getByRole('button', { name: '搜索并切换合约' }).click();

@@ -31,6 +31,21 @@ def _difference(current, previous):
     return float(current) - float(previous)
 
 
+def _build_exchange_distribution(homepage):
+    """Expose all current exchange snapshots with detail-only share weights."""
+    rows = [dict(item) for item in (homepage.get('exchange_statuses') or homepage.get('exchange_open_interest') or [])]
+    values = [float(item['open_interest_value']) for item in rows if item.get('open_interest_value') is not None]
+    total_value = sum(values)
+    for item in rows:
+        value = item.get('open_interest_value')
+        item['snapshot_share_percent'] = (
+            float(value) / total_value * 100
+            if value is not None and total_value > 0
+            else None
+        )
+    return rows
+
+
 def _build_intervals(homepage):
     changes = homepage.get('changes') or {}
     net_inflow = homepage.get('net_inflow') or {}
@@ -41,10 +56,16 @@ def _build_intervals(homepage):
         change = changes.get(interval) or {}
         rows.append({
             'interval': interval,
+            'current_price': change.get('current_price'),
+            'current_price_formatted': change.get('current_price_formatted'),
             'price_change': change.get('price_change'),
             'price_change_percent': change.get('price_change_percent'),
+            'open_interest': change.get('open_interest'),
+            'open_interest_formatted': change.get('open_interest_formatted'),
             'open_interest_change': _difference(homepage.get('current_open_interest'), change.get('open_interest')),
             'open_interest_change_percent': change.get('ratio'),
+            'open_interest_value': change.get('open_interest_value'),
+            'open_interest_value_formatted': change.get('open_interest_value_formatted'),
             'open_interest_value_change': _difference(homepage.get('current_open_interest_value'), change.get('open_interest_value')),
             'open_interest_value_change_percent': change.get('value_ratio'),
             'net_inflow': net_inflow.get(interval),
@@ -99,7 +120,7 @@ def get_contract_detail(
             'mark_price': funding.get('mark_price'),
         },
         'intervals': _build_intervals(homepage),
-        'exchange_distribution': homepage.get('exchange_open_interest') or [],
+        'exchange_distribution': _build_exchange_distribution(homepage),
     }
 
 
