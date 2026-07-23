@@ -19,6 +19,10 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'structureScore.value?.total_score' in template
     assert 'detail.data_status' in template
     assert '当前合约状态：[[ statusText ]]' in template
+    assert '缺少：[[ missingExchangeDetails ]]' in template
+    assert 'const missingExchangeDetails = computed' in template
+    assert "unsupported_symbol: '不支持该合约'" in template
+    assert "missing_open_interest_history: '缺少持仓历史'" in template
     assert '<span v-if="detail" class="status"' not in template
     assert 'coinx.contract-detail.recent' in template
     assert 'loadSymbolOptions' in template
@@ -44,9 +48,9 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'scoreComponents' in template
     assert 'chartCompact' in template
     assert 'chartMoney' in template
-    assert 'formatSignedPrice(row.price_change)' in template
-    assert 'formatSignedCompact(row.open_interest_change)' in template
-    assert "formatSignedCompact(row.open_interest_value_change, '$')" in template
+    assert 'formatPercent(row.price_change_percent)' in template
+    assert 'formatPercent(row.open_interest_change_percent)' in template
+    assert 'formatPercent(row.open_interest_value_change_percent)' in template
     assert '.chart { height: 360px; width: 100%; }' in template
     assert 'tooltip:{valueFormatter:value=>chartMoney(value)}' in template
     assert 'tooltip:{valueFormatter:value=>chartCompact(value)}' in template
@@ -76,3 +80,14 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'v-if="loading && !detail"' not in template
     assert '历史趋势' in template
     assert '正在加载摘要...' in template
+    assert 'class="period-matrix"' in template
+    assert '<div class="period-cell period-head">净流入</div>' in template
+    assert '<div class="period-cell period-head">价格</div>' in template
+    assert '<div class="period-cell period-head">量</div>' in template
+    assert '<div class="period-cell period-head">价值</div>' in template
+    assert 'row.current_price_formatted' in template
+    assert 'row.open_interest_formatted' in template
+    assert 'row.open_interest_value_formatted' in template
+    assert 'item.snapshot_share_percent' in template
+    assert 'class="metric-sub exchange-sub"' in template
+    assert 'class="exchange-warning">多周期未纳入</span>' in template
