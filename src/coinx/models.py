@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
 )
 
@@ -200,3 +201,89 @@ class MarketFundingRate(Base):
 
     def __repr__(self):
         return f"<MarketFundingRate(symbol='{self.symbol}', predicted_rate={self.predicted_rate})>"
+
+
+class NotificationChannel(Base):
+    __tablename__ = 'notification_channels'
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    channel_type = Column(String(30), nullable=False, default='apprise')
+    enabled = Column(Boolean, nullable=False, default=True)
+    config_encrypted = Column(Text, nullable=False)
+    key_version = Column(String(30), nullable=False, default='v1')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AlertRule(Base):
+    __tablename__ = 'alert_rules'
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False, unique=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    scope_type = Column(String(40), nullable=False)
+    scope_json = Column(JSON, nullable=False, default=dict)
+    params_json = Column(JSON, nullable=False, default=dict)
+    cooldown_seconds = Column(Integer, nullable=False, default=1800)
+    recovery_enabled = Column(Boolean, nullable=False, default=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AlertRuleChannel(Base):
+    __tablename__ = 'alert_rule_channels'
+    __table_args__ = (UniqueConstraint('rule_id', 'channel_id', name='uk_alert_rule_channel'),)
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    rule_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
+    channel_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class AlertState(Base):
+    __tablename__ = 'alert_states'
+    __table_args__ = (UniqueConstraint('rule_id', 'subject_key', 'dimension_key', name='uk_alert_state'),)
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    rule_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
+    subject_key = Column(String(80), nullable=False)
+    dimension_key = Column(String(80), nullable=False)
+    state = Column(String(20), nullable=False, default='normal')
+    consecutive_matches = Column(Integer, nullable=False, default=0)
+    last_value_json = Column(JSON)
+    last_triggered_at = Column(BigInteger)
+    last_notified_at = Column(BigInteger)
+    last_recovered_at = Column(BigInteger)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = 'notification_deliveries'
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    rule_id = Column(SQLITE_BIGINT_PK, nullable=True, index=True)
+    channel_id = Column(SQLITE_BIGINT_PK, nullable=True, index=True)
+    event_key = Column(String(255), nullable=False, index=True)
+    event_status = Column(String(20), nullable=False)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    delivery_status = Column(String(20), nullable=False)
+    response_code = Column(Integer)
+    error_message = Column(String(500))
+    sent_at = Column(BigInteger, nullable=False, index=True)
+
+
+class AlertEvaluationRun(Base):
+    __tablename__ = 'alert_evaluation_runs'
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    rule_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
+    trigger_source = Column(String(20), nullable=False, default='manual')
+    status = Column(String(20), nullable=False, default='running')
+    checked_count = Column(Integer, nullable=False, default=0)
+    matched_count = Column(Integer, nullable=False, default=0)
+    sent_count = Column(Integer, nullable=False, default=0)
+    error_message = Column(String(500))
+    started_at = Column(BigInteger, nullable=False, index=True)
+    completed_at = Column(BigInteger)

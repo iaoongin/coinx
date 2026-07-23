@@ -134,3 +134,88 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
     UNIQUE KEY uk_symbol_period_time (symbol, period, event_time),
     INDEX idx_symbol_time (symbol, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资金费率历史';
+
+-- 通知渠道：Apprise URL 仅保存为应用层 Fernet 密文。
+CREATE TABLE IF NOT EXISTS notification_channels (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    channel_type VARCHAR(30) NOT NULL DEFAULT 'apprise',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    config_encrypted TEXT NOT NULL,
+    key_version VARCHAR(30) NOT NULL DEFAULT 'v1',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='加密通知渠道配置';
+
+CREATE TABLE IF NOT EXISTS alert_rules (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL UNIQUE,
+    event_type VARCHAR(80) NOT NULL,
+    scope_type VARCHAR(40) NOT NULL,
+    scope_json JSON NOT NULL,
+    params_json JSON NOT NULL,
+    cooldown_seconds INT NOT NULL DEFAULT 1800,
+    recovery_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_alert_rules_event_type (event_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警规则';
+
+CREATE TABLE IF NOT EXISTS alert_rule_channels (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_alert_rule_channel (rule_id, channel_id),
+    KEY idx_alert_rule_channels_rule (rule_id),
+    KEY idx_alert_rule_channels_channel (channel_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='规则与渠道关联';
+
+CREATE TABLE IF NOT EXISTS alert_states (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT NOT NULL,
+    subject_key VARCHAR(80) NOT NULL,
+    dimension_key VARCHAR(80) NOT NULL,
+    state VARCHAR(20) NOT NULL DEFAULT 'normal',
+    consecutive_matches INT NOT NULL DEFAULT 0,
+    last_value_json JSON,
+    last_triggered_at BIGINT,
+    last_notified_at BIGINT,
+    last_recovered_at BIGINT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_alert_state (rule_id, subject_key, dimension_key),
+    KEY idx_alert_states_rule (rule_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警状态与去重';
+
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT NULL,
+    channel_id BIGINT NULL,
+    event_key VARCHAR(255) NOT NULL,
+    event_status VARCHAR(20) NOT NULL,
+    payload_json JSON NOT NULL,
+    delivery_status VARCHAR(20) NOT NULL,
+    response_code INT NULL,
+    error_message VARCHAR(500) NULL,
+    sent_at BIGINT NOT NULL,
+    KEY idx_notification_deliveries_rule (rule_id),
+    KEY idx_notification_deliveries_channel (channel_id),
+    KEY idx_notification_deliveries_event_key (event_key),
+    KEY idx_notification_deliveries_sent_at (sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知发送记录';
+
+CREATE TABLE IF NOT EXISTS alert_evaluation_runs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT NOT NULL,
+    trigger_source VARCHAR(20) NOT NULL DEFAULT 'manual',
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    checked_count INT NOT NULL DEFAULT 0,
+    matched_count INT NOT NULL DEFAULT 0,
+    sent_count INT NOT NULL DEFAULT 0,
+    error_message VARCHAR(500) NULL,
+    started_at BIGINT NOT NULL,
+    completed_at BIGINT NULL,
+    KEY idx_alert_evaluation_runs_rule (rule_id),
+    KEY idx_alert_evaluation_runs_started_at (started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警规则评估记录';

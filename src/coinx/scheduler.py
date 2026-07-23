@@ -71,7 +71,7 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
     duration_ms = None
     if started_at is not None:
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-    return _update_job_metadata(
+    metadata = _update_job_metadata(
         job_id,
         running=False,
         last_finished_at_ms=finished_at_ms,
@@ -80,6 +80,25 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         last_summary=summary,
         last_error=str(error) if error else None,
     )
+    try:
+        from .notifications import evaluate_job_failure_rules
+        evaluate_job_failure_rules(get_all_job_runtime_metadata())
+    except Exception:
+        logger.exception('任务失败通知评估异常: job_id=%s', job_id)
+    return metadata
+
+
+def _evaluate_market_notifications(event_type):
+    try:
+        if event_type == 'funding_rate':
+            from .notifications import evaluate_funding_rate_rules
+            return evaluate_funding_rate_rules()
+        if event_type == 'price_volume':
+            from .notifications import evaluate_price_volume_rules
+            return evaluate_price_volume_rules()
+    except Exception:
+        logger.exception('市场通知评估异常: event_type=%s', event_type)
+    return None
 
 
 def get_job_runtime_metadata(job_id):
@@ -223,6 +242,7 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
             )
             summary = _merge_repair_summaries([tracked_summary, top_summary])
             _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
+            _evaluate_market_notifications('price_volume')
             precheck_complete = summary.get('precheck_skipped_count', 0)
             task_total = (
                 (summary.get('success_count', 0) or 0)
@@ -362,6 +382,7 @@ if FUNDING_RATE_COLLECT_ENABLED:
                 summary={'status': 'success', 'count': count},
                 started_at=started_at,
             )
+            _evaluate_market_notifications('funding_rate')
             logger.info('资金费率采集完成: 记录=%d', count)
         except Exception as e:
             _mark_job_finished('collect_funding_rates_job', status='error', error=e, started_at=started_at)

@@ -79,31 +79,33 @@ def save_funding_rates(records, session=None):
             db.close()
 
 
-def load_latest_funding_rates(symbols, session=None):
+def load_latest_funding_rates(symbols=None, session=None):
     """
     加载指定币种的最新资金费率（批量查询优化）
 
     Args:
-        symbols: 交易对列表
+        symbols: 交易对列表；None 时加载全部币种
         session: 数据库 session（可选）
 
     Returns:
         dict: {symbol: {predicted_rate, funding_rate, next_funding_time, mark_price}}
     """
-    if not symbols:
+    if symbols == []:
         return {}
 
     own_session = session is None
     db = session or get_session()
 
     try:
-        subquery = db.query(
+        latest_query = db.query(
             MarketFundingRate.symbol,
             func.max(MarketFundingRate.event_time).label('max_time')
         ).filter(
-            MarketFundingRate.symbol.in_(symbols),
             MarketFundingRate.period == '5m',
-        ).group_by(MarketFundingRate.symbol).subquery()
+        )
+        if symbols is not None:
+            latest_query = latest_query.filter(MarketFundingRate.symbol.in_(symbols))
+        subquery = latest_query.group_by(MarketFundingRate.symbol).subquery()
 
         records = db.query(
             MarketFundingRate.symbol,

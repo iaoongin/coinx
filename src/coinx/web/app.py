@@ -25,6 +25,7 @@ try:
     from coinx.web.routes.api_data import api_data_bp
     from coinx.web.routes.api_config import api_config_bp
     from coinx.web.routes.api_funding_rate import api_funding_rate_bp
+    from coinx.web.routes.api_notifications import api_notifications_bp
 except ImportError:
     # 如果在当前目录运行，可能需要使用相对导入路径
     from routes.auth import auth_bp
@@ -32,6 +33,7 @@ except ImportError:
     from routes.api_data import api_data_bp
     from routes.api_config import api_config_bp
     from routes.api_funding_rate import api_funding_rate_bp
+    from routes.api_notifications import api_notifications_bp
 
 
 def create_app():
@@ -50,6 +52,7 @@ def create_app():
     app.register_blueprint(api_data_bp)
     app.register_blueprint(api_config_bp)
     app.register_blueprint(api_funding_rate_bp)
+    app.register_blueprint(api_notifications_bp)
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):
@@ -71,6 +74,9 @@ def create_app():
     def log_request_info():
         logger.debug('请求: %s %s', request.method, request.url)
         if request.data:
+            if request.path.startswith('/api/notification-channels'):
+                logger.debug('请求数据: [REDACTED]')
+                return None
             try:
                 json_data = request.get_json(force=True, silent=True)
                 if json_data:

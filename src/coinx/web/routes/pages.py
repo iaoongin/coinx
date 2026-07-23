@@ -71,3 +71,10 @@ def task_jobs():
     """任务管理页面"""
     logger.info("访问任务管理页面")
     return render_template('task_jobs.html')
+
+
+@pages_bp.route('/notification-management')
+def notification_management():
+    """告警与通知管理页面。"""
+    logger.info('访问告警管理页面')
+    return render_template('notification_management.html')

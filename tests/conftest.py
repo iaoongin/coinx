@@ -14,11 +14,17 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from coinx.database import Base
 from coinx.models import (
+    AlertEvaluationRun,
+    AlertRule,
+    AlertRuleChannel,
+    AlertState,
     MarketFundingRate,
     MarketKline,
     MarketOpenInterestHist,
     MarketTickers,
     MarketTakerBuySellVol,
+    NotificationChannel,
+    NotificationDelivery,
 )
 
 TEST_TABLES = [
@@ -27,6 +33,12 @@ TEST_TABLES = [
     MarketKline.__table__,
     MarketTakerBuySellVol.__table__,
     MarketTickers.__table__,
+    NotificationChannel.__table__,
+    AlertRule.__table__,
+    AlertRuleChannel.__table__,
+    AlertState.__table__,
+    NotificationDelivery.__table__,
+    AlertEvaluationRun.__table__,
 ]
 
 

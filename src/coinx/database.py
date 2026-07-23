@@ -8,6 +8,7 @@ engine = create_engine(
     pool_recycle=3600, 
     pool_size=10, 
     max_overflow=20,
+    pool_pre_ping=True,
     echo=False  # 设置为True可以查看生成的SQL语句
 )
 
