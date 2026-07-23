@@ -2,7 +2,10 @@ from flask import Blueprint, jsonify, request
 
 from coinx import config
 from coinx.database import get_session
-from coinx.models import AlertEvaluationRun, AlertRule, AlertRuleChannel, AlertState, NotificationChannel, NotificationDelivery
+from coinx.models import (
+    AlertEvaluationMetric, AlertEvaluationRun, AlertRule, AlertRuleChannel,
+    AlertState, NotificationChannel, NotificationDelivery,
+)
 from coinx.notifications import (
     NotificationConfigError,
     decrypt_apprise_url,
@@ -26,6 +29,11 @@ MANUAL_EVALUATION_TIMEOUT_MS = 2 * 60 * 1000
 
 def _error(message, status=400):
     return jsonify({'status': 'error', 'message': message}), status
+
+
+def _ensure_evaluation_metrics_table(db):
+    """Create the additive timing table for deployments with an older schema."""
+    AlertEvaluationMetric.__table__.create(bind=db.get_bind(), checkfirst=True)
 
 
 def _finalize_stale_manual_evaluations(db):
@@ -211,6 +219,12 @@ def update_alert_rule(rule_id):
         rule = db.get(AlertRule, rule_id)
         if not rule:
             return _error('rule not found', 404)
+        previous_evaluation_signature = (
+            rule.event_type,
+            rule.scope_type,
+            rule.scope_json or {},
+            rule.params_json or {},
+        )
         data = request.get_json(silent=True) or {}
         merged = serialize_rule(rule, get_rule_channel_ids(db, rule.id))
         merged.update(data)
@@ -223,8 +237,20 @@ def update_alert_rule(rule_id):
         if merged['name'] != rule.name and db.query(AlertRule).filter(AlertRule.name == merged['name']).first():
             return _error('rule name already exists', 409)
         _save_rule(db, rule, merged)
+        state_reset = previous_evaluation_signature != (
+            rule.event_type,
+            rule.scope_type,
+            rule.scope_json or {},
+            rule.params_json or {},
+        )
+        if state_reset:
+            db.query(AlertState).filter(AlertState.rule_id == rule.id).delete(synchronize_session=False)
         db.commit()
-        return jsonify({'status': 'success', 'data': serialize_rule(rule, get_rule_channel_ids(db, rule.id))})
+        return jsonify({
+            'status': 'success',
+            'data': serialize_rule(rule, get_rule_channel_ids(db, rule.id)),
+            'meta': {'state_reset': state_reset},
+        })
     except NotificationConfigError as exc:
         db.rollback()
         return _error(str(exc))
@@ -240,6 +266,18 @@ def _pagination_args():
 def _rule_or_404(db, rule_id):
     rule = db.get(AlertRule, rule_id)
     return rule
+
+
+def _delivery_item(row):
+    payload = row.payload_json or {}
+    return {
+        'id': row.id,
+        'event_status': row.event_status,
+        'delivery_status': row.delivery_status,
+        'error_message': row.error_message,
+        'sent_at': row.sent_at,
+        'message': payload.get('message'),
+    }
 
 
 @api_notifications_bp.route('/api/alert-rules/<int:rule_id>/states', methods=['GET'])
@@ -262,7 +300,7 @@ def list_rule_evaluation_runs(rule_id):
         if not _rule_or_404(db, rule_id): return _error('rule not found', 404)
         _finalize_stale_manual_evaluations(db); limit, offset = _pagination_args()
         query = db.query(AlertEvaluationRun).filter(AlertEvaluationRun.rule_id == rule_id); total=query.count(); rows=query.order_by(AlertEvaluationRun.started_at.desc()).offset(offset).limit(limit).all()
-        return jsonify({'status':'success','data':{'items':[{'id':r.id,'status':r.status,'checked_count':r.checked_count,'matched_count':r.matched_count,'sent_count':r.sent_count,'error_message':r.error_message,'started_at':r.started_at,'completed_at':r.completed_at} for r in rows],'total':total,'limit':limit,'offset':offset}})
+        return jsonify({'status':'success','data':{'items':[{'id':r.id,'rule_id':r.rule_id,'status':r.status,'checked_count':r.checked_count,'matched_count':r.matched_count,'sent_count':r.sent_count,'error_message':r.error_message,'started_at':r.started_at,'completed_at':r.completed_at,'duration_ms':(r.completed_at-r.started_at) if r.completed_at else None} for r in rows],'total':total,'limit':limit,'offset':offset}})
     finally: db.close()
 
 
@@ -272,7 +310,7 @@ def list_rule_deliveries(rule_id):
     try:
         if not _rule_or_404(db, rule_id): return _error('rule not found', 404)
         limit, offset = _pagination_args(); query=db.query(NotificationDelivery).filter(NotificationDelivery.rule_id == rule_id); total=query.count(); rows=query.order_by(NotificationDelivery.sent_at.desc()).offset(offset).limit(limit).all()
-        return jsonify({'status':'success','data':{'items':[{'id':r.id,'event_status':r.event_status,'delivery_status':r.delivery_status,'error_message':r.error_message,'sent_at':r.sent_at} for r in rows],'total':total,'limit':limit,'offset':offset}})
+        return jsonify({'status':'success','data':{'items':[_delivery_item(row) for row in rows],'total':total,'limit':limit,'offset':offset}})
     finally: db.close()
 
 
@@ -298,6 +336,7 @@ def evaluate_alert_rule(rule_id):
     db = get_session()
     run = None
     try:
+        _ensure_evaluation_metrics_table(db)
         rule = db.get(AlertRule, rule_id)
         if not rule:
             return _error('rule not found', 404)
@@ -313,6 +352,9 @@ def evaluate_alert_rule(rule_id):
         run.sent_count = result.get('sent', 0)
         run.error_message = result.get('error')
         run.completed_at = now_ms()
+        metrics = result.get('metrics') or {}
+        if metrics:
+            db.add(AlertEvaluationMetric(run_id=run.id, metrics_json=metrics))
         db.commit()
         result['run_id'] = run.id
         code = 200 if result['status'] in {'success', 'disabled'} else 500
@@ -339,10 +381,10 @@ def list_notification_deliveries():
         limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
         rows = db.query(NotificationDelivery).order_by(NotificationDelivery.sent_at.desc()).limit(limit).all()
         return jsonify({'status': 'success', 'data': [{
-            'id': row.id, 'rule_id': row.rule_id, 'channel_id': row.channel_id,
-            'event_key': row.event_key, 'event_status': row.event_status,
-            'delivery_status': row.delivery_status, 'error_message': row.error_message,
-            'sent_at': row.sent_at,
+            **_delivery_item(row),
+            'rule_id': row.rule_id,
+            'channel_id': row.channel_id,
+            'event_key': row.event_key,
         } for row in rows]})
     finally:
         db.close()
@@ -361,6 +403,7 @@ def list_alert_evaluation_runs():
             'matched_count': row.matched_count, 'sent_count': row.sent_count,
             'error_message': row.error_message, 'started_at': row.started_at,
             'completed_at': row.completed_at,
+            'duration_ms': (row.completed_at - row.started_at) if row.completed_at else None,
         } for row in rows]})
     finally:
         db.close()
@@ -370,6 +413,7 @@ def list_alert_evaluation_runs():
 def get_alert_evaluation_run_logs(run_id):
     db = get_session()
     try:
+        _ensure_evaluation_metrics_table(db)
         _finalize_stale_manual_evaluations(db)
         run = db.get(AlertEvaluationRun, run_id)
         if not run:
@@ -395,6 +439,22 @@ def get_alert_evaluation_run_logs(run_id):
                 'level': 'warning',
                 'message': 'evaluation is still running',
             })
+        metric = db.query(AlertEvaluationMetric).filter(
+            AlertEvaluationMetric.run_id == run.id,
+        ).one_or_none()
+        if metric:
+            metrics = metric.metrics_json or {}
+            stages = metrics.get('stage_ms') or {}
+            total = metrics.get('duration_ms')
+            stage_text = ', '.join(f'{name}={value:.0f}ms' for name, value in stages.items())
+            logs.append({
+                'timestamp': run.completed_at or now_ms(),
+                'level': 'info',
+                'message': (
+                    f'evaluation timing: total={total:.0f}ms'
+                    + (f'; {stage_text}' if stage_text else '')
+                ),
+            })
         deliveries = db.query(NotificationDelivery).filter(
             NotificationDelivery.rule_id == run.rule_id,
             NotificationDelivery.sent_at >= run.started_at,
@@ -409,6 +469,7 @@ def get_alert_evaluation_run_logs(run_id):
                     + (f' ({delivery.error_message})' if delivery.error_message else '')
                 ),
             })
+        logs.sort(key=lambda item: item['timestamp'], reverse=True)
         return jsonify({'status': 'success', 'data': {'run_id': run.id, 'logs': logs}})
     finally:
         db.close()

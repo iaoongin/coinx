@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from coinx.database import Base
 from coinx.models import (
     AlertEvaluationRun,
+    AlertEvaluationMetric,
     AlertRule,
     AlertRuleChannel,
     AlertState,
@@ -39,6 +40,7 @@ TEST_TABLES = [
     AlertState.__table__,
     NotificationDelivery.__table__,
     AlertEvaluationRun.__table__,
+    AlertEvaluationMetric.__table__,
 ]
 
 

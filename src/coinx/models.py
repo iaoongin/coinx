@@ -287,3 +287,15 @@ class AlertEvaluationRun(Base):
     error_message = Column(String(500))
     started_at = Column(BigInteger, nullable=False, index=True)
     completed_at = Column(BigInteger)
+
+
+class AlertEvaluationMetric(Base):
+    """Persist timing details separately so existing run rows need no migration."""
+
+    __tablename__ = 'alert_evaluation_metrics'
+    __table_args__ = (UniqueConstraint('run_id', name='uk_alert_evaluation_metric_run'),)
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    run_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
+    metrics_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, default=datetime.now)

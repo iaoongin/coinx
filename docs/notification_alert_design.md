@@ -120,7 +120,7 @@ NotificationDelivery（发送记录）
 
 | `event_type` | `params_json` |
 | --- | --- |
-| `market.funding_rate.threshold` | `threshold`、`direction`（`positive` / `negative` / `absolute`） |
+| `market.funding_rate.threshold` | `threshold`、`direction`（`positive` / `negative` / `absolute`）、`recovery_confirmations`（连续低于阈值的恢复确认次数，默认 3） |
 | `market.price_volume.threshold` | `period`（首期固定 `5m`）、`price_change_threshold`、`volume_ratio_threshold`、`direction` |
 | `system.job.failure` | `job_ids`、`consecutive_failures`（默认 1） |
 
@@ -308,6 +308,13 @@ NOTIFICATION_ENCRYPTION_KEY=
 
 ## 10. 测试计划
 
+### 10.0 批量评估与并发控制
+
+- `market.price_volume.threshold` 对榜单内币种使用一次批量 K 线查询；不得按币种发起 N 次查询。
+- 评估开始时批量初始化并读取 `alert_states`。状态创建使用数据库冲突忽略，保留并发评估已写入的状态。
+- 状态迁移仅使用当前 `state` 条件更新（CAS），不以审计时间、计数或观测值作为并发令牌，也不处理 ABA。条件不匹配时重新读取最新状态并重算，最多重试三次；避免手动评估与定时评估跨状态迁移时产生重复键或重复通知。
+- 手动评估将总耗时和分阶段耗时持久化到 `alert_evaluation_metrics`。评估日志展示 `scope/rate load`、K 线读取、状态读取、判定、投递和提交耗时；评估记录列表展示总耗时。
+
 ### 10.1 测试分层
 
 | 层级 | 范围 | 外部依赖 | 通过标准 |
@@ -397,14 +404,15 @@ NOTIFICATION_ENCRYPTION_KEY=
 ### 13.1 评估与投递
 
 - 通知数据表共六张，除渠道、规则、规则渠道、状态、投递记录外，新增 `alert_evaluation_runs` 保存手动评估的开始/结束时间、检查数、命中数、投递数和错误摘要。
-- 资金费率规则一次评估只发送一条汇总通知；币种状态仍逐个维护，用于后续恢复判断与去重。
+- 三类规则均按“每次评估、每个规则、每个渠道一条”汇总投递；币种或任务状态仍逐个维护，用于后续恢复判断与去重。
+- 更新规则的事件类型、适用范围或阈值等参数时，必须清空该规则的当前状态；参数变更不得生成“恢复正常”通知，下一次评估按新规则重新建立状态。
 - 汇总消息列出触发币种；恢复币种使用 `alert_states.last_value_json` 中的上次 `funding_rate` 展示“之前费率 / 当前费率 / 阈值”，不新增字段。
 - 资金费率汇总投递的 `event_status` 为 `summary`，不再按每个币种分别写入 `triggered` 或 `recovered` 投递记录。
 
 ### 13.2 页面与查询
 
 - 首页仅加载通知渠道和规则摘要；不展示全局状态、全局评估记录或全局投递列表。
-- 规则详情按需加载三个分页页签：状态、评估记录、投递记录。各接口使用 `limit` 和 `offset`，默认每页 50 条。
+- 规则详情按需加载三个分页页签：状态、评估记录、投递记录。各接口使用 `limit` 和 `offset`，页面默认每页 10 条，并按最新记录优先展示。
 - “立即评估”只执行所选规则；`all_market` 仅表示该规则会扫描全部币种。
 
 ### 13.3 补充 API
@@ -419,4 +427,4 @@ NOTIFICATION_ENCRYPTION_KEY=
 
 ### 13.4 测试要求
 
-资金费率规则必须验证一次评估最多生成一条汇总投递；恢复内容必须包含之前费率和当前费率。页面测试必须验证规则详情的按需请求和分页，不再依赖首页全局状态或投递列表。
+三类规则必须验证一次评估最多生成一条汇总投递；恢复内容必须包含之前值和当前值。页面测试必须验证规则详情的按需请求、倒序和分页，不再依赖首页全局状态或投递列表。
