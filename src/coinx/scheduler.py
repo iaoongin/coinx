@@ -81,8 +81,8 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         last_error=str(error) if error else None,
     )
     try:
-        from .notifications import evaluate_job_failure_rules
-        evaluate_job_failure_rules(get_all_job_runtime_metadata())
+        from .notifications import EVENT_JOB_FAILURE, evaluate_scheduled_rules
+        evaluate_scheduled_rules(EVENT_JOB_FAILURE, metadata=get_all_job_runtime_metadata())
     except Exception:
         logger.exception('任务失败通知评估异常: job_id=%s', job_id)
     return metadata
@@ -90,12 +90,17 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
 
 def _evaluate_market_notifications(event_type):
     try:
-        if event_type == 'funding_rate':
-            from .notifications import evaluate_funding_rate_rules
-            return evaluate_funding_rate_rules()
-        if event_type == 'price_volume':
-            from .notifications import evaluate_price_volume_rules
-            return evaluate_price_volume_rules()
+        from .notifications import (
+            EVENT_FUNDING_RATE,
+            EVENT_PRICE_VOLUME,
+            evaluate_scheduled_rules,
+        )
+        event_types = {
+            'funding_rate': EVENT_FUNDING_RATE,
+            'price_volume': EVENT_PRICE_VOLUME,
+        }
+        if event_type in event_types:
+            return evaluate_scheduled_rules(event_types[event_type])
     except Exception:
         logger.exception('市场通知评估异常: event_type=%s', event_type)
     return None

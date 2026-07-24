@@ -14,6 +14,8 @@ from cryptography.fernet import Fernet, InvalidToken
 from coinx import config
 from coinx.database import get_session
 from coinx.models import (
+    AlertEvaluationMetric,
+    AlertEvaluationRun,
     AlertRule,
     AlertRuleChannel,
     AlertState,
@@ -769,3 +771,72 @@ def evaluate_rule(rule, session=None, metadata=None):
     if rule.event_type == EVENT_PRICE_VOLUME:
         return evaluate_price_volume_rules(session=session, rule_id=rule.id)
     return evaluate_job_failure_rules(metadata or {}, session=session, rule_id=rule.id)
+
+
+def evaluate_rule_with_run(rule, trigger_source, session=None, metadata=None):
+    """Evaluate one rule and persist the same observable run for every source."""
+    own_session = session is None
+    db = session or get_session()
+    run = None
+    try:
+        AlertEvaluationMetric.__table__.create(bind=db.get_bind(), checkfirst=True)
+        run = AlertEvaluationRun(
+            rule_id=rule.id,
+            trigger_source=trigger_source,
+            status='running',
+            started_at=now_ms(),
+        )
+        db.add(run)
+        db.commit()
+
+        result = evaluate_rule(rule, session=db, metadata=metadata)
+        run.status = result['status']
+        run.checked_count = result.get('checked', 0)
+        run.matched_count = result.get('matched', 0)
+        run.sent_count = result.get('sent', 0)
+        run.error_message = result.get('error')
+        run.completed_at = now_ms()
+        metrics = result.get('metrics') or {}
+        if metrics:
+            db.add(AlertEvaluationMetric(run_id=run.id, metrics_json=metrics))
+        db.commit()
+        result['run_id'] = run.id
+        return result
+    except Exception as exc:
+        db.rollback()
+        if run is not None:
+            failed_run = db.get(AlertEvaluationRun, run.id)
+            if failed_run:
+                failed_run.status = 'error'
+                failed_run.error_message = str(exc)[:500]
+                failed_run.completed_at = now_ms()
+                db.commit()
+        logger.exception('%s alert evaluation failed: rule=%s', trigger_source, rule.id)
+        return {
+            'status': 'error', 'checked': 0, 'matched': 0, 'sent': 0,
+            'error': 'rule evaluation failed', 'run_id': run.id if run else None,
+        }
+    finally:
+        if own_session:
+            db.close()
+
+
+def evaluate_scheduled_rules(event_type, metadata=None):
+    """Evaluate enabled rules for a scheduler event, recording one run per rule."""
+    db = get_session()
+    try:
+        rules = _enabled_rules(db, event_type)
+        results = [
+            evaluate_rule_with_run(rule, 'scheduled', session=db, metadata=metadata)
+            for rule in rules
+        ]
+        return {
+            'status': 'error' if any(result['status'] == 'error' for result in results) else 'success',
+            'evaluated': len(results),
+            'checked': sum(result.get('checked', 0) for result in results),
+            'matched': sum(result.get('matched', 0) for result in results),
+            'sent': sum(result.get('sent', 0) for result in results),
+            'runs': results,
+        }
+    finally:
+        db.close()

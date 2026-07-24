@@ -7,6 +7,7 @@ import werkzeug
 from coinx import config, notifications
 from coinx.models import (
     AlertEvaluationMetric,
+    AlertEvaluationRun,
     AlertRule,
     AlertRuleChannel,
     AlertState,
@@ -329,6 +330,27 @@ def test_manual_evaluation_creates_a_visible_run_record(db_session, monkeypatch)
 
     rule_runs_response = client.get(f'/api/alert-rules/{rule_id}/evaluation-runs')
     assert rule_runs_response.get_json()['data']['items'][0]['rule_id'] == rule_id
+
+
+def test_scheduled_evaluation_creates_a_visible_run_record(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    monkeypatch.setattr(notifications, 'get_session', lambda: db_session)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+    rule_id = rule.id
+
+    result = notifications.evaluate_scheduled_rules(notifications.EVENT_FUNDING_RATE)
+
+    assert result['status'] == 'success'
+    run = db_session.query(AlertEvaluationRun).filter_by(rule_id=rule_id).one()
+    assert run.trigger_source == 'scheduled'
+    assert run.status == 'success'
+    assert run.completed_at is not None
+    metric = db_session.query(AlertEvaluationMetric).filter_by(run_id=run.id).one()
+    assert metric.metrics_json['duration_ms'] >= 0
 
 
 def test_notification_management_page_renders():

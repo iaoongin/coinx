@@ -10,7 +10,7 @@ from coinx.notifications import (
     NotificationConfigError,
     decrypt_apprise_url,
     encrypt_apprise_url,
-    evaluate_rule,
+    evaluate_rule_with_run,
     get_rule_channel_ids,
     serialize_channel,
     serialize_rule,
@@ -334,42 +334,17 @@ def delete_alert_rule(rule_id):
 @api_notifications_bp.route('/api/alert-rules/<int:rule_id>/evaluate', methods=['POST'])
 def evaluate_alert_rule(rule_id):
     db = get_session()
-    run = None
     try:
-        _ensure_evaluation_metrics_table(db)
         rule = db.get(AlertRule, rule_id)
         if not rule:
             return _error('rule not found', 404)
         if not rule.enabled:
             return _error('rule is disabled', 409)
-        run = AlertEvaluationRun(rule_id=rule.id, trigger_source='manual', status='running', started_at=now_ms())
-        db.add(run)
-        db.commit()
-        result = evaluate_rule(rule, session=db, metadata=get_all_job_runtime_metadata())
-        run.status = result['status']
-        run.checked_count = result.get('checked', 0)
-        run.matched_count = result.get('matched', 0)
-        run.sent_count = result.get('sent', 0)
-        run.error_message = result.get('error')
-        run.completed_at = now_ms()
-        metrics = result.get('metrics') or {}
-        if metrics:
-            db.add(AlertEvaluationMetric(run_id=run.id, metrics_json=metrics))
-        db.commit()
-        result['run_id'] = run.id
+        result = evaluate_rule_with_run(
+            rule, 'manual', session=db, metadata=get_all_job_runtime_metadata(),
+        )
         code = 200 if result['status'] in {'success', 'disabled'} else 500
         return jsonify({'status': result['status'], 'data': result}), code
-    except Exception as exc:
-        db.rollback()
-        if run is not None:
-            failed_run = db.get(AlertEvaluationRun, run.id)
-            if failed_run:
-                failed_run.status = 'error'
-                failed_run.error_message = str(exc)[:500]
-                failed_run.completed_at = now_ms()
-                db.commit()
-        logger.exception('manual alert evaluation failed: rule=%s', rule_id)
-        return _error('rule evaluation failed', 500)
     finally:
         db.close()
 
@@ -422,7 +397,7 @@ def get_alert_evaluation_run_logs(run_id):
         logs = [{
             'timestamp': run.started_at,
             'level': 'info',
-            'message': f'manual evaluation started for rule #{run.rule_id}',
+            'message': f'{run.trigger_source} evaluation started for rule #{run.rule_id}',
         }]
         if run.completed_at:
             logs.append({
