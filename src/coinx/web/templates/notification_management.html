@@ -43,6 +43,7 @@
     .pane:last-child { border-bottom: 0; }
     .pane.full { grid-column: 1 / -1; }
     .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .section-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
     h2 { margin: 0; font-size: 16px; line-height: 1.25; }
     .section-note { color: var(--text-muted); font-size: 12px; }
     .form-grid { display: grid; gap: 10px; }
@@ -50,6 +51,8 @@
     .rule-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .field { display: grid; gap: 5px; min-width: 0; }
     .field-span { grid-column: 1 / -1; }
+    .url-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .url-input .btn { min-height: 35px; }
     label { color: var(--text-muted); font-size: 12px; }
     input, select { width: 100%; min-height: 35px; padding: 7px 9px; border: 1px solid var(--border-default); border-radius: 5px; background: var(--bg-secondary); color: var(--text-primary); }
     .toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 35px; color: var(--text-secondary); white-space: nowrap; }
@@ -60,13 +63,16 @@
     .table-shell { margin-top: 18px; overflow: hidden; border: 1px solid var(--border-default); border-radius: 6px; background: rgba(0,0,0,.08); }
     .table-scroll { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th { padding: 9px 10px; border-bottom: 1px solid var(--border-default); background: rgba(255,255,255,.025); color: var(--text-muted); font: 500 10px/1.3 var(--font-mono, monospace); letter-spacing: .06em; text-align: left; text-transform: uppercase; white-space: nowrap; }
-    td { padding: 10px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); vertical-align: middle; }
+    th { padding: 9px 10px; border-bottom: 1px solid var(--border-default); background: rgba(255,255,255,.025); color: var(--text-muted); font: 500 10px/1.3 var(--font-mono, monospace); letter-spacing: .06em; text-align: center; text-transform: uppercase; white-space: nowrap; }
+    td { padding: 10px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); text-align: center; vertical-align: middle; }
     tbody tr:last-child td { border-bottom: 0; } tbody tr:hover { background: rgba(255,255,255,.022); }
     .cell-primary { color: var(--text-primary); font-weight: 600; } .mono { font-family: var(--font-mono, 'JetBrains Mono', monospace); font-size: 11px; }
     .badge { display: inline-flex; align-items: center; min-height: 22px; padding: 3px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 10px var(--font-mono, monospace); white-space: nowrap; }
     .badge.ok { color: #94e9b7; border-color: rgba(80,220,140,.3); background: rgba(80,220,140,.08); } .badge.off { color: #aeb9c9; } .badge.warn { color: #f0bd6a; border-color: rgba(240,189,106,.3); background: rgba(240,189,106,.07); } .badge.error { color: #ffb4b4; border-color: rgba(255,120,120,.3); background: rgba(255,120,120,.07); }
     .actions { display: flex; flex-wrap: wrap; gap: 5px; } .actions .btn { min-height: 28px; padding: 4px 8px; font-size: 11px; }
+    td[data-label="操作"] .actions { justify-content: center; }
+    .channel-actions { text-align: center; }
+    .channel-actions .actions { width: 100%; justify-content: center; }
     .empty { padding: 24px 14px; color: var(--text-muted); text-align: center; }
     .lower-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
     .legacy-overview { display: none; }
@@ -107,7 +113,7 @@
     <div class="workspace">
       <header class="page-header">
         <div><p class="eyebrow">Alert Operations</p><h1>告警管理</h1><p class="subtitle">管理通知渠道、触发规则与投递结果。</p></div>
-        <div class="header-actions"><span class="synced">[[ loading ? '正在同步…' : '数据已同步' ]]</span><button class="btn" @click="reload" :disabled="loading">刷新</button><button class="btn" @click="openChannelModal()">新增渠道</button><button class="btn btn-primary" @click="openRuleModal()">新增规则</button></div>
+        <div class="header-actions"><span class="synced">[[ loading ? '正在同步…' : '数据已同步' ]]</span><button class="btn" @click="reload" :disabled="loading">刷新</button></div>
       </header>
       <div class="summary">
         <div class="summary-item"><div class="summary-label">已配置渠道</div><div class="summary-value">[[ pageLoaded ? channels.length : '—' ]]</div></div>
@@ -119,18 +125,18 @@
 
       <div class="content">
         <section class="pane">
-          <div class="section-heading"><h2>通知渠道</h2><span class="section-note">密钥加密保存</span></div>
-          <div class="table-shell"><div class="table-scroll"><table><thead><tr><th>名称</th><th>状态</th><th>配置</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="channel in channels" :key="channel.id"><td data-label="名称" class="cell-primary">[[ channel.name ]]</td><td data-label="状态"><span :class="['badge', channel.enabled ? 'ok' : 'off']">[[ channel.enabled ? '启用' : '停用' ]]</span></td><td data-label="配置"><span :class="['badge', channel.configured ? 'ok' : 'warn']">[[ channel.configured ? '已配置' : '未配置' ]]</span></td><td data-label="操作"><div class="actions"><button class="btn" @click="testChannel(channel)" :disabled="busy">发送测试</button><button class="btn" @click="openChannelModal(channel)" :disabled="busy">更新 URL</button><button class="btn" @click="toggleChannel(channel)" :disabled="busy">[[ channel.enabled ? '停用' : '启用' ]]</button></div></td></tr>
-            <tr v-if="!pageLoaded"><td colspan="4" class="empty">加载中…</td></tr><tr v-else-if="!channels.length"><td colspan="4" class="empty">暂无通知渠道 <button class="btn btn-primary" @click="openChannelModal()">新增渠道</button></td></tr>
+          <div class="section-heading"><div class="section-title"><h2>通知渠道</h2><span class="section-note">密钥加密保存</span></div><button class="btn btn-primary" @click="openChannelModal()">新增渠道</button></div>
+          <div class="table-shell"><div class="table-scroll"><table><thead><tr><th>名称</th><th>类型</th><th>状态</th><th>配置</th><th>操作</th></tr></thead><tbody>
+            <tr v-for="channel in channels" :key="channel.id"><td data-label="名称" class="cell-primary">[[ channel.name ]]</td><td data-label="类型" class="mono">[[ channel.apprise_type || channel.channel_type ]]</td><td data-label="状态"><span :class="['badge', channel.enabled ? 'ok' : 'off']">[[ channel.enabled ? '启用' : '停用' ]]</span></td><td data-label="配置"><span :class="['badge', channel.configured ? 'ok' : 'warn']">[[ channel.configured ? '已配置' : '未配置' ]]</span></td><td data-label="操作" class="channel-actions"><div class="actions"><button class="btn" @click="testChannel(channel)" :disabled="busy">发送测试</button><button class="btn" @click="openChannelModal(channel)" :disabled="busy">更新 URL</button><button class="btn" @click="toggleChannel(channel)" :disabled="busy">[[ channel.enabled ? '停用' : '启用' ]]</button></div></td></tr>
+            <tr v-if="!pageLoaded"><td colspan="5" class="empty">加载中…</td></tr><tr v-else-if="!channels.length"><td colspan="5" class="empty">暂无通知渠道</td></tr>
           </tbody></table></div></div>
         </section>
 
         <section class="pane">
-          <div class="section-heading"><h2>告警规则</h2><span class="section-note">[[ pageLoaded ? `${rules.length} 条规则` : '加载中…' ]]</span></div>
+          <div class="section-heading"><div class="section-title"><h2>告警规则</h2><span class="section-note">[[ pageLoaded ? `${rules.length} 条规则` : '加载中…' ]]</span></div><button class="btn btn-primary" @click="openRuleModal()">新增规则</button></div>
           <div class="table-shell"><div class="table-scroll"><table><thead><tr><th>名称</th><th>事件</th><th>范围</th><th>状态</th><th>渠道</th><th>操作</th></tr></thead><tbody>
             <tr v-for="rule in rules" :key="rule.id"><td data-label="名称" class="cell-primary">[[ rule.name ]]</td><td data-label="事件" class="mono">[[ rule.event_type ]]</td><td data-label="范围">[[ rule.scope_type ]]</td><td data-label="状态"><span :class="['badge', rule.enabled ? 'ok' : 'off']">[[ rule.enabled ? '启用' : '停用' ]]</span></td><td data-label="渠道">[[ channelNames(rule.channel_ids) ]]</td><td data-label="操作"><div class="actions"><button class="btn" @click="openRuleDetail(rule)">详情</button><button class="btn" @click="openRuleModal(rule)" :disabled="busy">编辑</button><button class="btn" @click="evaluate(rule)" :disabled="busy || !rule.enabled">[[ evaluatingRuleId === rule.id ? '评估中…' : '立即评估' ]]</button><button class="btn" @click="toggleRule(rule)" :disabled="busy">[[ rule.enabled ? '停用' : '启用' ]]</button></div></td></tr>
-            <tr v-if="!pageLoaded"><td colspan="6" class="empty">加载中…</td></tr><tr v-else-if="!rules.length"><td colspan="6" class="empty">暂无告警规则 <button class="btn btn-primary" @click="openRuleModal()">新增规则</button></td></tr>
+            <tr v-if="!pageLoaded"><td colspan="6" class="empty">加载中…</td></tr><tr v-else-if="!rules.length"><td colspan="6" class="empty">暂无告警规则</td></tr>
           </tbody></table></div></div>
         </section>
 
@@ -153,7 +159,8 @@
         <header class="modal-header"><h2 id="channel-dialog-title">[[ editingChannel ? '更新通知渠道' : '新增通知渠道' ]]</h2><button class="btn icon-button" type="button" aria-label="关闭" @click="showChannelModal = false">×</button></header>
         <form class="modal-body form-grid modal-form" @submit.prevent="saveChannel">
           <label class="field field-span">渠道名称<input v-model.trim="channelForm.name" placeholder="例如：我的 Bark" required></label>
-          <label class="field field-span">Apprise URL<input v-model.trim="channelForm.url" type="password" placeholder="Bark HTTPS：barks://设备密钥" required></label>
+          <label class="field field-span">常用 Apprise URL 模板<select v-model="selectedAppriseTemplate" @change="applyAppriseTemplate"><option value="">选择后填入 URL 骨架</option><option v-for="template in appriseTemplates" :key="template.url" :value="template.url">[[ template.name ]]</option></select></label>
+          <label class="field field-span">Apprise URL<div class="url-input"><input v-model.trim="channelForm.url" :type="showChannelUrl ? 'text' : 'password'" placeholder="选择模板后替换其中的密钥和目标标识" required><button class="btn" type="button" @click="showChannelUrl=!showChannelUrl">[[ showChannelUrl ? '隐藏' : '显示' ]]</button></div></label>
           <label class="toggle field-span"><input v-model="channelForm.enabled" type="checkbox">[[ editingChannel ? '保持启用状态' : '创建后立即启用' ]]</label>
           <div class="modal-actions field-span"><button class="btn" type="button" @click="showChannelModal = false">取消</button><button class="btn btn-primary" type="submit" :disabled="busy">[[ editingChannel ? '保存更新' : '创建渠道' ]]</button></div>
         </form>
@@ -220,12 +227,13 @@
     createApp({ delimiters: ['[[', ']]'], setup() {
       const detailPageSize = 5; const channels = ref([]), rules = ref([]), states = ref([]), deliveries = ref([]), evaluationRuns = ref([]), loading = ref(false), pageLoaded = ref(false), busy = ref(false), evaluatingRuleId = ref(null), logsLoading = ref(false), showRunLogModal = ref(false), selectedRun = ref(null), runLogs = ref([]), showRuleDetail = ref(false), detailRule = ref(null), detailTab = ref('states'), detailStateStatus = ref('triggered'), detailOffset = ref(0), detailData = ref({states:{items:[],total:0},runs:{items:[],total:0},deliveries:{items:[],total:0}}), detailLoading = ref({states:false,runs:false,deliveries:false}), detailLoaded = ref({states:false,runs:false,deliveries:false}), showDeliveryModal = ref(false), selectedDelivery = ref(null), flash = ref({ message: '', type: '' });
       const showChannelModal = ref(false), showRuleModal = ref(false), editingChannel = ref(null), editingRule = ref(null);
-      const channelForm = ref({ name: '', url: '', enabled: true }); const ruleForm = ref({ name: '', event_type: 'market.funding_rate.threshold', threshold: 0.001, volumeRatio: 2, direction: 'absolute', recoveryConfirmations: 3, jobIds: '', channelIds: [] });
+      const channelForm = ref({ name: '', url: '', enabled: true }), selectedAppriseTemplate = ref(''), showChannelUrl = ref(true); const appriseTemplates = [{name:'Bark',url:'barks://YOUR_DEVICE_KEY'},{name:'Telegram',url:'tgram://BOT_TOKEN/CHAT_ID'},{name:'Discord',url:'discord://WEBHOOK_ID/WEBHOOK_TOKEN'},{name:'企业微信机器人',url:'wecombot://BOT_KEY'},{name:'通用 HTTPS JSON Webhook',url:'jsons://example.com/path'}]; const ruleForm = ref({ name: '', event_type: 'market.funding_rate.threshold', threshold: 0.001, volumeRatio: 2, direction: 'absolute', recoveryConfirmations: 3, jobIds: '', channelIds: [] });
       const enabledChannels = computed(() => channels.value.filter(item => item.enabled)); const enabledRuleCount = computed(() => rules.value.filter(item => item.enabled).length); const failedDeliveryCount = computed(() => deliveries.value.filter(item => item.delivery_status !== 'success').length); const show = (message, type = '') => flash.value = { message, type };
       const request = async (url, options = {}) => { const response = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options }); const isJson = (response.headers.get('content-type') || '').includes('application/json'); const data = isJson ? await response.json() : null; if (!response.ok || !data || data.status === 'error') throw new Error(data?.message || `请求失败 (${response.status})`); return data; };
       const reload = async () => { loading.value = true; try { const [channelResult, ruleResult, deliveryResult] = await Promise.all([request('/api/notification-channels'),request('/api/alert-rules'),request('/api/notification-deliveries?limit=50')]); channels.value=channelResult.data; rules.value=ruleResult.data; deliveries.value=deliveryResult.data; states.value=[]; evaluationRuns.value=[]; pageLoaded.value=true; } catch (error) { show(error.message, 'error'); } finally { loading.value=false; } };
-      const openChannelModal = channel => { editingChannel.value = channel || null; channelForm.value = {name: channel?.name || '',url: '',enabled: channel?.enabled ?? true}; showChannelModal.value = true; };
-      const saveChannel = async () => { busy.value=true; try { const editing = editingChannel.value; if (editing) { await request(`/api/notification-channels/${editing.id}`,{method:'PATCH',body:JSON.stringify(channelForm.value)}); show('渠道 URL 已更新'); } else { await request('/api/notification-channels',{method:'POST',body:JSON.stringify(channelForm.value)}); show('渠道已创建'); } channelForm.value={name:'',url:'',enabled:true}; editingChannel.value=null; showChannelModal.value=false; await reload(); } catch(error){show(error.message,'error')} finally{busy.value=false} };
+      const openChannelModal = channel => { editingChannel.value = channel || null; selectedAppriseTemplate.value=''; showChannelUrl.value=true; channelForm.value = {name: channel?.name || '',url: '',enabled: channel?.enabled ?? true}; showChannelModal.value = true; };
+      const applyAppriseTemplate = () => { if (selectedAppriseTemplate.value) channelForm.value.url=selectedAppriseTemplate.value; };
+      const saveChannel = async () => { busy.value=true; try { const editing = editingChannel.value; if (editing) { await request(`/api/notification-channels/${editing.id}`,{method:'PATCH',body:JSON.stringify(channelForm.value)}); show('渠道 URL 已更新'); } else { await request('/api/notification-channels',{method:'POST',body:JSON.stringify(channelForm.value)}); show('渠道已创建'); } channelForm.value={name:'',url:'',enabled:true}; selectedAppriseTemplate.value=''; editingChannel.value=null; showChannelModal.value=false; await reload(); } catch(error){show(error.message,'error')} finally{busy.value=false} };
       const testChannel = async channel => { busy.value=true; try { await request(`/api/notification-channels/${channel.id}/test`,{method:'POST'}); show('测试消息已发送'); await reload(); } catch(error){show(error.message,'error')} finally{busy.value=false} };
       const toggleChannel = async channel => { busy.value=true; try { await request(`/api/notification-channels/${channel.id}`,{method:'PATCH',body:JSON.stringify({name:channel.name,enabled:!channel.enabled})}); await reload(); } catch(error){show(error.message,'error')} finally{busy.value=false} };
       const resetRuleForm = () => ruleForm.value={name:'',event_type:'market.funding_rate.threshold',threshold:0.001,volumeRatio:2,direction:'absolute',recoveryConfirmations:3,jobIds:'',channelIds:[]};
@@ -244,7 +252,7 @@
       watch(detailStateStatus, () => { if (showRuleDetail.value && detailTab.value==='states') loadRuleDetail(0); });
       const channelNames = ids => ids.map(id => (channels.value.find(item => item.id===id)||{}).name || id).join(', ') || '未选择'; const ruleName = id => (rules.value.find(item => item.id === id) || {}).name || `规则 #${id}`; const formatTime = value => value ? new Date(value).toLocaleString('zh-CN') : '-'; const formatDuration = value => value == null ? '-' : value < 1000 ? `${value}ms` : `${(value / 1000).toFixed(2)}s`; onMounted(reload);
       const detailPageLabel = computed(() => { const data = detailData.value[detailTab.value]; if (!data.total) return '共 0 条'; return `第 ${detailOffset.value + 1}-${Math.min(detailOffset.value + data.items.length, data.total)} 条，共 ${data.total} 条`; });
-      return {detailPageSize,channels,rules,states,deliveries,evaluationRuns,loading,pageLoaded,busy,evaluatingRuleId,logsLoading,showRunLogModal,selectedRun,runLogs,showRuleDetail,detailRule,detailTab,detailStateStatus,detailOffset,detailData,detailLoading,detailLoaded,showDeliveryModal,selectedDelivery,flash,showChannelModal,showRuleModal,editingChannel,editingRule,channelForm,ruleForm,enabledChannels,enabledRuleCount,failedDeliveryCount,reload,openChannelModal,saveChannel,testChannel,toggleChannel,openRuleModal,saveRule,toggleRule,evaluate,loadRunLogs,openRuleDetail,loadRuleDetail,openDelivery,channelNames,ruleName,formatTime,formatDuration,detailPageLabel,isDetailLoading};
+      return {detailPageSize,channels,rules,states,deliveries,evaluationRuns,loading,pageLoaded,busy,evaluatingRuleId,logsLoading,showRunLogModal,selectedRun,runLogs,showRuleDetail,detailRule,detailTab,detailStateStatus,detailOffset,detailData,detailLoading,detailLoaded,showDeliveryModal,selectedDelivery,flash,showChannelModal,showRuleModal,editingChannel,editingRule,channelForm,selectedAppriseTemplate,showChannelUrl,appriseTemplates,ruleForm,enabledChannels,enabledRuleCount,failedDeliveryCount,reload,openChannelModal,applyAppriseTemplate,saveChannel,testChannel,toggleChannel,openRuleModal,saveRule,toggleRule,evaluate,loadRunLogs,openRuleDetail,loadRuleDetail,openDelivery,channelNames,ruleName,formatTime,formatDuration,detailPageLabel,isDetailLoading};
     }}).mount('#app');
   </script>
 </body>

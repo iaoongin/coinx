@@ -157,7 +157,16 @@ def test_notification_channel(channel_id):
         db.commit()
         status = 'success' if delivery.delivery_status == 'success' else 'error'
         code = 200 if status == 'success' else 502
-        return jsonify({'status': status, 'data': {'delivery_status': delivery.delivery_status}}), code
+        response = {
+            'status': status,
+            'data': {
+                'delivery_status': delivery.delivery_status,
+                'error_message': delivery.error_message,
+            },
+        }
+        if delivery.error_message:
+            response['message'] = f'测试发送失败：{delivery.error_message}'
+        return jsonify(response), code
     finally:
         db.close()
 

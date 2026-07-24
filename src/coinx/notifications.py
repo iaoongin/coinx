@@ -7,6 +7,8 @@ import time
 import threading
 from collections import defaultdict
 from datetime import datetime
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text, update
 from sqlalchemy.exc import IntegrityError
@@ -39,6 +41,18 @@ EVENT_SCOPE = {
 
 EVALUATION_RUN_LOCK = threading.Lock()
 ACTIVE_EVALUATION_RUN_IDS = set()
+NOTIFICATION_TIME_ZONE = ZoneInfo('Asia/Shanghai')
+APPRISE_TARGET_TYPES = {
+    'bark': 'Bark',
+    'barks': 'Bark',
+    'discord': 'Discord',
+    'discords': 'Discord',
+    'json': 'JSON Webhook',
+    'jsons': 'JSON Webhook',
+    'tgram': 'Telegram',
+    'tgrams': 'Telegram',
+    'wecombot': '企业微信机器人',
+}
 
 
 class NotificationConfigError(ValueError):
@@ -140,8 +154,11 @@ def is_evaluation_run_active(db, run_id):
 
 
 def format_notification_time(timestamp=None):
-    """Format the delivery time in the application host's local timezone."""
-    moment = datetime.fromtimestamp((timestamp or now_ms()) / 1000).astimezone()
+    """Format the delivery time in the fixed China Standard Time zone."""
+    moment = datetime.fromtimestamp(
+        (now_ms() if timestamp is None else timestamp) / 1000,
+        tz=NOTIFICATION_TIME_ZONE,
+    )
     return moment.strftime('%Y-%m-%d %H:%M:%S')
 
 
@@ -169,11 +186,21 @@ def decrypt_apprise_url(channel):
         raise NotificationConfigError('unable to decrypt notification channel') from exc
 
 
+def apprise_target_type(channel):
+    """Return a display-safe Apprise target name without exposing its URL."""
+    try:
+        scheme = urlsplit(decrypt_apprise_url(channel)).scheme.lower()
+    except NotificationConfigError:
+        return 'Unknown'
+    return APPRISE_TARGET_TYPES.get(scheme, scheme or 'Unknown')
+
+
 def serialize_channel(channel):
     return {
         'id': channel.id,
         'name': channel.name,
         'channel_type': channel.channel_type,
+        'apprise_type': apprise_target_type(channel) if channel.channel_type == 'apprise' else None,
         'enabled': bool(channel.enabled),
         'configured': bool(channel.config_encrypted),
         'key_version': channel.key_version,
@@ -555,7 +582,7 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     triggered = [event['triggered'] for event in events if event['status'] == 'triggered']
     recovered = [event['recovered'] for event in events if event['status'] == 'recovered']
     sections = [
-        f'本次评估完成\n检查对象：{checked}\n触发异常：{len(triggered)}\n恢复正常：{len(recovered)}',
+        f'本次评估完成\n检查对象：{checked}｜触发异常：{len(triggered)}｜恢复正常：{len(recovered)}',
     ]
     if triggered:
         sections.append('触发异常\n' + '\n'.join(triggered))

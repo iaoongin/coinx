@@ -69,6 +69,10 @@ def test_channel_url_is_encrypted_and_not_deterministic(monkeypatch):
     assert notifications.decrypt_apprise_url(channel) == 'tgram://token/chat'
 
 
+def test_notification_time_is_fixed_to_china_standard_time():
+    assert notifications.format_notification_time(0) == '1970-01-01 08:00:00'
+
+
 def test_funding_rate_alert_triggers_once_then_recovers(db_session, monkeypatch):
     configure_notifications(monkeypatch)
     sent_bodies = []
@@ -92,6 +96,7 @@ def test_funding_rate_alert_triggers_once_then_recovers(db_session, monkeypatch)
     assert [delivery.event_status for delivery in deliveries] == ['summary', 'summary']
     assert all(delivery.delivery_status == 'success' for delivery in deliveries)
     assert all(delivery.payload_json['message']['title'] for delivery in deliveries)
+    assert all('检查对象：1｜触发异常：1｜恢复正常：0' in body or '检查对象：1｜触发异常：0｜恢复正常：1' in body for body in sent_bodies)
     assert all('时间：' in body for body in sent_bodies)
 
 
@@ -274,6 +279,7 @@ def test_channel_api_never_returns_url_and_rule_can_select_channel(db_session, m
     assert 'example.test' not in channel_response.get_data(as_text=True)
     channel = channel_response.get_json()['data']
     assert channel['configured'] is True
+    assert channel['apprise_type'] == 'JSON Webhook'
 
     update_response = client.patch(f"/api/notification-channels/{channel['id']}", json={
         'name': 'ops', 'url': 'json://example.test/updated', 'enabled': True,
@@ -308,6 +314,26 @@ def test_channel_api_never_returns_url_and_rule_can_select_channel(db_session, m
     delivery = deliveries_response.get_json()['data']['items'][0]
     assert delivery['message']['title'] == '资金费率异常'
     assert 'BTCUSDT' in delivery['message']['body']
+
+
+def test_channel_test_api_returns_delivery_error(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    monkeypatch.setattr('coinx.web.routes.api_notifications.get_session', lambda: db_session)
+    channel = create_channel(db_session)
+
+    def fail_delivery(*_args, **_kwargs):
+        raise RuntimeError('Telegram request timed out')
+
+    monkeypatch.setattr(notifications, 'send_apprise', fail_delivery)
+    app = Flask(__name__)
+    app.register_blueprint(api_notifications_bp)
+
+    response = app.test_client().post(f'/api/notification-channels/{channel.id}/test')
+
+    assert response.status_code == 502
+    payload = response.get_json()
+    assert payload['message'] == '测试发送失败：Telegram request timed out'
+    assert payload['data']['error_message'] == 'Telegram request timed out'
 
 
 def test_rule_parameter_change_resets_states_without_recovery(db_session, monkeypatch):
