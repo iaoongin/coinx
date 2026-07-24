@@ -399,6 +399,78 @@ def test_scheduled_evaluation_creates_a_visible_run_record(db_session, monkeypat
     assert metric.metrics_json['duration_ms'] >= 0
 
 
+def test_stale_scheduled_evaluation_is_finalized(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.web.routes.api_notifications.get_session', lambda: db_session)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+    run = AlertEvaluationRun(
+        rule_id=rule.id,
+        trigger_source='scheduled',
+        status='running',
+        started_at=notifications.now_ms() - 5 * 60 * 1000 - 1,
+    )
+    db_session.add(run)
+    db_session.commit()
+    if not hasattr(werkzeug, '__version__'):
+        werkzeug.__version__ = '3'
+    app = Flask(__name__)
+    app.register_blueprint(api_notifications_bp)
+
+    response = app.test_client().get(f'/api/alert-rules/{rule.id}/evaluation-runs')
+
+    assert response.status_code == 200
+    item = response.get_json()['data']['items'][0]
+    assert item['status'] == 'error'
+    assert '5-minute timeout' in item['error_message']
+    assert item['completed_at'] is not None
+
+
+def test_rule_state_details_default_to_all_states(db_session, monkeypatch):
+    monkeypatch.setattr('coinx.web.routes.api_notifications.get_session', lambda: db_session)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+    db_session.add_all([
+        AlertState(rule_id=rule.id, subject_key='BTCUSDT', dimension_key='absolute', state='normal'),
+        AlertState(rule_id=rule.id, subject_key='ETHUSDT', dimension_key='absolute', state='triggered'),
+    ])
+    db_session.commit()
+    app = Flask(__name__)
+    app.register_blueprint(api_notifications_bp)
+    client = app.test_client()
+
+    all_states = client.get(f'/api/alert-rules/{rule.id}/states?limit=5').get_json()['data']
+    triggered_states = client.get(f'/api/alert-rules/{rule.id}/states?limit=5&status=triggered').get_json()['data']
+
+    assert all_states['total'] == 2
+    assert {item['state'] for item in all_states['items']} == {'normal', 'triggered'}
+    assert triggered_states['total'] == 1
+    assert triggered_states['items'][0]['subject_key'] == 'ETHUSDT'
+
+
+def test_evaluation_is_skipped_when_rule_lease_is_held(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+    monkeypatch.setattr(notifications, 'acquire_evaluation_run_lease', lambda *_args: (True, None))
+    monkeypatch.setattr(notifications, '_acquire_evaluation_lease', lambda *_args: (False, None))
+
+    result = notifications.evaluate_rule_with_run(rule, 'scheduled', session=db_session)
+
+    assert result['status'] == 'skipped'
+    run = db_session.query(AlertEvaluationRun).filter_by(rule_id=rule.id).one()
+    assert run.status == 'skipped'
+    assert run.completed_at is not None
+
+
 def test_notification_management_page_renders():
     if not hasattr(werkzeug, '__version__'):
         werkzeug.__version__ = '3'

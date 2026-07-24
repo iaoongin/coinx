@@ -4,6 +4,7 @@ All evaluators operate on data already stored by CoinX jobs.  Notification
 failures are recorded but never allowed to fail a collection or repair job.
 """
 import time
+import threading
 from collections import defaultdict
 from datetime import datetime
 
@@ -36,6 +37,9 @@ EVENT_SCOPE = {
     EVENT_JOB_FAILURE: 'system_jobs',
 }
 
+EVALUATION_RUN_LOCK = threading.Lock()
+ACTIVE_EVALUATION_RUN_IDS = set()
+
 
 class NotificationConfigError(ValueError):
     """Raised for invalid notification configuration without exposing secrets."""
@@ -43,6 +47,96 @@ class NotificationConfigError(ValueError):
 
 def now_ms():
     return int(time.time() * 1000)
+
+
+def _evaluation_run_lock_name(run_id):
+    return f'coinx_alert_evaluation_{run_id}'
+
+
+def _acquire_evaluation_lease(db, name):
+    if db.get_bind().dialect.name != 'mysql':
+        return True, None
+    connection = db.get_bind().connect()
+    try:
+        acquired = connection.execute(
+            text('SELECT GET_LOCK(:name, 0)'), {'name': name},
+        ).scalar() == 1
+        if not acquired:
+            connection.close()
+            return False, None
+        return True, connection
+    except Exception:
+        connection.close()
+        raise
+
+
+def _release_evaluation_lease(connection, name):
+    if connection is None:
+        return
+    try:
+        connection.execute(text('SELECT RELEASE_LOCK(:name)'), {'name': name})
+    finally:
+        connection.close()
+
+
+def acquire_evaluation_run_lease(db, run_id):
+    """Hold a MySQL advisory lock for an active evaluation run.
+
+    A separate connection owns the lock because evaluator commits must not
+    release its liveness lease. SQLite tests use the in-process registry.
+    """
+    with EVALUATION_RUN_LOCK:
+        ACTIVE_EVALUATION_RUN_IDS.add(run_id)
+    if db.get_bind().dialect.name != 'mysql':
+        return True, None
+    try:
+        acquired, connection = _acquire_evaluation_lease(
+            db, _evaluation_run_lock_name(run_id),
+        )
+        if acquired:
+            return True, connection
+        with EVALUATION_RUN_LOCK:
+            ACTIVE_EVALUATION_RUN_IDS.discard(run_id)
+        return False, None
+    except Exception:
+        with EVALUATION_RUN_LOCK:
+            ACTIVE_EVALUATION_RUN_IDS.discard(run_id)
+        raise
+
+
+def release_evaluation_run_lease(run_id, connection):
+    with EVALUATION_RUN_LOCK:
+        ACTIVE_EVALUATION_RUN_IDS.discard(run_id)
+    if connection is None:
+        return
+    _release_evaluation_lease(connection, _evaluation_run_lock_name(run_id))
+
+
+def is_evaluation_run_active(db, run_id):
+    """Check the local registry and, for MySQL, the cross-process lease."""
+    with EVALUATION_RUN_LOCK:
+        if run_id in ACTIVE_EVALUATION_RUN_IDS:
+            return True
+    if db.get_bind().dialect.name != 'mysql':
+        return False
+    connection = db.get_bind().connect()
+    try:
+        acquired = connection.execute(
+            text('SELECT GET_LOCK(:name, 0)'),
+            {'name': _evaluation_run_lock_name(run_id)},
+        ).scalar()
+        if acquired != 1:
+            return True
+        connection.execute(
+            text('SELECT RELEASE_LOCK(:name)'),
+            {'name': _evaluation_run_lock_name(run_id)},
+        )
+        return False
+    except Exception:
+        logger.warning('unable to verify alert evaluation lease: run=%s', run_id)
+        return True
+    finally:
+        connection.close()
 
 
 def format_notification_time(timestamp=None):
@@ -505,6 +599,7 @@ def _evaluation_metrics(started_at, stages, **extra):
 
 
 PRICE_VOLUME_LOOKBACK_MS = 26 * 60 * 60 * 1000
+EVALUATION_QUERY_TIMEOUT_MS = 4 * 60 * 1000
 
 
 def _load_price_volume_metrics(db, scope_limit):
@@ -513,7 +608,11 @@ def _load_price_volume_metrics(db, scope_limit):
     The 26-hour range bounds each 5-minute series to roughly 312 rows before
     the window function keeps the latest 289 observations.
     """
-    rows = db.execute(text("""
+    query_hint = (
+        f'/*+ MAX_EXECUTION_TIME({EVALUATION_QUERY_TIMEOUT_MS}) */ '
+        if db.get_bind().dialect.name == 'mysql' else ''
+    )
+    rows = db.execute(text(f"""
         WITH latest_snapshot AS (
           SELECT MAX(close_time) AS snapshot_time FROM market_tickers
         ), top_symbols AS (
@@ -550,7 +649,7 @@ def _load_price_volume_metrics(db, scope_limit):
           WHERE rn <= 289
           GROUP BY symbol
         )
-        SELECT
+        SELECT {query_hint}
           s.symbol,
           m.open_time,
           m.price_change,
@@ -839,6 +938,8 @@ def evaluate_rule_with_run(rule, trigger_source, session=None, metadata=None):
     own_session = session is None
     db = session or get_session()
     run = None
+    lease_connection = None
+    rule_lease_connection = None
     try:
         AlertEvaluationMetric.__table__.create(bind=db.get_bind(), checkfirst=True)
         run = AlertEvaluationRun(
@@ -849,6 +950,22 @@ def evaluate_rule_with_run(rule, trigger_source, session=None, metadata=None):
         )
         db.add(run)
         db.commit()
+
+        lease_acquired, lease_connection = acquire_evaluation_run_lease(db, run.id)
+        if not lease_acquired:
+            raise RuntimeError('unable to acquire evaluation run lease')
+        rule_lease_acquired, rule_lease_connection = _acquire_evaluation_lease(
+            db, f'coinx_alert_rule_{rule.id}',
+        )
+        if not rule_lease_acquired:
+            run.status = 'skipped'
+            run.error_message = 'another evaluation for this rule is still running'
+            run.completed_at = now_ms()
+            db.commit()
+            return {
+                'status': 'skipped', 'checked': 0, 'matched': 0, 'sent': 0,
+                'error': run.error_message, 'run_id': run.id,
+            }
 
         result = evaluate_rule(rule, session=db, metadata=metadata)
         run.status = result['status']
@@ -878,6 +995,9 @@ def evaluate_rule_with_run(rule, trigger_source, session=None, metadata=None):
             'error': 'rule evaluation failed', 'run_id': run.id if run else None,
         }
     finally:
+        _release_evaluation_lease(rule_lease_connection, f'coinx_alert_rule_{rule.id}' if run else None)
+        if run is not None:
+            release_evaluation_run_lease(run.id, lease_connection)
         if own_session:
             db.close()
 

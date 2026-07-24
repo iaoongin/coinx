@@ -12,6 +12,7 @@ from coinx.notifications import (
     encrypt_apprise_url,
     evaluate_rule_with_run,
     get_rule_channel_ids,
+    is_evaluation_run_active,
     serialize_channel,
     serialize_rule,
     set_rule_channels,
@@ -24,7 +25,7 @@ from coinx.utils import logger
 
 
 api_notifications_bp = Blueprint('api_notifications', __name__)
-MANUAL_EVALUATION_TIMEOUT_MS = 2 * 60 * 1000
+EVALUATION_STALE_TIMEOUT_MS = 5 * 60 * 1000
 
 
 def _error(message, status=400):
@@ -36,10 +37,10 @@ def _ensure_evaluation_metrics_table(db):
     AlertEvaluationMetric.__table__.create(bind=db.get_bind(), checkfirst=True)
 
 
-def _finalize_stale_manual_evaluations(db):
-    cutoff = now_ms() - MANUAL_EVALUATION_TIMEOUT_MS
+def _finalize_stale_evaluations(db):
+    """Mark abandoned manual and scheduled evaluations as failed."""
+    cutoff = now_ms() - EVALUATION_STALE_TIMEOUT_MS
     rows = db.query(AlertEvaluationRun).filter(
-        AlertEvaluationRun.trigger_source == 'manual',
         AlertEvaluationRun.status == 'running',
         AlertEvaluationRun.started_at < cutoff,
     ).all()
@@ -47,8 +48,11 @@ def _finalize_stale_manual_evaluations(db):
         return
     finished_at = now_ms()
     for row in rows:
+        if is_evaluation_run_active(db, row.id):
+            logger.info('evaluation remains active; stale finalization skipped: run=%s', row.id)
+            continue
         row.status = 'error'
-        row.error_message = 'evaluation timed out or was interrupted by a service restart'
+        row.error_message = 'evaluation exceeded the 5-minute timeout or was interrupted by a service restart'
         row.completed_at = finished_at
     db.commit()
 
@@ -285,7 +289,7 @@ def list_rule_states(rule_id):
     db = get_session()
     try:
         if not _rule_or_404(db, rule_id): return _error('rule not found', 404)
-        limit, offset = _pagination_args(); status = request.args.get('status', 'triggered')
+        limit, offset = _pagination_args(); status = request.args.get('status')
         query = db.query(AlertState).filter(AlertState.rule_id == rule_id)
         if status in {'normal', 'triggered'}: query = query.filter(AlertState.state == status)
         total = query.count(); rows = query.order_by(AlertState.updated_at.desc()).offset(offset).limit(limit).all()
@@ -298,7 +302,7 @@ def list_rule_evaluation_runs(rule_id):
     db = get_session()
     try:
         if not _rule_or_404(db, rule_id): return _error('rule not found', 404)
-        _finalize_stale_manual_evaluations(db); limit, offset = _pagination_args()
+        _finalize_stale_evaluations(db); limit, offset = _pagination_args()
         query = db.query(AlertEvaluationRun).filter(AlertEvaluationRun.rule_id == rule_id); total=query.count(); rows=query.order_by(AlertEvaluationRun.started_at.desc()).offset(offset).limit(limit).all()
         return jsonify({'status':'success','data':{'items':[{'id':r.id,'rule_id':r.rule_id,'status':r.status,'checked_count':r.checked_count,'matched_count':r.matched_count,'sent_count':r.sent_count,'error_message':r.error_message,'started_at':r.started_at,'completed_at':r.completed_at,'duration_ms':(r.completed_at-r.started_at) if r.completed_at else None} for r in rows],'total':total,'limit':limit,'offset':offset}})
     finally: db.close()
@@ -343,7 +347,7 @@ def evaluate_alert_rule(rule_id):
         result = evaluate_rule_with_run(
             rule, 'manual', session=db, metadata=get_all_job_runtime_metadata(),
         )
-        code = 200 if result['status'] in {'success', 'disabled'} else 500
+        code = 200 if result['status'] in {'success', 'disabled', 'skipped'} else 500
         return jsonify({'status': result['status'], 'data': result}), code
     finally:
         db.close()
@@ -369,7 +373,7 @@ def list_notification_deliveries():
 def list_alert_evaluation_runs():
     db = get_session()
     try:
-        _finalize_stale_manual_evaluations(db)
+        _finalize_stale_evaluations(db)
         limit = min(max(request.args.get('limit', 100, type=int), 1), 500)
         rows = db.query(AlertEvaluationRun).order_by(AlertEvaluationRun.started_at.desc()).limit(limit).all()
         return jsonify({'status': 'success', 'data': [{
@@ -389,7 +393,7 @@ def get_alert_evaluation_run_logs(run_id):
     db = get_session()
     try:
         _ensure_evaluation_metrics_table(db)
-        _finalize_stale_manual_evaluations(db)
+        _finalize_stale_evaluations(db)
         run = db.get(AlertEvaluationRun, run_id)
         if not run:
             return _error('evaluation run not found', 404)
