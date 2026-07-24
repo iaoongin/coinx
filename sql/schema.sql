@@ -137,68 +137,68 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
 
 -- 通知渠道：Apprise URL 仅保存为应用层 Fernet 密文。
 CREATE TABLE IF NOT EXISTS notification_channels (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
-    channel_type VARCHAR(30) NOT NULL DEFAULT 'apprise',
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    config_encrypted TEXT NOT NULL,
-    key_version VARCHAR(30) NOT NULL DEFAULT 'v1',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    name VARCHAR(100) NOT NULL UNIQUE COMMENT '渠道名称',
+    channel_type VARCHAR(30) NOT NULL DEFAULT 'apprise' COMMENT '通知渠道类型',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT '是否启用渠道',
+    config_encrypted TEXT NOT NULL COMMENT '加密后的渠道配置',
+    key_version VARCHAR(30) NOT NULL DEFAULT 'v1' COMMENT '配置加密密钥版本',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='加密通知渠道配置';
 
 CREATE TABLE IF NOT EXISTS alert_rules (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(120) NOT NULL UNIQUE,
-    event_type VARCHAR(80) NOT NULL,
-    scope_type VARCHAR(40) NOT NULL,
-    scope_json JSON NOT NULL,
-    params_json JSON NOT NULL,
-    cooldown_seconds INT NOT NULL DEFAULT 1800,
-    recovery_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    enabled BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    name VARCHAR(120) NOT NULL UNIQUE COMMENT '规则名称',
+    event_type VARCHAR(80) NOT NULL COMMENT '事件类型',
+    scope_type VARCHAR(40) NOT NULL COMMENT '适用对象范围类型',
+    scope_json JSON NOT NULL COMMENT '适用对象范围配置',
+    params_json JSON NOT NULL COMMENT '规则参数配置',
+    cooldown_seconds INT NOT NULL DEFAULT 1800 COMMENT '同一对象重复通知冷却时间（秒）',
+    recovery_enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT '是否发送恢复通知',
+    enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否启用规则',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     KEY idx_alert_rules_event_type (event_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警规则';
 
 CREATE TABLE IF NOT EXISTS alert_rule_channels (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rule_id BIGINT NOT NULL,
-    channel_id BIGINT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    rule_id BIGINT NOT NULL COMMENT '告警规则ID',
+    channel_id BIGINT NOT NULL COMMENT '通知渠道ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE KEY uk_alert_rule_channel (rule_id, channel_id),
     KEY idx_alert_rule_channels_rule (rule_id),
     KEY idx_alert_rule_channels_channel (channel_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='规则与渠道关联';
 
 CREATE TABLE IF NOT EXISTS alert_states (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rule_id BIGINT NOT NULL,
-    subject_key VARCHAR(80) NOT NULL,
-    dimension_key VARCHAR(80) NOT NULL,
-    state VARCHAR(20) NOT NULL DEFAULT 'normal',
-    consecutive_matches INT NOT NULL DEFAULT 0,
-    last_value_json JSON,
-    last_triggered_at BIGINT,
-    last_notified_at BIGINT,
-    last_recovered_at BIGINT,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    rule_id BIGINT NOT NULL COMMENT '告警规则ID',
+    subject_key VARCHAR(80) NOT NULL COMMENT '监控对象标识，例如交易对或任务ID',
+    dimension_key VARCHAR(80) NOT NULL COMMENT '规则判定维度标识',
+    state VARCHAR(20) NOT NULL DEFAULT 'normal' COMMENT '当前状态：normal 或 triggered',
+    consecutive_matches INT NOT NULL DEFAULT 0 COMMENT '连续满足恢复条件的次数',
+    last_value_json JSON COMMENT '最近一次判定指标值',
+    last_triggered_at BIGINT COMMENT '最近一次触发异常时间戳（毫秒）',
+    last_notified_at BIGINT COMMENT '最近一次发送通知时间戳（毫秒）',
+    last_recovered_at BIGINT COMMENT '最近一次恢复正常时间戳（毫秒）',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '状态更新时间',
     UNIQUE KEY uk_alert_state (rule_id, subject_key, dimension_key),
     KEY idx_alert_states_rule (rule_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警状态与去重';
 
 CREATE TABLE IF NOT EXISTS notification_deliveries (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rule_id BIGINT NULL,
-    channel_id BIGINT NULL,
-    event_key VARCHAR(255) NOT NULL,
-    event_status VARCHAR(20) NOT NULL,
-    payload_json JSON NOT NULL,
-    delivery_status VARCHAR(20) NOT NULL,
-    response_code INT NULL,
-    error_message VARCHAR(500) NULL,
-    sent_at BIGINT NOT NULL,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    rule_id BIGINT NULL COMMENT '关联告警规则ID；渠道测试时为空',
+    channel_id BIGINT NULL COMMENT '目标通知渠道ID',
+    event_key VARCHAR(255) NOT NULL COMMENT '投递事件幂等标识',
+    event_status VARCHAR(20) NOT NULL COMMENT '事件状态，例如 triggered、recovered、test',
+    payload_json JSON NOT NULL COMMENT '投递消息内容与上下文',
+    delivery_status VARCHAR(20) NOT NULL COMMENT '投递结果：success 或 failed',
+    response_code INT NULL COMMENT '渠道响应状态码',
+    error_message VARCHAR(500) NULL COMMENT '投递失败原因',
+    sent_at BIGINT NOT NULL COMMENT '投递尝试时间戳（毫秒）',
     KEY idx_notification_deliveries_rule (rule_id),
     KEY idx_notification_deliveries_channel (channel_id),
     KEY idx_notification_deliveries_event_key (event_key),
@@ -206,16 +206,25 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知发送记录';
 
 CREATE TABLE IF NOT EXISTS alert_evaluation_runs (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    rule_id BIGINT NOT NULL,
-    trigger_source VARCHAR(20) NOT NULL DEFAULT 'manual',
-    status VARCHAR(20) NOT NULL DEFAULT 'running',
-    checked_count INT NOT NULL DEFAULT 0,
-    matched_count INT NOT NULL DEFAULT 0,
-    sent_count INT NOT NULL DEFAULT 0,
-    error_message VARCHAR(500) NULL,
-    started_at BIGINT NOT NULL,
-    completed_at BIGINT NULL,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    rule_id BIGINT NOT NULL COMMENT '被评估的告警规则ID',
+    trigger_source VARCHAR(20) NOT NULL DEFAULT 'manual' COMMENT '评估触发来源：manual 或 scheduled',
+    status VARCHAR(20) NOT NULL DEFAULT 'running' COMMENT '评估状态：running、success、error 或 skipped',
+    checked_count INT NOT NULL DEFAULT 0 COMMENT '本次检查对象数量',
+    matched_count INT NOT NULL DEFAULT 0 COMMENT '本次命中规则条件的对象数量',
+    sent_count INT NOT NULL DEFAULT 0 COMMENT '本次成功投递的渠道消息数量',
+    error_message VARCHAR(500) NULL COMMENT '评估失败或跳过原因',
+    started_at BIGINT NOT NULL COMMENT '评估开始时间戳（毫秒）',
+    completed_at BIGINT NULL COMMENT '评估完成时间戳（毫秒）',
     KEY idx_alert_evaluation_runs_rule (rule_id),
     KEY idx_alert_evaluation_runs_started_at (started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警规则评估记录';
+
+CREATE TABLE IF NOT EXISTS alert_evaluation_metrics (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    run_id BIGINT NOT NULL COMMENT '关联评估记录ID',
+    metrics_json JSON NOT NULL COMMENT '评估耗时与分阶段指标',
+    created_at DATETIME NULL COMMENT '指标记录创建时间',
+    UNIQUE KEY uk_alert_evaluation_metric_run (run_id),
+    KEY idx_alert_evaluation_metrics_run (run_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警评估耗时指标';
