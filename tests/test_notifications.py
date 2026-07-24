@@ -188,6 +188,52 @@ def test_price_volume_batches_kline_loading_and_state_initialization(db_session,
     assert db_session.query(AlertState).filter_by(rule_id=rule.id).count() == 3
 
 
+def test_observation_skips_cas_when_state_does_not_advance(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+    state = notifications._load_rule_states(db_session, rule.id, 'absolute', ['BTCUSDT'])['BTCUSDT']
+    updates = []
+
+    def capture_state_update(_conn, _cursor, statement, _params, _context, _executemany):
+        if statement.lstrip().upper().startswith('UPDATE ALERT_STATES'):
+            updates.append(statement)
+
+    event.listen(db_session.bind, 'before_cursor_execute', capture_state_update)
+    try:
+        result = notifications._observe(
+            db_session, rule, 'BTCUSDT', 'absolute', False, {'funding_rate': 0.0},
+            'unused', 'unused', state=state, aggregate=True,
+        )
+    finally:
+        event.remove(db_session.bind, 'before_cursor_execute', capture_state_update)
+
+    assert result == {'event_status': None, 'sent': 0}
+    assert updates == []
+
+    notifications._observe(
+        db_session, rule, 'BTCUSDT', 'absolute', True, {'funding_rate': 0.01},
+        'unused', 'unused', state=state, aggregate=True,
+    )
+    db_session.expire_all()
+    triggered_state = db_session.query(AlertState).filter_by(rule_id=rule.id, subject_key='BTCUSDT').one()
+    updates = []
+    event.listen(db_session.bind, 'before_cursor_execute', capture_state_update)
+    try:
+        result = notifications._observe(
+            db_session, rule, 'BTCUSDT', 'absolute', True, {'funding_rate': 0.02},
+            'unused', 'unused', state=triggered_state, aggregate=True,
+        )
+    finally:
+        event.remove(db_session.bind, 'before_cursor_execute', capture_state_update)
+
+    assert result == {'event_status': None, 'sent': 0}
+    assert updates == []
+
+
 def test_job_failure_requires_configured_consecutive_failures(db_session, monkeypatch):
     configure_notifications(monkeypatch)
     channel = create_channel(db_session)

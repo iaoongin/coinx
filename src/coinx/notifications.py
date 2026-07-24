@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.exc import IntegrityError
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -19,12 +19,10 @@ from coinx.models import (
     AlertRule,
     AlertRuleChannel,
     AlertState,
-    MarketKline,
     NotificationChannel,
     NotificationDelivery,
 )
 from coinx.repositories.funding_rate import load_latest_funding_rates
-from coinx.repositories.market_tickers import get_market_ticker_symbols
 from coinx.utils import logger
 
 
@@ -361,11 +359,24 @@ def _observe(
     for _attempt in range(3):
         previous = state.state
         previous_values = state.last_value_json or {}
-        observed_values = dict(values)
         consecutive_value = (
             consecutive_matches if consecutive_matches is not None
             else (int(state.consecutive_matches or 0) + 1 if matched else 0)
         )
+        recovery_count = int(previous_values.get('_recovery_count', 0))
+
+        # Most periodic observations do not advance the state machine. Avoid
+        # a CAS write for normal observations and sustained triggered states.
+        if (
+            not matched
+            and previous != 'triggered'
+            and consecutive_value == int(state.consecutive_matches or 0)
+        ):
+            return {'event_status': None, 'sent': 0}
+        if matched and previous == 'triggered' and recovery_count == 0:
+            return {'event_status': None, 'sent': 0}
+
+        observed_values = dict(values)
         next_state = previous
         next_triggered_at = state.last_triggered_at
         next_recovered_at = state.last_recovered_at
@@ -378,7 +389,7 @@ def _observe(
                 next_triggered_at = timestamp
                 event_status = 'triggered'
         elif previous == 'triggered':
-            recovery_count = int(previous_values.get('_recovery_count', 0)) + 1
+            recovery_count += 1
             observed_values['_recovery_count'] = recovery_count
             last_triggered_values = previous_values.get('_last_triggered_values', previous_values)
             observed_values['_last_triggered_values'] = last_triggered_values
@@ -493,21 +504,76 @@ def _evaluation_metrics(started_at, stages, **extra):
     }
 
 
-def _load_price_volume_klines(db, symbols, period='5m', history_limit=289):
-    """Fetch K-lines for every scoped symbol in one indexed database query."""
-    if not symbols:
-        return {}
-    rows = db.query(MarketKline).filter(
-        MarketKline.exchange == 'binance',
-        MarketKline.period == period,
-        MarketKline.symbol.in_(symbols),
-    ).order_by(MarketKline.symbol.asc(), MarketKline.open_time.desc()).all()
-    result = defaultdict(list)
-    for row in rows:
-        bucket = result[row.symbol]
-        if len(bucket) < history_limit:
-            bucket.append(row)
-    return result
+PRICE_VOLUME_LOOKBACK_MS = 26 * 60 * 60 * 1000
+
+
+def _load_price_volume_metrics(db, scope_limit):
+    """Calculate the per-symbol price and volume metrics in the database.
+
+    The 26-hour range bounds each 5-minute series to roughly 312 rows before
+    the window function keeps the latest 289 observations.
+    """
+    rows = db.execute(text("""
+        WITH latest_snapshot AS (
+          SELECT MAX(close_time) AS snapshot_time FROM market_tickers
+        ), top_symbols AS (
+          SELECT mt.symbol, latest_snapshot.snapshot_time
+          FROM market_tickers AS mt
+          JOIN latest_snapshot ON mt.close_time = latest_snapshot.snapshot_time
+          ORDER BY mt.quote_volume DESC
+          LIMIT :scope_limit
+        ), ranked_klines AS (
+          SELECT
+            k.symbol, k.open_time, k.open_price, k.close_price, k.quote_volume,
+            ROW_NUMBER() OVER (
+              PARTITION BY k.symbol ORDER BY k.open_time DESC
+            ) AS rn
+          FROM market_klines AS k
+          JOIN top_symbols AS s ON s.symbol = k.symbol
+          WHERE k.exchange = 'binance'
+            AND k.period = '5m'
+            AND k.open_time >= s.snapshot_time - :lookback_ms
+        ), metrics AS (
+          SELECT
+            symbol,
+            MAX(CASE WHEN rn = 1 THEN open_time END) AS open_time,
+            1.0 * (MAX(CASE WHEN rn = 1 THEN close_price END)
+              - MAX(CASE WHEN rn = 1 THEN open_price END))
+              / NULLIF(MAX(CASE WHEN rn = 1 THEN open_price END), 0) AS price_change,
+            MAX(CASE WHEN rn = 1 THEN quote_volume END)
+              / NULLIF(AVG(CASE WHEN rn BETWEEN 2 AND 289 THEN quote_volume END), 0)
+              AS volume_ratio,
+            COUNT(*) AS kline_count,
+            SUM(CASE WHEN rn BETWEEN 2 AND 289 AND quote_volume IS NOT NULL
+              THEN 1 ELSE 0 END) AS historical_volume_count
+          FROM ranked_klines
+          WHERE rn <= 289
+          GROUP BY symbol
+        )
+        SELECT
+          s.symbol,
+          m.open_time,
+          m.price_change,
+          m.volume_ratio,
+          COALESCE(m.kline_count, 0) AS kline_count,
+          COALESCE(m.historical_volume_count, 0) AS historical_volume_count
+        FROM top_symbols AS s
+        LEFT JOIN metrics AS m ON m.symbol = s.symbol
+        ORDER BY s.symbol
+    """), {
+        'scope_limit': int(scope_limit),
+        'lookback_ms': PRICE_VOLUME_LOOKBACK_MS,
+    }).mappings().all()
+    return {
+        row['symbol']: {
+            'open_time': row['open_time'],
+            'price_change': float(row['price_change']) if row['price_change'] is not None else None,
+            'volume_ratio': float(row['volume_ratio']) if row['volume_ratio'] is not None else None,
+            'kline_count': int(row['kline_count'] or 0),
+            'historical_volume_count': int(row['historical_volume_count'] or 0),
+        }
+        for row in rows
+    }
 
 
 def evaluate_funding_rate_rules(session=None, rule_id=None):
@@ -607,32 +673,27 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
             events = []
             rule_checked = 0
             stage_started = time.perf_counter()
-            symbols = get_market_ticker_symbols(
-                rank_type='quote_volume',
-                limit=int(scope.get('limit', config.FETCH_COINS_TOP_VOLUME_COUNT)),
-                session=db,
+            metrics_by_symbol = _load_price_volume_metrics(
+                db, int(scope.get('limit', config.FETCH_COINS_TOP_VOLUME_COUNT)),
             )
-            stages['scope_load_ms'] += (time.perf_counter() - stage_started) * 1000
-            stage_started = time.perf_counter()
-            klines_by_symbol = _load_price_volume_klines(
-                db, symbols, period=params.get('period', '5m'), history_limit=289,
-            )
-            stages['kline_load_ms'] += (time.perf_counter() - stage_started) * 1000
+            stages['metric_load_ms'] += (time.perf_counter() - stage_started) * 1000
+            symbols = list(metrics_by_symbol)
             direction = params.get('direction', 'absolute')
             stage_started = time.perf_counter()
             states = _load_rule_states(db, rule.id, direction, symbols)
             stages['state_load_ms'] += (time.perf_counter() - stage_started) * 1000
             stage_started = time.perf_counter()
             for symbol in symbols:
-                rows = klines_by_symbol.get(symbol, [])
-                if len(rows) < 2:
+                metric = metrics_by_symbol[symbol]
+                price_change = metric['price_change']
+                volume_ratio = metric['volume_ratio']
+                if (
+                    metric['kline_count'] < 2
+                    or metric['historical_volume_count'] == 0
+                    or price_change is None
+                    or volume_ratio is None
+                ):
                     continue
-                latest = rows[0]
-                historical_volumes = [float(row.quote_volume) for row in rows[1:] if row.quote_volume is not None]
-                if latest.open_price in (None, 0) or latest.close_price is None or latest.quote_volume is None or not historical_volumes:
-                    continue
-                price_change = (float(latest.close_price) - float(latest.open_price)) / float(latest.open_price)
-                volume_ratio = float(latest.quote_volume) / (sum(historical_volumes) / len(historical_volumes))
                 price_threshold = float(params['price_change_threshold'])
                 volume_threshold = float(params['volume_ratio_threshold'])
                 direction_match = abs(price_change) >= price_threshold if direction == 'absolute' else (price_change >= price_threshold if direction == 'up' else price_change <= -price_threshold)
@@ -642,7 +703,7 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
                 matched_count += int(is_match)
                 result = _observe(
                     db, rule, symbol, direction, is_match,
-                    {'price_change': price_change, 'price_change_threshold': price_threshold, 'volume_ratio': volume_ratio, 'volume_ratio_threshold': volume_threshold, 'open_time': latest.open_time},
+                    {'price_change': price_change, 'price_change_threshold': price_threshold, 'volume_ratio': volume_ratio, 'volume_ratio_threshold': volume_threshold, 'open_time': metric['open_time']},
                     f'{symbol} 价格放量异动',
                     f'5分钟涨跌 {price_change * 100:.2f}%，成交额放大 {volume_ratio:.2f} 倍。',
                     state=states.get(symbol),
@@ -676,7 +737,7 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
             'matched': matched_count, 'sent': sent,
             'metrics': _evaluation_metrics(
                 started_at, stages, symbols=len(symbols) if rules else 0,
-                kline_rows=sum(len(rows) for rows in klines_by_symbol.values()) if rules else 0,
+                kline_rows=sum(metric['kline_count'] for metric in metrics_by_symbol.values()) if rules else 0,
             ),
         }
     except Exception:
