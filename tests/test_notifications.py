@@ -73,6 +73,18 @@ def test_notification_time_is_fixed_to_china_standard_time():
     assert notifications.format_notification_time(0) == '1970-01-01 08:00:00'
 
 
+def test_telegram_body_preserves_visual_blank_lines(monkeypatch):
+    telegram = type('Channel', (), {})()
+    other = type('Channel', (), {})()
+    monkeypatch.setattr(
+        notifications, 'apprise_target_type',
+        lambda channel: 'Telegram' if channel is telegram else 'Bark',
+    )
+
+    assert notifications.format_channel_body(telegram, 'first\n\nsecond') == 'first\n\u200b\nsecond'
+    assert notifications.format_channel_body(other, 'first\n\nsecond') == 'first\n\nsecond'
+
+
 def test_funding_rate_alert_triggers_once_then_recovers(db_session, monkeypatch):
     configure_notifications(monkeypatch)
     sent_bodies = []
@@ -96,8 +108,9 @@ def test_funding_rate_alert_triggers_once_then_recovers(db_session, monkeypatch)
     assert [delivery.event_status for delivery in deliveries] == ['summary', 'summary']
     assert all(delivery.delivery_status == 'success' for delivery in deliveries)
     assert all(delivery.payload_json['message']['title'] for delivery in deliveries)
-    assert all('检查对象：1｜触发异常：1｜恢复正常：0' in body or '检查对象：1｜触发异常：0｜恢复正常：1' in body for body in sent_bodies)
-    assert all('时间：' in body for body in sent_bodies)
+    assert all('检查 1 | 异常 1 | 恢复 0' in body or '检查 1 | 异常 0 | 恢复 1' in body for body in sent_bodies)
+    assert all(delivery.payload_json['message']['title'].startswith('CoinX · rule-') for delivery in deliveries)
+    assert all('时间：' not in body for body in sent_bodies)
 
 
 def test_funding_rate_recovery_requires_configured_confirmations(db_session, monkeypatch):

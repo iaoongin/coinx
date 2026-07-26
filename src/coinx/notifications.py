@@ -162,6 +162,20 @@ def format_notification_time(timestamp=None):
     return moment.strftime('%Y-%m-%d %H:%M:%S')
 
 
+def format_signed_percent(value, precision=2):
+    return f'{value * 100:+.{precision}f}%'
+
+
+def format_price(value):
+    if value is None:
+        return '-'
+    return f'{value:,.8f}'.rstrip('0').rstrip('.')
+
+
+def trend_dot(value):
+    return '🟢' if value >= 0 else '🔴'
+
+
 def get_fernet():
     key = config.NOTIFICATION_ENCRYPTION_KEY
     if not key:
@@ -193,6 +207,13 @@ def apprise_target_type(channel):
     except NotificationConfigError:
         return 'Unknown'
     return APPRISE_TARGET_TYPES.get(scheme, scheme or 'Unknown')
+
+
+def format_channel_body(channel, body):
+    """Preserve visual blank lines for Telegram without affecting other targets."""
+    if apprise_target_type(channel) == 'Telegram':
+        return body.replace('\n\n', '\n\u200b\n')
+    return body
 
 
 def serialize_channel(channel):
@@ -360,9 +381,10 @@ def send_apprise(url, title, body):
     return True
 
 
-def _delivery(db, rule, channel, event_key, event_status, payload, title, body):
+def _delivery(db, rule, channel, event_key, event_status, payload, title, body, include_time=True):
     timestamp = now_ms()
-    body_with_time = f'{body}\n\n时间：{format_notification_time(timestamp)}'
+    body_with_time = f'{body}\n\n时间：{format_notification_time(timestamp)}' if include_time else body
+    body_with_time = format_channel_body(channel, body_with_time)
     payload = dict(payload or {})
     # Keep the exact rendered content so delivery history can be audited later.
     payload['message'] = {'title': title, 'body': body_with_time}
@@ -581,16 +603,15 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         return 0
     triggered = [event['triggered'] for event in events if event['status'] == 'triggered']
     recovered = [event['recovered'] for event in events if event['status'] == 'recovered']
-    sections = [
-        f'本次评估完成\n检查对象：{checked}｜触发异常：{len(triggered)}｜恢复正常：{len(recovered)}',
-    ]
+    timestamp = now_ms()
+    sections = [format_notification_time(timestamp)]
     if triggered:
         sections.append('触发异常\n' + '\n'.join(triggered))
     if recovered:
         sections.append('恢复正常\n' + '\n'.join(recovered))
-    sections.append(f'规则条件：{condition}')
+    sections.append(condition)
+    sections.append(f'检查 {checked} | 异常 {len(triggered)} | 恢复 {len(recovered)}')
 
-    timestamp = now_ms()
     payload = {
         'event_type': rule.event_type,
         'status': 'summary',
@@ -602,7 +623,7 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     deliveries = [
         _delivery(
             db, rule, channel, f'rule:{rule.id}|evaluation:{timestamp}', 'summary', payload,
-            f'CoinX · {rule.name}', '\n\n'.join(sections),
+            f'CoinX · {rule.name}', '\n\n'.join(sections), include_time=False,
         )
         for channel in _rule_channels(db, rule.id)
     ]
@@ -663,6 +684,7 @@ def _load_price_volume_metrics(db, scope_limit):
           SELECT
             symbol,
             MAX(CASE WHEN rn = 1 THEN open_time END) AS open_time,
+            MAX(CASE WHEN rn = 1 THEN close_price END) AS close_price,
             1.0 * (MAX(CASE WHEN rn = 1 THEN close_price END)
               - MAX(CASE WHEN rn = 1 THEN open_price END))
               / NULLIF(MAX(CASE WHEN rn = 1 THEN open_price END), 0) AS price_change,
@@ -679,6 +701,7 @@ def _load_price_volume_metrics(db, scope_limit):
         SELECT {query_hint}
           s.symbol,
           m.open_time,
+          m.close_price,
           m.price_change,
           m.volume_ratio,
           COALESCE(m.kline_count, 0) AS kline_count,
@@ -693,6 +716,7 @@ def _load_price_volume_metrics(db, scope_limit):
     return {
         row['symbol']: {
             'open_time': row['open_time'],
+            'close_price': float(row['close_price']) if row['close_price'] is not None else None,
             'price_change': float(row['price_change']) if row['price_change'] is not None else None,
             'volume_ratio': float(row['volume_ratio']) if row['volume_ratio'] is not None else None,
             'kline_count': int(row['kline_count'] or 0),
@@ -753,8 +777,11 @@ def evaluate_funding_rate_rules(session=None, rule_id=None):
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
-                        'triggered': f'- {symbol} 资金费率 {rate * 100:.4f}%',
-                        'recovered': f'- {symbol}\n  之前：{previous_rate * 100:.4f}%\n  当前：{rate * 100:.4f}%',
+                        'triggered': f'{trend_dot(rate)} {symbol} {format_signed_percent(rate, 4)}',
+                        'recovered': (
+                            f'{trend_dot(rate)} {symbol} {format_signed_percent(rate, 4)}'
+                            f'\n  之前 {format_signed_percent(previous_rate, 4)}'
+                        ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
             stage_started = time.perf_counter()
@@ -813,6 +840,7 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
                 metric = metrics_by_symbol[symbol]
                 price_change = metric['price_change']
                 volume_ratio = metric['volume_ratio']
+                close_price = metric['close_price']
                 if (
                     metric['kline_count'] < 2
                     or metric['historical_volume_count'] == 0
@@ -829,7 +857,7 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
                 matched_count += int(is_match)
                 result = _observe(
                     db, rule, symbol, direction, is_match,
-                    {'price_change': price_change, 'price_change_threshold': price_threshold, 'volume_ratio': volume_ratio, 'volume_ratio_threshold': volume_threshold, 'open_time': metric['open_time']},
+                    {'price_change': price_change, 'price_change_threshold': price_threshold, 'volume_ratio': volume_ratio, 'volume_ratio_threshold': volume_threshold, 'close_price': close_price, 'open_time': metric['open_time']},
                     f'{symbol} 价格放量异动',
                     f'5分钟涨跌 {price_change * 100:.2f}%，成交额放大 {volume_ratio:.2f} 倍。',
                     state=states.get(symbol),
@@ -839,20 +867,25 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
                     previous = result['previous_values'] or {}
                     previous_change = float(previous.get('price_change') or 0)
                     previous_ratio = float(previous.get('volume_ratio') or 0)
+                    previous_price = previous.get('close_price')
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
-                        'triggered': f'- {symbol} 5分钟涨跌 {price_change * 100:.2f}%，成交额放大 {volume_ratio:.2f} 倍',
+                        'triggered': (
+                            f'{trend_dot(price_change)} {symbol} {format_signed_percent(price_change)}'
+                            f' | {volume_ratio:.2f} 倍 | {format_price(close_price)}'
+                        ),
                         'recovered': (
-                            f'- {symbol}\n  之前：涨跌 {previous_change * 100:.2f}%，成交额 {previous_ratio:.2f} 倍'
-                            f'\n  当前：涨跌 {price_change * 100:.2f}%，成交额 {volume_ratio:.2f} 倍'
+                            f'{trend_dot(price_change)} {symbol} {format_signed_percent(price_change)}'
+                            f' | {volume_ratio:.2f} 倍 | {format_price(close_price)}'
+                            f'\n  之前 {format_signed_percent(previous_change)} | {previous_ratio:.2f} 倍 | {format_price(previous_price)}'
                         ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
             stage_started = time.perf_counter()
             sent += _deliver_evaluation_summary(
                 db, rule, rule_checked, events,
-                f'5分钟涨跌 {price_threshold * 100:.2f}% 且成交额放大 >= {volume_threshold:.2f} 倍',
+                f'阈值 {format_signed_percent(price_threshold)} | {volume_threshold:.2f} 倍',
             )
             stages['delivery_ms'] += (time.perf_counter() - stage_started) * 1000
         stage_started = time.perf_counter()
