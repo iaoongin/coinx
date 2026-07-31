@@ -601,8 +601,21 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     """Send one consistently formatted summary per rule evaluation and channel."""
     if not events:
         return 0
-    triggered = [event['triggered'] for event in events if event['status'] == 'triggered']
-    recovered = [event['recovered'] for event in events if event['status'] == 'recovered']
+    triggered_events = sorted(
+        (event for event in events if event['status'] == 'triggered'),
+        key=lambda event: event.get('severity', 0),
+        reverse=True,
+    )
+    recovered_events = sorted(
+        (event for event in events if event['status'] == 'recovered'),
+        key=lambda event: event.get('severity', 0),
+        reverse=True,
+    )
+    triggered = [
+        f'{index}. {event["triggered"]}'
+        for index, event in enumerate(triggered_events, start=1)
+    ]
+    recovered = [event['recovered'] for event in recovered_events]
     timestamp = now_ms()
     event_titles = {
         EVENT_FUNDING_RATE: ('资金费率异常', '资金费率已恢复', '资金费率'),
@@ -616,14 +629,11 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     else:
         title = f'✅ {event_titles[1]}'
 
-    if triggered and recovered:
-        sections = [
-            '触发异常\n' + '\n\n'.join(triggered),
-            '恢复正常\n' + '\n\n'.join(recovered),
-        ]
-    else:
-        sections = ['\n\n'.join(triggered or recovered)]
-    sections.append(condition)
+    sections = [condition]
+    if triggered:
+        sections.append(f'🔴 当前异常 · {len(triggered)} 个\n' + '\n'.join(triggered))
+    if recovered:
+        sections.append(f'✅ 已恢复 · {len(recovered)} 个\n' + '\n'.join(recovered))
     sections.append(f'本轮：检查 {checked} · 异常 {len(triggered)} · 恢复 {len(recovered)}')
     sections.append(f'时间：{format_notification_time(timestamp)}')
 
@@ -792,14 +802,14 @@ def evaluate_funding_rate_rules(session=None, rule_id=None):
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
+                        'severity': abs(rate) / threshold,
                         'triggered': (
-                            f'{symbol}\n\n'
-                            f'当前    {format_signed_percent(rate, 4)}'
+                            f'{symbol}  {format_signed_percent(rate, 4)}'
+                            f'  · {abs(rate) / threshold:.2f}x 阈值'
                         ),
                         'recovered': (
-                            f'{symbol}\n\n'
-                            f'当前    {format_signed_percent(rate, 4)}\n'
-                            f'之前    {format_signed_percent(previous_rate, 4)}'
+                            f'{symbol}  当前 {format_signed_percent(rate, 4)}'
+                            f'  · 之前 {format_signed_percent(previous_rate, 4)}'
                         ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
@@ -890,14 +900,19 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
+                        'severity': max(
+                            abs(price_change) / price_threshold,
+                            volume_ratio / volume_threshold,
+                        ),
                         'triggered': (
-                            f'{symbol} · 5 分钟\n\n'
-                            f'当前    {format_signed_percent(price_change)}   {volume_ratio:.2f}x   {format_price(close_price)}'
+                            f'{symbol}  {format_signed_percent(price_change)}'
+                            f'  · {volume_ratio:.2f}x · {format_price(close_price)}'
                         ),
                         'recovered': (
-                            f'{symbol} · 5 分钟\n\n'
-                            f'当前    {format_signed_percent(price_change)}   {volume_ratio:.2f}x   {format_price(close_price)}\n'
-                            f'之前    {format_signed_percent(previous_change)}   {previous_ratio:.2f}x   {format_price(previous_price)}'
+                            f'{symbol}  当前 {format_signed_percent(price_change)}'
+                            f' · {volume_ratio:.2f}x · {format_price(close_price)}'
+                            f'  · 之前 {format_signed_percent(previous_change)}'
+                            f' · {previous_ratio:.2f}x · {format_price(previous_price)}'
                         ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
@@ -974,15 +989,14 @@ def evaluate_job_failure_rules(metadata, session=None, rule_id=None):
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
+                        'severity': current_failures / required_failures,
                         'triggered': (
-                            f'{job_id}\n\n'
-                            f'错误    {job.get("last_error") or "未提供"}\n'
-                            f'当前    已连续失败 {current_failures} 次'
+                            f'{job_id}  错误：{job.get("last_error") or "未提供"}'
+                            f' · 已连续失败 {current_failures} 次'
                         ),
                         'recovered': (
-                            f'{job_id}\n\n'
-                            f'当前    执行成功\n'
-                            f'之前    {previous_error}'
+                            f'{job_id}  当前：执行成功'
+                            f' · 之前：{previous_error}'
                         ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000

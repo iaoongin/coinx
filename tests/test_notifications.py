@@ -113,9 +113,8 @@ def test_funding_rate_alert_triggers_once_then_recovers(db_session, monkeypatch)
         '🔴 资金费率异常',
         '✅ 资金费率已恢复',
     ]
-    assert '当前    +0.1200%' in sent_bodies[0]
-    assert '当前    +0.0200%' in sent_bodies[1]
-    assert '之前    +0.1200%' in sent_bodies[1]
+    assert '🔴 当前异常 · 1 个\n1. BTCUSDT  +0.1200%  · 1.20x 阈值' in sent_bodies[0]
+    assert '✅ 已恢复 · 1 个\nBTCUSDT  当前 +0.0200%  · 之前 +0.1200%' in sent_bodies[1]
     assert all('时间：' in body for body in sent_bodies)
 
 
@@ -139,6 +138,33 @@ def test_funding_rate_recovery_requires_configured_confirmations(db_session, mon
 
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id.asc()).all()
     assert [delivery.event_status for delivery in deliveries] == ['summary', 'summary']
+
+
+def test_summary_orders_current_exceptions_and_separates_recoveries(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.005, 'direction': 'absolute'},
+    )
+
+    assert notifications._deliver_evaluation_summary(
+        db_session, rule, 626,
+        [
+            {'status': 'triggered', 'severity': 1.02, 'triggered': 'CFXUSDT  -0.5075%  · 1.02x 阈值'},
+            {'status': 'recovered', 'severity': 1.34, 'recovered': 'BTCUSDT  当前 +0.0820%  · 之前 +0.1240%'},
+            {'status': 'triggered', 'severity': 2.11, 'triggered': 'LAUSDT  -1.0543%  · 2.11x 阈值'},
+            {'status': 'triggered', 'severity': 1.29, 'triggered': 'RLCUSDT  -0.6433%  · 1.29x 阈值'},
+        ],
+        '规则：绝对值 ≥ 0.5000%',
+    ) == 1
+
+    delivery = db_session.query(NotificationDelivery).one()
+    body = delivery.payload_json['message']['body']
+    assert delivery.payload_json['message']['title'] == '📊 资金费率状态更新'
+    assert '🔴 当前异常 · 3 个' in body
+    assert body.index('1. LAUSDT') < body.index('2. RLCUSDT') < body.index('3. CFXUSDT')
+    assert '✅ 已恢复 · 1 个\nBTCUSDT  当前 +0.0820%  · 之前 +0.1240%' in body
 
 
 def test_price_volume_only_evaluates_current_quote_volume_rank(db_session, monkeypatch):
@@ -172,8 +198,7 @@ def test_price_volume_only_evaluates_current_quote_volume_rank(db_session, monke
     delivery = db_session.query(NotificationDelivery).one()
     assert delivery.event_status == 'summary'
     assert delivery.payload_json['message']['title'] == '🔴 价格放量异动'
-    assert 'BTCUSDT · 5 分钟' in delivery.payload_json['message']['body']
-    assert '当前    +3.00%   3.00x   103' in delivery.payload_json['message']['body']
+    assert '🔴 当前异常 · 1 个\n1. BTCUSDT  +3.00%  · 3.00x · 103' in delivery.payload_json['message']['body']
     assert '规则：涨跌幅 ≥ +2.00% · 放量 ≥ 2.00x' in delivery.payload_json['message']['body']
 
 
@@ -287,9 +312,8 @@ def test_job_failure_requires_configured_consecutive_failures(db_session, monkey
     ]
     assert 'repair_market_rolling_job' in deliveries[0].payload_json['message']['body']
     assert 'collect_funding_rates_job' in deliveries[0].payload_json['message']['body']
-    assert '错误    network' in deliveries[0].payload_json['message']['body']
-    assert '当前    执行成功' in deliveries[1].payload_json['message']['body']
-    assert '之前    network' in deliveries[1].payload_json['message']['body']
+    assert 'repair_market_rolling_job  错误：network · 已连续失败 2 次' in deliveries[0].payload_json['message']['body']
+    assert 'repair_market_rolling_job  当前：执行成功 · 之前：network' in deliveries[1].payload_json['message']['body']
 
 
 def test_channel_api_never_returns_url_and_rule_can_select_channel(db_session, monkeypatch):
