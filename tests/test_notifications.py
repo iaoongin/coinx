@@ -108,9 +108,15 @@ def test_funding_rate_alert_triggers_once_then_recovers(db_session, monkeypatch)
     assert [delivery.event_status for delivery in deliveries] == ['summary', 'summary']
     assert all(delivery.delivery_status == 'success' for delivery in deliveries)
     assert all(delivery.payload_json['message']['title'] for delivery in deliveries)
-    assert all('检查 1 | 异常 1 | 恢复 0' in body or '检查 1 | 异常 0 | 恢复 1' in body for body in sent_bodies)
-    assert all(delivery.payload_json['message']['title'].startswith('CoinX · rule-') for delivery in deliveries)
-    assert all('时间：' not in body for body in sent_bodies)
+    assert all('本轮：检查 1 · 异常 1 · 恢复 0' in body or '本轮：检查 1 · 异常 0 · 恢复 1' in body for body in sent_bodies)
+    assert [delivery.payload_json['message']['title'] for delivery in deliveries] == [
+        '🔴 资金费率异常',
+        '✅ 资金费率已恢复',
+    ]
+    assert '当前    +0.1200%' in sent_bodies[0]
+    assert '当前    +0.0200%' in sent_bodies[1]
+    assert '之前    +0.1200%' in sent_bodies[1]
+    assert all('时间：' in body for body in sent_bodies)
 
 
 def test_funding_rate_recovery_requires_configured_confirmations(db_session, monkeypatch):
@@ -165,7 +171,10 @@ def test_price_volume_only_evaluates_current_quote_volume_rank(db_session, monke
     assert result['sent'] == 1
     delivery = db_session.query(NotificationDelivery).one()
     assert delivery.event_status == 'summary'
-    assert 'BTCUSDT' in delivery.payload_json['message']['body']
+    assert delivery.payload_json['message']['title'] == '🔴 价格放量异动'
+    assert 'BTCUSDT · 5 分钟' in delivery.payload_json['message']['body']
+    assert '当前    +3.00%   3.00x   103' in delivery.payload_json['message']['body']
+    assert '规则：涨跌幅 ≥ +2.00% · 放量 ≥ 2.00x' in delivery.payload_json['message']['body']
 
 
 def test_price_volume_batches_kline_loading_and_state_initialization(db_session, monkeypatch):
@@ -272,8 +281,15 @@ def test_job_failure_requires_configured_consecutive_failures(db_session, monkey
     }, session=db_session)['sent'] == 1
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
     assert [item.event_status for item in deliveries] == ['summary', 'summary']
+    assert [item.payload_json['message']['title'] for item in deliveries] == [
+        '🔴 定时任务执行失败',
+        '✅ 定时任务已恢复',
+    ]
     assert 'repair_market_rolling_job' in deliveries[0].payload_json['message']['body']
     assert 'collect_funding_rates_job' in deliveries[0].payload_json['message']['body']
+    assert '错误    network' in deliveries[0].payload_json['message']['body']
+    assert '当前    执行成功' in deliveries[1].payload_json['message']['body']
+    assert '之前    network' in deliveries[1].payload_json['message']['body']
 
 
 def test_channel_api_never_returns_url_and_rule_can_select_channel(db_session, monkeypatch):
