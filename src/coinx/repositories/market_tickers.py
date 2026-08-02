@@ -2,7 +2,12 @@ from typing import List, Optional
 
 from sqlalchemy import func, desc, asc
 
-from coinx.config import DB_TYPE
+from coinx.config import (
+    DB_TYPE,
+    FETCH_COINS_TOP_GAINERS_COUNT,
+    FETCH_COINS_TOP_LOSERS_COUNT,
+    FETCH_COINS_TOP_VOLUME_COUNT,
+)
 from coinx.database import get_session
 from coinx.models import MarketTickers
 
@@ -133,6 +138,79 @@ def get_market_ticker_symbols(
     finally:
         if own_session:
             db.close()
+
+
+def _stable_unique_symbols(*symbol_groups) -> List[str]:
+    seen = set()
+    symbols = []
+    for group in symbol_groups:
+        for symbol in group or []:
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                symbols.append(symbol)
+    return symbols
+
+
+def get_market_scope_symbols(
+    tracked_symbols=None,
+    top_gainers_limit: int = FETCH_COINS_TOP_GAINERS_COUNT,
+    top_losers_limit: int = FETCH_COINS_TOP_LOSERS_COUNT,
+    top_volume_limit: int = FETCH_COINS_TOP_VOLUME_COUNT,
+    session=None,
+) -> List[str]:
+    """Build the tracked and ranked market scope from the latest ticker snapshot."""
+    own_session = session is None
+    db = session or get_session()
+
+    try:
+        close_time = db.query(func.max(MarketTickers.close_time)).scalar()
+        if close_time is None:
+            return _stable_unique_symbols(tracked_symbols)
+
+        gainers = get_market_ticker_symbols(
+            rank_type='price_change', direction='up', limit=top_gainers_limit,
+            close_time=close_time, session=db,
+        )
+        losers = get_market_ticker_symbols(
+            rank_type='price_change', direction='down', limit=top_losers_limit,
+            close_time=close_time, session=db,
+        )
+        volumes = get_market_ticker_symbols(
+            rank_type='quote_volume', limit=top_volume_limit, close_time=close_time, session=db,
+        )
+        return _stable_unique_symbols(tracked_symbols, gainers, losers, volumes)
+    finally:
+        if own_session:
+            db.close()
+
+
+def get_market_scope_symbols_from_tickers(
+    tickers,
+    tracked_symbols=None,
+    top_gainers_limit: int = FETCH_COINS_TOP_GAINERS_COUNT,
+    top_losers_limit: int = FETCH_COINS_TOP_LOSERS_COUNT,
+    top_volume_limit: int = FETCH_COINS_TOP_VOLUME_COUNT,
+) -> List[str]:
+    """Build the market scope from live Binance 24-hour ticker records."""
+    tickers = tickers or []
+
+    def ranked_symbols(field, reverse, limit):
+        def sort_value(ticker):
+            try:
+                return float(ticker.get(field, 0) or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        return [
+            ticker.get('symbol')
+            for ticker in sorted(tickers, key=sort_value, reverse=reverse)[:limit]
+            if ticker.get('symbol')
+        ]
+
+    gainers = ranked_symbols('priceChangePercent', True, top_gainers_limit)
+    losers = ranked_symbols('priceChangePercent', False, top_losers_limit)
+    volumes = ranked_symbols('quoteVolume', True, top_volume_limit)
+    return _stable_unique_symbols(tracked_symbols, gainers, losers, volumes)
 
 
 def get_latest_close_time(session=None) -> Optional[int]:

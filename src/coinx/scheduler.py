@@ -15,6 +15,8 @@ from .coin_manager import get_active_coins, update_coins_config
 from .config import (
     FETCH_COINS_ENABLED,
     FETCH_COINS_INTERVAL,
+    FETCH_COINS_TOP_GAINERS_COUNT,
+    FETCH_COINS_TOP_LOSERS_COUNT,
     FETCH_COINS_TOP_VOLUME_COUNT,
     FUNDING_RATE_COLLECT_ENABLED,
     ENABLED_EXCHANGES,
@@ -31,6 +33,7 @@ from .config import (
 )
 from .repositories.funding_rate import collect_funding_rates
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
+from .repositories.market_tickers import get_market_scope_symbols_from_tickers
 from .repositories.market_structure_score import get_market_structure_score_symbols
 from .collector.timing import format_duration_ms
 from .utils import logger
@@ -230,7 +233,7 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
         started_at = time.perf_counter()
         _mark_job_started('repair_market_rolling_job')
         try:
-            tracked_symbols = get_active_coins()
+            tracked_symbols = list(dict.fromkeys(get_active_coins()))
             score_symbols = get_market_structure_score_symbols()
             tracked_symbol_set = set(tracked_symbols)
             top_symbols = [symbol for symbol in score_symbols if symbol not in tracked_symbol_set]
@@ -334,23 +337,23 @@ if REPAIR_HISTORY_ENABLED:
         _mark_job_started('repair_market_history_job')
         try:
             logger.info('开始执行低频历史补齐任务')
-            tracked_symbols = get_active_coins()
+            tracked_symbols = list(dict.fromkeys(get_active_coins()))
             top_symbols = []
             worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
             if FETCH_COINS_ENABLED:
                 all_tickers = get_all_24hr_tickers()
                 if all_tickers:
-                    top_volume_symbols = [
-                        t['symbol'] for t in sorted(
-                            all_tickers,
-                            key=lambda x: x.get('quoteVolume', 0),
-                            reverse=True
-                        )[:FETCH_COINS_TOP_VOLUME_COUNT]
-                    ]
+                    market_symbols = get_market_scope_symbols_from_tickers(
+                        all_tickers,
+                        tracked_symbols=tracked_symbols,
+                        top_gainers_limit=FETCH_COINS_TOP_GAINERS_COUNT,
+                        top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
+                        top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
+                    )
                     tracked_symbol_set = set(tracked_symbols)
-                    top_symbols = [symbol for symbol in top_volume_symbols if symbol not in tracked_symbol_set]
+                    top_symbols = [symbol for symbol in market_symbols if symbol not in tracked_symbol_set]
                 else:
-                    logger.warning('低频历史补齐获取成交额排行失败，仅修补跟踪币种')
+                    logger.warning('低频历史补齐获取行情排行失败，仅修补跟踪币种')
             logger.info(
                 '历史修补阶段 1/2: 开始修补跟踪币种全类型: symbols=%d series_types=%s coverage_hours=%s max_workers=%s',
                 len(tracked_symbols),

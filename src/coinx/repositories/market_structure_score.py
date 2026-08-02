@@ -10,9 +10,14 @@ from coinx.collector.exchange_repair import latest_closed_5m_open_time
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
 from coinx.collector.gate.series import get_all_funding_rates as get_all_gate_funding_rates
 from coinx.collector.okx.series import get_all_funding_rates as get_all_okx_funding_rates
-from coinx.config import ENABLED_EXCHANGES, FETCH_COINS_TOP_VOLUME_COUNT
+from coinx.config import (
+    ENABLED_EXCHANGES,
+    FETCH_COINS_TOP_GAINERS_COUNT,
+    FETCH_COINS_TOP_LOSERS_COUNT,
+    FETCH_COINS_TOP_VOLUME_COUNT,
+)
 from coinx.database import get_session
-from coinx.repositories.market_tickers import get_market_ticker_symbols
+from coinx.repositories.market_tickers import get_market_scope_symbols
 from coinx.repositories.market_structure_series import load_market_structure_exchange_maps
 from coinx.utils import logger
 
@@ -75,14 +80,24 @@ def _normalize_exchange_list(exchanges):
     return normalized
 
 
-def get_market_structure_score_symbols(session=None, top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT):
+def get_market_structure_score_symbols(
+    session=None,
+    top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
+    top_gainers_limit=FETCH_COINS_TOP_GAINERS_COUNT,
+    top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
+):
     tracked_symbols = get_active_coins()
     own_session = session is None
     db = session or get_session()
 
     try:
-        top_volume_symbols = get_market_ticker_symbols(rank_type='quote_volume', limit=top_volume_limit, session=db)
-        return list(dict.fromkeys([*tracked_symbols, *top_volume_symbols]))
+        return get_market_scope_symbols(
+            tracked_symbols=tracked_symbols,
+            top_gainers_limit=top_gainers_limit,
+            top_losers_limit=top_losers_limit,
+            top_volume_limit=top_volume_limit,
+            session=db,
+        )
     finally:
         if own_session:
             db.close()

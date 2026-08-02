@@ -4,6 +4,8 @@ from coinx.repositories.market_tickers import (
     save_market_tickers,
     get_market_tickers,
     get_market_ticker_symbols,
+    get_market_scope_symbols,
+    get_market_scope_symbols_from_tickers,
     get_latest_close_time,
     delete_old_records,
 )
@@ -141,6 +143,47 @@ def test_get_market_ticker_symbols_returns_symbols_only(db_session):
     assert len(symbols) == 5
     assert symbols[0].endswith('USDT')
     assert isinstance(symbols[0], str)
+
+
+def test_market_scope_symbols_preserves_source_order_and_deduplicates(db_session):
+    close_time = int(time.time() * 1000)
+    records = [
+        {'symbol': 'TRACKEDUSDT', 'price_change_percent': 10, 'quote_volume': 10, 'close_time': close_time},
+        {'symbol': 'GAINERUSDT', 'price_change_percent': 9, 'quote_volume': 20, 'close_time': close_time},
+        {'symbol': 'LOSERUSDT', 'price_change_percent': -9, 'quote_volume': 30, 'close_time': close_time},
+        {'symbol': 'VOLUMEUSDT', 'price_change_percent': 1, 'quote_volume': 100, 'close_time': close_time},
+    ]
+    db_session.add_all(MarketTickers(**record) for record in records)
+    db_session.commit()
+
+    symbols = get_market_scope_symbols(
+        tracked_symbols=['TRACKEDUSDT', 'TRACKEDUSDT'],
+        top_gainers_limit=2,
+        top_losers_limit=2,
+        top_volume_limit=3,
+        session=db_session,
+    )
+
+    assert symbols == ['TRACKEDUSDT', 'GAINERUSDT', 'LOSERUSDT', 'VOLUMEUSDT']
+
+
+def test_live_market_scope_symbols_preserves_source_order_and_deduplicates():
+    tickers = [
+        {'symbol': 'TRACKEDUSDT', 'priceChangePercent': 10, 'quoteVolume': 10},
+        {'symbol': 'GAINERUSDT', 'priceChangePercent': 9, 'quoteVolume': 20},
+        {'symbol': 'LOSERUSDT', 'priceChangePercent': -9, 'quoteVolume': 30},
+        {'symbol': 'VOLUMEUSDT', 'priceChangePercent': 1, 'quoteVolume': 100},
+    ]
+
+    symbols = get_market_scope_symbols_from_tickers(
+        tickers,
+        tracked_symbols=['TRACKEDUSDT', 'TRACKEDUSDT'],
+        top_gainers_limit=2,
+        top_losers_limit=2,
+        top_volume_limit=3,
+    )
+
+    assert symbols == ['TRACKEDUSDT', 'GAINERUSDT', 'LOSERUSDT', 'VOLUMEUSDT']
 
 
 def test_get_market_tickers_empty(db_session):

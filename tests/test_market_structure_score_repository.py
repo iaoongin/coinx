@@ -43,11 +43,11 @@ def test_point_float_handles_homepage_open_interest_aliases():
     assert _point_float(point, 'open_interest_value', 'sum_open_interest_value') == 456
 
 
-def test_market_structure_symbols_include_tracked_and_top_volume(monkeypatch):
+def test_market_structure_symbols_include_tracked_and_ranked_symbols(monkeypatch):
     monkeypatch.setattr('coinx.repositories.market_structure_score.get_active_coins', lambda: ['BTCUSDT', 'ETHUSDT'])
     monkeypatch.setattr(
-        'coinx.repositories.market_structure_score.get_market_ticker_symbols',
-        lambda **kwargs: ['ETHUSDT', 'SOLUSDT', 'XRPUSDT'],
+        'coinx.repositories.market_structure_score.get_market_scope_symbols',
+        lambda **kwargs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'],
     )
 
     symbols = get_market_structure_score_symbols(session=object(), top_volume_limit=100)

@@ -96,12 +96,15 @@ def test_scheduled_repair_market_history_repairs_tracked_symbols_before_top_symb
     monkeypatch.setattr(
         'coinx.scheduler.get_all_24hr_tickers',
         lambda: [
-            {'symbol': 'BTCUSDT', 'quoteVolume': 300},
-            {'symbol': 'SOLUSDT', 'quoteVolume': 200},
-            {'symbol': 'BNBUSDT', 'quoteVolume': 100},
+            {'symbol': 'BTCUSDT', 'priceChangePercent': 10, 'quoteVolume': 300},
+            {'symbol': 'SOLUSDT', 'priceChangePercent': 9, 'quoteVolume': 200},
+            {'symbol': 'BNBUSDT', 'priceChangePercent': -10, 'quoteVolume': 100},
+            {'symbol': 'XRPUSDT', 'priceChangePercent': -9, 'quoteVolume': 50},
         ],
     )
     monkeypatch.setattr('coinx.scheduler.FETCH_COINS_TOP_VOLUME_COUNT', 3)
+    monkeypatch.setattr('coinx.scheduler.FETCH_COINS_TOP_GAINERS_COUNT', 2)
+    monkeypatch.setattr('coinx.scheduler.FETCH_COINS_TOP_LOSERS_COUNT', 2)
     monkeypatch.setattr('coinx.scheduler.ENABLED_EXCHANGES', ['binance', 'okx'])
     monkeypatch.setattr('coinx.scheduler.run_history_repair_job', fake_history)
 
@@ -115,7 +118,7 @@ def test_scheduled_repair_market_history_repairs_tracked_symbols_before_top_symb
             'max_workers': 2,
         },
         {
-            'symbols': ['SOLUSDT', 'BNBUSDT'],
+            'symbols': ['SOLUSDT', 'BNBUSDT', 'XRPUSDT'],
             'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
             'max_workers': 2,
         },
