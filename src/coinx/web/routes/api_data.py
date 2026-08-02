@@ -62,6 +62,7 @@ MARKET_STRUCTURE_MARKET_SERIES_TYPES = {
 TASK_JOB_ACTIONS = {'run', 'pause', 'resume'}
 TASK_JOB_LABELS = {
     'market_rank_refresh_job': '行情榜快照刷新',
+    'rss_monitor_job': 'RSS 订阅监控',
     'repair_market_rolling_job': '市场滚动补齐',
     'repair_market_history_job': '低频历史补齐',
     'update_coins_config_job': '币种配置刷新',

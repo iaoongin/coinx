@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 
 import requests
 from sqlalchemy import desc, inspect, text
+from sqlalchemy.orm import sessionmaker
 
 from coinx import config
 from coinx.database import Base, engine, get_session
@@ -153,6 +154,9 @@ def fetch_feed(url):
     response.raise_for_status()
     if not response.content:
         raise ValueError('RSS response is empty')
+    content_type = response.headers.get('Content-Type', '').split(';', 1)[0].strip().lower()
+    if content_type in {'text/html', 'application/xhtml+xml'}:
+        raise ValueError(f'RSS source returned HTML instead of XML (content-type: {content_type})')
     return parse_rss_document(response.content)
 
 
@@ -292,16 +296,48 @@ def monitor_all_subscriptions():
     ensure_rss_schema()
     db = get_session()
     try:
-        rows = db.query(RssSubscription).filter(RssSubscription.enabled.is_(True)).all()
-        summaries = [sync_subscription(db, row, notify=True) for row in rows]
-        return {
-            'status': 'error' if any(item['status'] == 'error' for item in summaries) else 'success',
-            'subscription_count': len(rows),
-            'new_count': sum(item.get('new_count', 0) for item in summaries),
-            'summaries': summaries,
-        }
+        subscription_ids = [
+            row.id for row in db.query(RssSubscription.id).filter(
+                RssSubscription.enabled.is_(True),
+            ).all()
+        ]
     finally:
         db.close()
+
+    summaries = []
+    # An independent session contains transaction failures from one source.
+    session_factory = sessionmaker(bind=engine)
+    for subscription_id in subscription_ids:
+        db = session_factory()
+        try:
+            subscription = db.get(RssSubscription, subscription_id)
+            if subscription:
+                result = sync_subscription(db, subscription, notify=True)
+                result['subscription_name'] = subscription.name
+                summaries.append(result)
+        except Exception as exc:
+            db.rollback()
+            logger.exception('RSS 订阅同步异常: subscription=%s', subscription_id)
+            summaries.append({
+                'status': 'error',
+                'subscription_id': subscription_id,
+                'subscription_name': None,
+                'new_count': 0,
+                'error': str(exc),
+            })
+        finally:
+            db.close()
+
+    failure_count = sum(item['status'] == 'error' for item in summaries)
+    success_count = len(summaries) - failure_count
+    return {
+        'status': 'error' if failure_count and not success_count else ('partial' if failure_count else 'success'),
+        'subscription_count': len(subscription_ids),
+        'success_count': success_count,
+        'failure_count': failure_count,
+        'new_count': sum(item.get('new_count', 0) for item in summaries),
+        'summaries': summaries,
+    }
 
 
 def list_articles(db, subscription_id=None, limit=50, offset=0):

@@ -109,6 +109,17 @@ def _evaluate_market_notifications(event_type):
     return None
 
 
+def _rss_summary_error(summary):
+    """Build a concise task-page error from failed RSS sources."""
+    errors = []
+    for result in (summary or {}).get('summaries') or []:
+        if result.get('status') != 'error' or not result.get('error'):
+            continue
+        source = result.get('subscription_name') or f"订阅 {result.get('subscription_id', '--')}"
+        errors.append(f'{source}: {result["error"]}')
+    return '; '.join(errors)[:500] or None
+
+
 if RSS_ENABLED:
     @scheduled_job(
         'interval',
@@ -129,6 +140,7 @@ if RSS_ENABLED:
                 'rss_monitor_job',
                 status=summary.get('status') or 'success',
                 summary=summary,
+                error=_rss_summary_error(summary),
                 started_at=started_at,
             )
             logger.info(

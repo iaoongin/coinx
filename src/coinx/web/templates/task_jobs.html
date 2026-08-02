@@ -333,6 +333,12 @@
       background: rgba(255, 120, 120, 0.08);
     }
 
+    .badge.partial {
+      color: #ffd67a;
+      border-color: rgba(255, 214, 122, 0.28);
+      background: rgba(255, 214, 122, 0.08);
+    }
+
     .message-box {
       min-height: 20px;
       font-size: 12px;
@@ -519,7 +525,7 @@
                 </td>
                 <td>
                   <div class="cell-stack">
-                    <span class="cell-mono">[[ job.runtime?.last_error || '--' ]]</span>
+                    <span class="cell-mono" :title="jobError(job)">[[ jobError(job) || '--' ]]</span>
                   </div>
                 </td>
                 <td>
@@ -625,6 +631,7 @@
           if (normalized === 'running') return '运行中';
           if (normalized === 'success') return '成功';
           if (normalized === 'error') return '失败';
+          if (normalized === 'partial') return '部分失败';
           if (normalized === 'skipped') return '跳过';
           if (normalized === 'paused') return '已暂停';
           if (normalized === 'ready') return '就绪';
@@ -638,8 +645,16 @@
           if (job.paused) return 'paused';
           const normalized = String(job.runtime?.last_status || '').toLowerCase();
           if (normalized === 'error') return 'error';
+          if (normalized === 'partial') return 'partial';
           if (normalized === 'success') return 'success';
           return 'ready';
+        };
+
+        const jobError = (job) => {
+          const runtime = job.runtime || {};
+          if (runtime.last_error) return runtime.last_error;
+          const failures = runtime.last_summary?.summaries?.filter((item) => item.status === 'error' && item.error) || [];
+          return failures.map((item) => `${item.subscription_name || `订阅 ${item.subscription_id}`}: ${item.error}`).join('; ');
         };
 
         const statusClass = (job) => statusKey(job);
@@ -731,6 +746,7 @@
           statusText,
           statusClass,
           statusLabel,
+          jobError,
           loadJobs,
           runAction,
           toggleAutoRefresh,

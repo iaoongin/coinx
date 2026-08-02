@@ -20,5 +20,6 @@ def test_task_jobs_page_renders():
     assert '任务管理'.encode('utf-8') in response.data
     assert '任务调度控制台'.encode('utf-8') in response.data
     assert 'SCHEDULER_ENABLED=false'.encode('utf-8') in response.data
+    assert '部分失败'.encode('utf-8') in response.data
     assert '限流等待'.encode('utf-8') in response.data
     assert '冷却剩余'.encode('utf-8') in response.data
