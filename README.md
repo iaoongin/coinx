@@ -134,7 +134,8 @@ MySQL 数据保存在 Docker 命名卷 `mysql_data` 中。普通停止、重建�
 | `GATE_SETTLE` | Gate 合约结算币种，首期默认只接 `usdt` 永续 | `usdt` |
 | `GATE_MIN_INTERVAL_MS` | Gate 公共接口最小请求间隔，避免连续 futures 请求触发代理/WAF 拦截 | `60` |
 | `GATE_403_RETRY_FALLBACK_SECONDS` | Gate 遇到 `403` 时的冷却秒数 | `8` |
-| `SCHEDULER_ENABLED` | 定时任务调度器总开关。设为 `false` 不注册、不启动和不执行任何后台定时任务，并跳过启动时的首页数据补采；任务管理页也不会列出任务，不能手动执行、暂停或恢复。修改后需重启服务。支持 `true/false`、`1/0`、`yes/no`、`on/off` | `true` |
+| `SCHEDULER_ENABLED` | 定时任务调度器总开关。设为 `false` 时任务仍会注册并在任务管理页展示，但 APScheduler 不启动、不会自动执行任务，并跳过启动时的首页数据补采；仍可立即手动执行，暂停和恢复不可用。修改后需重启服务。支持 `true/false`、`1/0`、`yes/no`、`on/off` | `true` |
+| `TASK_RUN_HISTORY_RETENTION_DAYS` | 定时任务每次执行的持久化记录保留天数；服务启动会将遗留的运行中记录标记为中断失败 | `90` |
 | `UPDATE_INTERVAL` | 定时刷新间隔，单位为秒，当前会同时用于市场数据与行情榜快照刷新 | `300` |
 | `TIME_INTERVALS` | 需要计算的时间周期列表，当前更建议放在 YAML 中配置，不建议直接用环境变量字符串覆盖 | `5m,15m,30m,1h,4h,12h,24h,48h,72h,168h` |
 | `USE_PROXY` | 是否启用 HTTP/HTTPS 代理，支持 `true/false/1/0/yes/no` | `false` |
@@ -236,7 +237,7 @@ http://127.0.0.1:5000
 
 Open `/rss` to manually add and manage RSS feeds, read fetched articles, and independently toggle fetching and notifications.
 
-RSS polling uses `RSS_ENABLED` and `RSS_POLL_INTERVAL`. Notifications reuse the Apprise channels configured in `/notification-management`; for Bark, add a `barks://device-key` channel and set `NOTIFICATIONS_ENABLED=true`. The global `SCHEDULER_ENABLED` setting must also be `true`; restart the service after changing environment variables.
+Automatic RSS polling uses `RSS_ENABLED` and `RSS_POLL_INTERVAL`, and also requires `SCHEDULER_ENABLED=true`. Notifications reuse the Apprise channels configured in `/notification-management`; for Bark, add a `barks://device-key` channel and set `NOTIFICATIONS_ENABLED=true`. Restart the service after changing environment variables.
 
 ## API
 

@@ -30,9 +30,17 @@ from .config import (
     REPAIR_TRACKED_INTERVAL,
     RSS_ENABLED,
     RSS_POLL_INTERVAL,
+    TASK_RUN_HISTORY_RETENTION_DAYS,
 )
 from .repositories.funding_rate import collect_funding_rates
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
+from .repositories.job_runs import (
+    create_job_run,
+    delete_expired_job_runs,
+    ensure_job_run_schema,
+    finish_job_run,
+    recover_interrupted_job_runs,
+)
 from .repositories.market_tickers import get_market_scope_symbols_from_tickers
 from .repositories.market_structure_score import get_market_structure_score_symbols
 from .collector.timing import format_duration_ms
@@ -45,10 +53,19 @@ JOB_METADATA = {}
 
 
 def scheduled_job(*args, **kwargs):
-    """仅在启用调度器时向 APScheduler 注册任务。"""
-    if SCHEDULER_ENABLED:
-        return scheduler.scheduled_job(*args, **kwargs)
-    return lambda func: func
+    """Register task definitions even when scheduling is disabled."""
+    return scheduler.scheduled_job(*args, **kwargs)
+
+
+def initialize_job_run_history():
+    """Ensure task history is available and recover runs interrupted by a restart."""
+    try:
+        ensure_job_run_schema()
+        interrupted_count = recover_interrupted_job_runs()
+        if interrupted_count:
+            logger.warning('已标记中断的任务运行记录: count=%s', interrupted_count)
+    except Exception:
+        logger.exception('任务运行记录初始化失败，将继续启动服务')
 
 
 def _update_job_metadata(job_id, **fields):
@@ -60,16 +77,24 @@ def _update_job_metadata(job_id, **fields):
 
 
 def _mark_job_started(job_id):
-    return _update_job_metadata(
+    started_at_ms = int(time.time() * 1000)
+    metadata = _update_job_metadata(
         job_id,
         running=True,
-        last_started_at_ms=int(time.time() * 1000),
+        last_started_at_ms=started_at_ms,
         last_finished_at_ms=None,
         last_duration_ms=None,
         last_status='running',
         last_summary=None,
         last_error=None,
+        run_id=None,
     )
+    try:
+        run_id = create_job_run(job_id, started_at=started_at_ms)
+        metadata = _update_job_metadata(job_id, run_id=run_id)
+    except Exception:
+        logger.exception('任务运行记录创建失败: job_id=%s', job_id)
+    return metadata
 
 
 def _mark_job_finished(job_id, status='success', summary=None, error=None, started_at=None):
@@ -86,6 +111,19 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         last_summary=summary,
         last_error=str(error) if error else None,
     )
+    run_id = metadata.get('run_id')
+    if run_id is not None:
+        try:
+            finish_job_run(
+                run_id,
+                status=status,
+                summary=summary,
+                error=error,
+                completed_at=finished_at_ms,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.exception('任务运行记录更新失败: job_id=%s run_id=%s', job_id, run_id)
     try:
         from .notifications import EVENT_JOB_FAILURE, evaluate_scheduled_rules
         evaluate_scheduled_rules(EVENT_JOB_FAILURE, metadata=get_all_job_runtime_metadata())
@@ -467,10 +505,30 @@ def scheduled_coins_config_update():
         logger.exception(e)
 
 
+@scheduled_job('cron', hour=0, minute=20, id='cleanup_task_run_history_job')
+def scheduled_cleanup_task_run_history():
+    """Remove persisted task execution records outside the retention window."""
+    started_at = time.perf_counter()
+    _mark_job_started('cleanup_task_run_history_job')
+    try:
+        deleted = delete_expired_job_runs(TASK_RUN_HISTORY_RETENTION_DAYS)
+        _mark_job_finished(
+            'cleanup_task_run_history_job',
+            status='success',
+            summary={'status': 'success', 'deleted_count': deleted},
+            started_at=started_at,
+        )
+        logger.info('定时任务运行记录清理完成: deleted=%s retention_days=%s', deleted, TASK_RUN_HISTORY_RETENTION_DAYS)
+    except Exception as e:
+        _mark_job_finished('cleanup_task_run_history_job', status='error', error=e, started_at=started_at)
+        logger.error('定时任务运行记录清理失败: %s', e)
+        logger.exception(e)
+
+
 def start_scheduler():
     """Start the background scheduler."""
     if not SCHEDULER_ENABLED:
-        logger.info('调度器已禁用（SCHEDULER_ENABLED=false），所有定时任务不会执行')
+        logger.info('调度器已禁用（SCHEDULER_ENABLED=false），任务已注册但不会定时执行')
         return
     logger.info('开始启动调度器')
     try:

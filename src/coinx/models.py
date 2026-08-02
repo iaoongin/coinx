@@ -301,6 +301,26 @@ class AlertEvaluationMetric(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class ScheduledJobRun(Base):
+    """Persistent execution record for an APScheduler job."""
+
+    __tablename__ = 'scheduled_job_runs'
+    __table_args__ = (
+        Index('idx_scheduled_job_runs_job_started', 'job_id', 'started_at'),
+        Index('idx_scheduled_job_runs_started_at', 'started_at'),
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    job_id = Column(String(120), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default='running')
+    summary_json = Column(JSON)
+    error_message = Column(String(500))
+    started_at = Column(BigInteger, nullable=False)
+    completed_at = Column(BigInteger)
+    duration_ms = Column(Integer)
+    created_at = Column(DateTime, default=datetime.now)
+
+
 class RssSubscription(Base):
     """A feed that can be fetched and optionally delivered as notifications."""
 

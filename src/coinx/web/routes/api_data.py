@@ -34,6 +34,7 @@ from coinx.repositories.homepage_series import (
     latest_closed_5m_open_time,
     should_refresh_homepage_series,
 )
+from coinx.repositories.job_runs import get_job_runs, get_latest_job_runtime_metadata
 from coinx.repositories.market_structure_score import (
     get_market_structure_score_snapshot,
     get_market_structure_score_symbols,
@@ -52,6 +53,8 @@ HOMEPAGE_SNAPSHOT_CACHE_LOCK = threading.Lock()
 HOMEPAGE_SNAPSHOT_CACHE = {}
 HOME_PAGE_LAST_REFRESH_SUMMARY = None
 MARKET_STRUCTURE_LAST_REFRESH_SUMMARY = None
+MANUAL_TASK_JOB_LOCK = threading.Lock()
+MANUAL_TASK_JOB_LOCKS = {}
 
 MARKET_STRUCTURE_MARKET_SERIES_TYPES = {
     'klines',
@@ -66,6 +69,7 @@ TASK_JOB_LABELS = {
     'repair_market_rolling_job': '市场滚动补齐',
     'repair_market_history_job': '低频历史补齐',
     'update_coins_config_job': '币种配置刷新',
+    'cleanup_task_run_history_job': '任务运行记录清理',
 }
 
 
@@ -73,8 +77,8 @@ def _default_exchange_repair_workers(exchanges=None):
     return resolve_repair_worker_count(exchanges or ENABLED_EXCHANGES)
 
 
-def _format_scheduler_job(job):
-    runtime = get_all_job_runtime_metadata().get(job.id, {})
+def _format_scheduler_job(job, runtime=None):
+    runtime = runtime or {}
     scheduler_running = bool(scheduler.running)
     next_run_time = getattr(job, 'next_run_time', None)
     paused = scheduler_running and next_run_time is None
@@ -97,9 +101,36 @@ def _format_scheduler_job(job):
 
 
 def _list_scheduler_jobs():
-    runtime_by_id = get_all_job_runtime_metadata()
-    jobs = [_format_scheduler_job(job) for job in scheduler.get_jobs()]
-    return jobs
+    scheduler_jobs = scheduler.get_jobs()
+    job_ids = [job.id for job in scheduler_jobs]
+    try:
+        persisted_runtime = get_latest_job_runtime_metadata(job_ids)
+    except Exception:
+        logger.exception('读取持久化任务运行记录失败')
+        persisted_runtime = {}
+    memory_runtime = get_all_job_runtime_metadata()
+    return [
+        _format_scheduler_job(job, {**persisted_runtime.get(job.id, {}), **memory_runtime.get(job.id, {})})
+        for job in scheduler_jobs
+    ]
+
+
+def _start_manual_task_job(job):
+    with MANUAL_TASK_JOB_LOCK:
+        run_lock = MANUAL_TASK_JOB_LOCKS.setdefault(job.id, threading.Lock())
+    if not run_lock.acquire(blocking=False):
+        return False
+
+    def run_job():
+        try:
+            job.func(*getattr(job, 'args', ()), **getattr(job, 'kwargs', {}))
+        except Exception:
+            logger.exception('手动执行任务失败: job_id=%s', job.id)
+        finally:
+            run_lock.release()
+
+    threading.Thread(target=run_job, daemon=True, name=f'coinx-manual-{job.id}').start()
+    return True
 
 
 def _log_market_structure_refresh_component(component_name, summary):
@@ -800,24 +831,53 @@ def list_task_jobs():
         return jsonify({'status': 'error', 'message': f'failed to load task jobs: {str(e)}'}), 500
 
 
+@api_data_bp.route('/api/task-jobs/<job_id>/runs')
+def list_task_job_runs(job_id):
+    job = scheduler.get_job(job_id)
+    if job is None:
+        return jsonify({'status': 'error', 'message': f'job not found: {job_id}'}), 404
+    try:
+        limit = int(request.args.get('limit', 20))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'error', 'message': 'limit must be an integer'}), 400
+    if limit < 1 or limit > 100:
+        return jsonify({'status': 'error', 'message': 'limit must be between 1 and 100'}), 400
+    try:
+        return jsonify(
+            {
+                'status': 'success',
+                'message': 'task job runs loaded',
+                'data': {'job_id': job_id, 'runs': get_job_runs(job_id, limit=limit)},
+            }
+        )
+    except Exception as e:
+        logger.error('加载任务运行记录失败: job_id=%s error=%s', job_id, e)
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load task job runs: {str(e)}'}), 500
+
+
 @api_data_bp.route('/api/task-jobs/<job_id>/action', methods=['POST'])
 def control_task_job(job_id):
     payload = request.get_json(silent=True) or {}
     action = (payload.get('action') or '').strip().lower()
     if action not in TASK_JOB_ACTIONS:
         return jsonify({'status': 'error', 'message': f'unsupported action: {action}'}), 400
-    if not SCHEDULER_ENABLED:
-        return jsonify({'status': 'error', 'message': 'scheduler is disabled by SCHEDULER_ENABLED=false'}), 409
-
     job = scheduler.get_job(job_id)
     if job is None:
         return jsonify({'status': 'error', 'message': f'job not found: {job_id}'}), 404
+    if not SCHEDULER_ENABLED and action in {'pause', 'resume'}:
+        return jsonify({'status': 'error', 'message': 'scheduler is disabled by SCHEDULER_ENABLED=false'}), 409
 
     try:
         if action == 'run':
-            scheduler.modify_job(job_id, next_run_time=datetime.now())
-            scheduler.wakeup()
-            message = f'任务已触发执行: {job_id}'
+            if SCHEDULER_ENABLED:
+                scheduler.modify_job(job_id, next_run_time=datetime.now())
+                scheduler.wakeup()
+                message = f'任务已触发执行: {job_id}'
+            elif _start_manual_task_job(job):
+                message = f'任务已在后台手动执行: {job_id}'
+            else:
+                return jsonify({'status': 'error', 'message': f'job is already running: {job_id}'}), 409
         elif action == 'pause':
             job.pause()
             message = f'任务已暂停: {job_id}'

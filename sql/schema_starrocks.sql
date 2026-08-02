@@ -130,3 +130,18 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
 ) PRIMARY KEY (symbol, period, event_time)
 DISTRIBUTED BY HASH(symbol) BUCKETS 4
 PROPERTIES ("replication_num" = "1");
+
+-- 定时任务执行记录
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    job_id VARCHAR(120) NOT NULL COMMENT 'APScheduler 任务ID',
+    status VARCHAR(20) NOT NULL COMMENT '运行状态',
+    summary_json JSON COMMENT '任务执行摘要',
+    error_message VARCHAR(500) COMMENT '错误或中断原因',
+    started_at BIGINT NOT NULL COMMENT '开始时间戳（毫秒）',
+    completed_at BIGINT COMMENT '结束时间戳（毫秒）',
+    duration_ms INT COMMENT '执行耗时（毫秒）',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间'
+) PRIMARY KEY (id)
+DISTRIBUTED BY HASH(id) BUCKETS 1
+PROPERTIES ("replication_num" = "1");

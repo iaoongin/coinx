@@ -28,6 +28,9 @@ class FakeJob:
         self.paused = False
         self.resumed = False
         self.modified = False
+        self.args = ()
+        self.kwargs = {}
+        self.func = lambda: None
 
     def modify(self, **kwargs):
         self.modified = True
@@ -59,6 +62,7 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
             }
         },
     )
+    monkeypatch.setattr('coinx.web.routes.api_data.get_latest_job_runtime_metadata', lambda _job_ids: {})
     monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', True)
 
     client = create_test_client()
@@ -73,6 +77,41 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     assert payload['data']['jobs'][0]['registered'] is True
     assert payload['data']['jobs'][0]['paused'] is False
     assert payload['data']['jobs'][0]['runtime']['last_summary']['duration_breakdown_ms']['api_ms'] == 12.0
+
+
+def test_list_task_job_runs_returns_latest_records(monkeypatch):
+    fake_job = FakeJob()
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [fake_job],
+        get_job=lambda job_id: fake_job if job_id == fake_job.id else None,
+    ))
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_job_runs',
+        lambda job_id, limit: [
+            {'id': 2, 'job_id': job_id, 'status': 'error', 'last_started_at_ms': 2_000},
+            {'id': 1, 'job_id': job_id, 'status': 'success', 'last_started_at_ms': 1_000},
+        ],
+    )
+
+    response = create_test_client().get('/api/task-jobs/job-a/runs')
+
+    assert response.status_code == 200
+    assert [run['id'] for run in response.get_json()['data']['runs']] == [2, 1]
+
+
+def test_list_task_job_runs_validates_limit_and_job_id(monkeypatch):
+    fake_job = FakeJob()
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [fake_job],
+        get_job=lambda job_id: fake_job if job_id == fake_job.id else None,
+    ))
+    client = create_test_client()
+
+    assert client.get('/api/task-jobs/missing/runs').status_code == 404
+    assert client.get('/api/task-jobs/job-a/runs?limit=0').status_code == 400
+    assert client.get('/api/task-jobs/job-a/runs?limit=101').status_code == 400
 
 
 def test_control_task_job_runs_job(monkeypatch):
@@ -108,13 +147,38 @@ def test_control_task_job_rejects_unsupported_action():
     assert payload['status'] == 'error'
 
 
-def test_control_task_job_rejects_actions_when_scheduler_disabled(monkeypatch):
+def test_control_task_job_runs_manually_when_scheduler_disabled(monkeypatch):
+    fake_job = FakeJob()
+    manual_calls = []
     monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', False)
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=False,
+        get_jobs=lambda: [fake_job],
+        get_job=lambda job_id: fake_job if job_id == fake_job.id else None,
+    ))
+    monkeypatch.setattr('coinx.web.routes.api_data._start_manual_task_job', lambda job: manual_calls.append(job.id) or True)
+    monkeypatch.setattr('coinx.web.routes.api_data.get_all_job_runtime_metadata', lambda: {})
+    monkeypatch.setattr('coinx.web.routes.api_data.get_latest_job_runtime_metadata', lambda _job_ids: {})
 
     client = create_test_client()
     response = client.post('/api/task-jobs/job-a/action', json={'action': 'run'})
 
-    assert response.status_code == 409
+    assert response.status_code == 200
     payload = response.get_json()
-    assert payload['status'] == 'error'
-    assert 'SCHEDULER_ENABLED=false' in payload['message']
+    assert payload['status'] == 'success'
+    assert manual_calls == ['job-a']
+
+
+def test_control_task_job_rejects_pause_when_scheduler_disabled(monkeypatch):
+    fake_job = FakeJob()
+    monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', False)
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=False,
+        get_jobs=lambda: [fake_job],
+        get_job=lambda job_id: fake_job if job_id == fake_job.id else None,
+    ))
+
+    response = create_test_client().post('/api/task-jobs/job-a/action', json={'action': 'pause'})
+
+    assert response.status_code == 409
+    assert 'SCHEDULER_ENABLED=false' in response.get_json()['message']

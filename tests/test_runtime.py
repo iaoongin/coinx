@@ -25,6 +25,7 @@ def test_start_runtime_services_starts_scheduler_and_bootstrap(monkeypatch):
 
     monkeypatch.setattr(runtime, 'scheduler', SimpleNamespace(running=True))
     monkeypatch.setattr(runtime, 'SCHEDULER_ENABLED', True)
+    monkeypatch.setattr(runtime, 'initialize_job_run_history', lambda: calls.append('history_initialized'))
     monkeypatch.setattr(runtime, 'get_active_coins', lambda: ['BTCUSDT'])
     monkeypatch.setattr(runtime, 'start_scheduler', fake_start_scheduler)
     monkeypatch.setattr(runtime, 'HOMEPAGE_SERIES_REPAIR_ENABLED', True)
@@ -37,4 +38,19 @@ def test_start_runtime_services_starts_scheduler_and_bootstrap(monkeypatch):
     assert result['tracked_coins'] == ['BTCUSDT']
     assert result['scheduler_thread'].started is True
     assert result['repair_thread'].started is True
-    assert calls == ['fake_start_scheduler', 'scheduler_started', 'fake_startup_repair', 'repair_started']
+    assert calls == ['history_initialized', 'fake_start_scheduler', 'scheduler_started', 'fake_startup_repair', 'repair_started']
+
+
+def test_start_runtime_services_initializes_job_history_when_scheduler_disabled(monkeypatch):
+    calls = []
+    monkeypatch.setattr(runtime, 'SCHEDULER_ENABLED', False)
+    monkeypatch.setattr(runtime, 'initialize_job_run_history', lambda: calls.append('history_initialized'))
+
+    result = runtime.start_runtime_services()
+
+    assert calls == ['history_initialized']
+    assert result == {
+        'scheduler_thread': None,
+        'repair_thread': None,
+        'tracked_coins': [],
+    }

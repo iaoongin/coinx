@@ -3,7 +3,7 @@ import time
 
 from coinx.coin_manager import get_active_coins
 from coinx.config import HOMEPAGE_SERIES_REPAIR_ENABLED, SCHEDULER_ENABLED
-from coinx.scheduler import scheduler, start_scheduler
+from coinx.scheduler import initialize_job_run_history, scheduler, start_scheduler
 from coinx.utils import logger
 
 # 条件性导入主页序列修复函数
@@ -34,8 +34,9 @@ def start_startup_repair():
 
 
 def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
+    initialize_job_run_history()
     if not SCHEDULER_ENABLED:
-        logger.info('调度器已禁用（SCHEDULER_ENABLED=false），跳过启动运行时服务')
+        logger.info('调度器已禁用（SCHEDULER_ENABLED=false），跳过自动调度与启动补采')
         return {
             'scheduler_thread': None,
             'repair_thread': None,

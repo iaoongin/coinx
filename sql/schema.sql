@@ -228,3 +228,17 @@ CREATE TABLE IF NOT EXISTS alert_evaluation_metrics (
     UNIQUE KEY uk_alert_evaluation_metric_run (run_id),
     KEY idx_alert_evaluation_metrics_run (run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警评估耗时指标';
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    job_id VARCHAR(120) NOT NULL COMMENT 'APScheduler 任务ID',
+    status VARCHAR(20) NOT NULL DEFAULT 'running' COMMENT '运行状态：running、success、error、partial 或 skipped',
+    summary_json JSON NULL COMMENT '任务执行摘要',
+    error_message VARCHAR(500) NULL COMMENT '错误或中断原因',
+    started_at BIGINT NOT NULL COMMENT '开始时间戳（毫秒）',
+    completed_at BIGINT NULL COMMENT '结束时间戳（毫秒）',
+    duration_ms INT NULL COMMENT '执行耗时（毫秒）',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+    KEY idx_scheduled_job_runs_job_started (job_id, started_at),
+    KEY idx_scheduled_job_runs_started_at (started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务执行记录';

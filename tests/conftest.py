@@ -26,6 +26,7 @@ from coinx.models import (
     MarketTakerBuySellVol,
     NotificationChannel,
     NotificationDelivery,
+    ScheduledJobRun,
 )
 
 TEST_TABLES = [
@@ -41,6 +42,7 @@ TEST_TABLES = [
     NotificationDelivery.__table__,
     AlertEvaluationRun.__table__,
     AlertEvaluationMetric.__table__,
+    ScheduledJobRun.__table__,
 ]
 
 
