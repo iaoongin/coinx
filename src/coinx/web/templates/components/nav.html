@@ -54,6 +54,9 @@
       <a class="nav-menu-item{% if request.path.startswith('/notification-management') %} active{% endif %}" href="/notification-management"{% if request.path.startswith('/notification-management') %} aria-current="page"{% endif %}>
         告警管理
       </a>
+      <a class="nav-menu-item{% if request.path.startswith('/rss') %} active{% endif %}" href="/rss"{% if request.path.startswith('/rss') %} aria-current="page"{% endif %}>
+        RSS 订阅
+      </a>
       </div>
     </div>
   </nav>

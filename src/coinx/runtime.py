@@ -42,6 +42,12 @@ def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
             'tracked_coins': [],
         }
     logger.info('开始启动运行时服务')
+    try:
+        from coinx.rss_monitor import ensure_rss_schema
+        ensure_rss_schema()
+    except Exception as exc:
+        logger.warning('RSS 数据表初始化失败，将在 RSS 任务执行时重试: %s', exc)
+
     scheduler_thread = threading.Thread(target=start_scheduler, daemon=True)
     scheduler_thread.start()
 

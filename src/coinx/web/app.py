@@ -26,6 +26,7 @@ try:
     from coinx.web.routes.api_config import api_config_bp
     from coinx.web.routes.api_funding_rate import api_funding_rate_bp
     from coinx.web.routes.api_notifications import api_notifications_bp
+    from coinx.web.routes.api_rss import api_rss_bp
 except ImportError:
     # 如果在当前目录运行，可能需要使用相对导入路径
     from routes.auth import auth_bp
@@ -34,6 +35,7 @@ except ImportError:
     from routes.api_config import api_config_bp
     from routes.api_funding_rate import api_funding_rate_bp
     from routes.api_notifications import api_notifications_bp
+    from routes.api_rss import api_rss_bp
 
 
 def create_app():
@@ -53,6 +55,7 @@ def create_app():
     app.register_blueprint(api_config_bp)
     app.register_blueprint(api_funding_rate_bp)
     app.register_blueprint(api_notifications_bp)
+    app.register_blueprint(api_rss_bp)
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):

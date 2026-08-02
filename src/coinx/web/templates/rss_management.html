@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RSS 订阅</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body { margin: 0; padding: var(--page-padding); background: var(--bg-primary); color: var(--text-primary); font-family: 'Noto Sans SC', sans-serif; }
+    .page-frame { max-width: var(--page-max-width); margin: 0 auto; }
+    .shell { margin-top: 12px; padding: 14px; border: 1px solid var(--border-default); border-radius: var(--page-surface-radius); background: var(--bg-card); box-shadow: var(--shadow-card); }
+    .header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px; }
+    h1 { margin: 0 0 4px; font-size: 22px; } h2 { margin: 0; font-size: 16px; }
+    .muted { color: var(--text-muted); font-size: 12px; }
+    .layout { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+    .panel { border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-secondary); padding: 12px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .feed { border: 1px solid var(--border-subtle); border-radius: 7px; padding: 10px; margin-bottom: 8px; cursor: pointer; background: var(--bg-elevated); }
+    .feed.selected { border-color: var(--gold-primary); }
+    .feed-title { font-weight: 700; overflow-wrap: anywhere; }
+    .feed-meta { display: flex; justify-content: space-between; gap: 6px; margin-top: 5px; font-size: 11px; color: var(--text-muted); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row-between { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .field { display: grid; gap: 5px; margin-bottom: 9px; font-size: 12px; color: var(--text-muted); }
+    input[type=text], input[type=url] { width: 100%; box-sizing: border-box; height: 32px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: 6px; color: var(--text-primary); background: var(--bg-primary); }
+    .btn { height: 30px; padding: 0 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; font-weight: 600; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+    .btn:disabled, .switch input:disabled { cursor: wait; opacity: .58; }
+    .btn-primary { color: var(--gold-bright); border-color: rgba(212,175,55,.5); }
+    .btn-danger { color: #ffb4b4; }
+    .switch { display: inline-flex; gap: 5px; align-items: center; font-size: 11px; color: var(--text-muted); }
+    .article { padding: 11px 0; border-bottom: 1px solid var(--border-subtle); }
+    .article:last-child { border-bottom: 0; }
+    .article-title { color: var(--text-primary); font-weight: 700; text-decoration: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+    .article-title:hover { color: var(--gold-bright); }
+    .article-summary { color: var(--text-secondary); font-size: 12px; line-height: 1.55; margin-top: 5px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+    .article-meta { color: var(--text-muted); font-size: 11px; margin-top: 5px; }
+    .pager { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-top: 12px; }
+    .toast { position: fixed; z-index: 20; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 32px)); padding: 10px 12px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); box-shadow: var(--shadow-card); font-size: 12px; }
+    .toast.success { border-color: rgba(89, 192, 130, .65); } .toast.error { border-color: rgba(239, 101, 101, .72); color: #ffb4b4; }
+    .spinner { width: 12px; height: 12px; box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .modal-backdrop { position: fixed; z-index: 29; inset: 0; background: rgba(0, 0, 0, .56); }
+    .feed-modal { position: fixed; z-index: 30; top: 50%; left: 50%; width: min(460px, calc(100vw - 32px)); box-sizing: border-box; transform: translate(-50%, -50%); padding: 16px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-card); box-shadow: var(--shadow-card); }
+    .feed-modal .panel-head { margin-bottom: 16px; }
+    .channel-options { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 6px; }
+    .empty { padding: 24px 10px; text-align: center; color: var(--text-muted); font-size: 12px; }
+    @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } .header { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <div class="page-frame">
+    {% include 'components/nav.html' %}
+    <main id="app" class="shell">
+      <div class="header">
+        <div><h1>RSS 订阅</h1><div class="muted">管理 RSS 源、查看文章，并单独控制是否参与定时推送。</div></div>
+        <button class="btn" @click="reload" :disabled="loading"><span v-if="loading" class="spinner" aria-hidden="true"></span>[[ loading ? '刷新中…' : '刷新' ]]</button>
+      </div>
+      <div v-if="flash.message" class="toast" :class="flash.type" role="status">[[ flash.message ]]</div>
+      <div class="layout">
+        <section class="panel">
+          <div class="panel-head"><h2>订阅源</h2><span class="muted">[[ subscriptions.length ]] 个</span></div>
+          <div class="row" style="margin-bottom:10px;"><button class="btn btn-primary" type="button" @click="openCreateModal">新增订阅</button></div>
+          <div v-for="feed in subscriptions" :key="feed.id" class="feed" :class="{selected: selectedId === feed.id}" @click="selectFeed(feed)">
+            <div class="feed-title">[[ feed.name ]]</div>
+            <div class="muted" style="overflow-wrap:anywhere;margin-top:4px;">[[ feed.url ]]</div>
+            <div class="feed-meta"><span>文章 [[ feed.article_count ?? 0 ]]</span><span>[[ formatTime(feed.last_success_at) ]]</span></div>
+            <div class="row" style="margin-top:8px;" @click.stop>
+              <label class="switch"><input type="checkbox" :checked="feed.enabled" :disabled="isBusy(feed.id, 'settings')" @change="toggleFeed(feed, 'enabled', $event.target.checked)">抓取</label>
+              <label class="switch"><input type="checkbox" :checked="feed.monitor_enabled" :disabled="isBusy(feed.id, 'settings')" @change="toggleFeed(feed, 'monitor_enabled', $event.target.checked)">推送</label>
+              <button class="btn" @click="beginEdit(feed)" :disabled="isFeedBusy(feed.id)">编辑</button>
+              <button class="btn" @click="refreshFeed(feed)" :disabled="isFeedBusy(feed.id)"><span v-if="isBusy(feed.id, 'refresh')" class="spinner" aria-hidden="true"></span>[[ isBusy(feed.id, 'refresh') ? '抓取中…' : '立即抓取' ]]</button>
+              <button class="btn btn-danger" @click="requestRemove(feed)" :disabled="isFeedBusy(feed.id)">删除</button>
+            </div>
+            <div v-if="feed.last_error" class="muted" style="color:#ffb4b4;margin-top:6px;">[[ feed.last_error ]]</div>
+          </div>
+          <div v-if="showFeedModal" class="modal-backdrop" aria-hidden="true" @click="cancelEdit"></div>
+          <form v-if="showFeedModal" class="feed-modal" role="dialog" aria-modal="true" @submit.prevent="saveFeed">
+            <div class="panel-head"><h2>[[ editingId ? '编辑订阅源' : '添加订阅源' ]]</h2><button class="btn" type="button" @click="cancelEdit" :disabled="formBusy">取消</button></div>
+            <div class="field"><label for="feed-name">名称</label><input id="feed-name" v-model.trim="form.name" type="text" required maxlength="160" placeholder="例如：某个账号"></div>
+            <div class="field"><label for="feed-url">RSS 地址</label><input id="feed-url" v-model.trim="form.url" type="url" required placeholder="https://example.com/feed.xml"></div>
+            <div class="field"><label>推送渠道</label><label class="switch"><input type="checkbox" v-model="form.notify_all" :disabled="formBusy">所有启用渠道</label><div v-if="!form.notify_all" class="channel-options"><label v-for="channel in channels" :key="channel.id" class="switch"><input type="checkbox" :value="channel.id" v-model="form.notification_channel_ids" :disabled="formBusy || !channel.enabled">[[ channel.name ]][[ channel.enabled ? '' : '（已禁用）' ]]</label><span v-if="!channels.length" class="muted">暂无推送渠道</span></div></div>
+            <div class="row"><label class="switch"><input type="checkbox" v-model="form.enabled" :disabled="formBusy">抓取</label><label class="switch"><input type="checkbox" v-model="form.monitor_enabled" :disabled="formBusy">推送</label><button class="btn btn-primary" type="submit" :disabled="formBusy"><span v-if="formBusy" class="spinner" aria-hidden="true"></span>[[ formBusy ? '保存中…' : (editingId ? '保存修改' : '添加订阅') ]]</button></div>
+          </form>
+          <div v-if="pendingDelete" class="modal-backdrop" aria-hidden="true" @click="cancelRemove"></div>
+          <section v-if="pendingDelete" class="feed-modal" role="dialog" aria-modal="true" aria-label="确认删除订阅">
+            <div class="panel-head"><h2>删除订阅</h2></div>
+            <p class="muted" style="margin:0 0 16px;line-height:1.6;">将删除“[[ pendingDelete.name ]]”及其已抓取文章，此操作不可恢复。</p>
+            <div class="row" style="justify-content:flex-end;"><button class="btn" type="button" @click="cancelRemove" :disabled="deleteBusy">取消</button><button class="btn btn-danger" type="button" @click="removeFeed" :disabled="deleteBusy"><span v-if="deleteBusy" class="spinner" aria-hidden="true"></span>[[ deleteBusy ? '删除中…' : '确认删除' ]]</button></div>
+          </section>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>文章</h2><span class="muted">[[ selectedFeed?.name || '选择一个订阅源' ]]</span></div>
+          <div v-if="articles.length">
+            <article v-for="article in articles" :key="article.id" class="article">
+              <a class="article-title" :href="article.link" target="_blank" rel="noopener">[[ article.title ]]</a>
+              <div class="article-meta">[[ formatTime(article.published_at || article.fetched_at) ]]<span v-if="article.author"> · [[ article.author ]]</span></div>
+              <div v-if="summaryFor(article)" class="article-summary">[[ summaryFor(article) ]]</div>
+            </article>
+            <div v-if="articleTotal > pageSize" class="pager"><span class="muted">[[ pageLabel ]]</span><button class="btn" @click="changePage(-1)" :disabled="articlesLoading || articleOffset === 0">上一页</button><button class="btn" @click="changePage(1)" :disabled="articlesLoading || articleOffset + pageSize >= articleTotal">下一页</button></div>
+          </div>
+          <div v-else class="empty">[[ selectedFeed ? '暂无文章，点击立即抓取。' : '请先选择订阅源。' ]]</div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+    createApp({ delimiters: ['[[', ']]'], setup() {
+      const pageSize=20; const subscriptions = ref([]), articles = ref([]), channels = ref([]), selectedId = ref(null), articleOffset = ref(0), articleTotal = ref(0), articlesLoading = ref(false), loading = ref(false), busy = ref({}), editingId = ref(null), formBusy = ref(false), showFeedModal = ref(false), pendingDelete = ref(null), deleteBusy = ref(false);
+      const flash = ref({type:'', message:''}); const form = ref({name:'', url:'', enabled:true, monitor_enabled:true,notify_all:true,notification_channel_ids:[]});
+      const selectedFeed = computed(() => subscriptions.value.find(item => item.id === selectedId.value));
+      const pageLabel = computed(() => `${Math.floor(articleOffset.value / pageSize) + 1} / ${Math.max(1, Math.ceil(articleTotal.value / pageSize))} 页，共 ${articleTotal.value} 篇`);
+      const show = (message, type='success') => { flash.value = {message, type}; setTimeout(() => { flash.value = {type:'',message:''}; }, 4000); };
+      const formatTime = value => value ? new Date(value).toLocaleString('zh-CN') : '--';
+      const summaryFor = article => {
+        const title = (article.title || '').trim();
+        let summary = (article.summary || article.content || '').trim();
+        if (!summary) return '';
+        const normalize = value => value.replace(/\s+/g, ' ').trim().toLowerCase();
+        const normalizedTitle = normalize(title);
+        const normalizedSummary = normalize(summary);
+        if (normalizedTitle && normalizedSummary === normalizedTitle) return '';
+        if (title && summary.startsWith(title)) {
+          summary = summary.slice(title.length).replace(/^[\s:：—-]+/, '').trim();
+        }
+        return summary;
+      };
+      const request = async (url, options={}) => { const response = await fetch(url, {headers:{'Content-Type':'application/json'}, ...options}); const result = await response.json().catch(() => ({})); if (!response.ok || result.status === 'error') throw new Error(result.message || `请求失败 (${response.status})`); return result; };
+      const actionKey = (id, action) => `${id}:${action}`;
+      const isBusy = (id, action) => Boolean(busy.value[actionKey(id, action)]);
+      const isFeedBusy = id => Object.keys(busy.value).some(key => key.startsWith(`${id}:`));
+      const runFeedAction = async (feed, action, task) => { const key=actionKey(feed.id, action); busy.value={...busy.value,[key]:true}; try { await task(); } finally { const next={...busy.value}; delete next[key]; busy.value=next; } };
+      const loadArticles = async () => { if (!selectedId.value) { articles.value=[]; articleTotal.value=0; return; } articlesLoading.value=true; try { const result = await request(`/api/rss/articles?subscription_id=${selectedId.value}&limit=${pageSize}&offset=${articleOffset.value}`); articles.value=result.data.items || []; articleTotal.value=result.data.total || 0; } finally { articlesLoading.value=false; } };
+      const loadSubscriptions = async () => { const result = await request('/api/rss/subscriptions'); subscriptions.value=result.data || []; if (!selectedId.value && subscriptions.value.length) selectedId.value=subscriptions.value[0].id; if (selectedId.value && !subscriptions.value.some(item => item.id === selectedId.value)) selectedId.value=subscriptions.value[0]?.id || null; await loadArticles(); };
+      const loadChannels = async () => { const result=await request('/api/notification-channels'); channels.value=result.data || []; };
+      const reload = async () => { loading.value=true; try { await Promise.all([loadSubscriptions(),loadChannels()]); } catch(error) { show(error.message,'error'); } finally { loading.value=false; } };
+      const selectFeed = async feed => { selectedId.value=feed.id; articleOffset.value=0; try { await loadArticles(); } catch(error) { show(error.message,'error'); } };
+      const changePage = async direction => { const next=Math.max(0, articleOffset.value + direction * pageSize); if(next === articleOffset.value || next >= articleTotal.value) return; articleOffset.value=next; try { await loadArticles(); } catch(error) { show(error.message,'error'); } };
+      const resetForm = () => { form.value={name:'',url:'',enabled:true,monitor_enabled:true,notify_all:true,notification_channel_ids:[]}; editingId.value=null; };
+      const openCreateModal = () => { resetForm(); showFeedModal.value=true; };
+      const beginEdit = feed => { const selected=feed.notification_channel_ids; editingId.value=feed.id; form.value={name:feed.name,url:feed.url,enabled:feed.enabled,monitor_enabled:feed.monitor_enabled,notify_all:!Array.isArray(selected),notification_channel_ids:selected || []}; showFeedModal.value=true; };
+      const cancelEdit = () => { resetForm(); showFeedModal.value=false; };
+      const saveFeed = async () => { formBusy.value=true; const editing=Boolean(editingId.value); const payload={...form.value,notification_channel_ids:form.value.notify_all ? null : form.value.notification_channel_ids}; try { if(editing) { await request(`/api/rss/subscriptions/${editingId.value}`,{method:'PATCH',body:JSON.stringify(payload)}); } else { await request('/api/rss/subscriptions',{method:'POST',body:JSON.stringify(payload)}); } await loadSubscriptions(); cancelEdit(); show(editing ? '订阅源已更新' : '订阅源已添加'); } catch(error) { show(error.message,'error'); } finally { formBusy.value=false; } };
+      const toggleFeed = async (feed, key, value) => { await runFeedAction(feed,'settings',async () => { try { await request(`/api/rss/subscriptions/${feed.id}`,{method:'PATCH',body:JSON.stringify({[key]:value})}); feed[key]=value; show('订阅设置已更新'); } catch(error) { show(error.message,'error'); } }); };
+      const refreshFeed = async feed => { await runFeedAction(feed,'refresh',async () => { try { const result=await request(`/api/rss/subscriptions/${feed.id}/refresh`,{method:'POST',body:JSON.stringify({notify:true})}); show(`抓取完成，新增 ${result.data.new_count || 0} 条`); await loadSubscriptions(); } catch(error) { show(error.message,'error'); } }); };
+      const requestRemove = feed => { pendingDelete.value=feed; };
+      const cancelRemove = () => { if (!deleteBusy.value) pendingDelete.value=null; };
+      const removeFeed = async () => { const feed=pendingDelete.value; if(!feed) return; deleteBusy.value=true; await runFeedAction(feed,'remove',async () => { try { await request(`/api/rss/subscriptions/${feed.id}`,{method:'DELETE'}); if(selectedId.value===feed.id) selectedId.value=null; if(editingId.value===feed.id) cancelEdit(); await loadSubscriptions(); pendingDelete.value=null; show('订阅源已删除'); } catch(error) { show(error.message,'error'); } finally { deleteBusy.value=false; } }); };
+      onMounted(reload); return {subscriptions,articles,channels,selectedId,selectedFeed,articleOffset,articleTotal,articlesLoading,pageSize,pageLabel,loading,busy,editingId,formBusy,showFeedModal,pendingDelete,deleteBusy,flash,form,formatTime,summaryFor,isBusy,isFeedBusy,reload,selectFeed,changePage,openCreateModal,saveFeed,beginEdit,cancelEdit,requestRemove,cancelRemove,toggleFeed,refreshFeed,removeFeed};
+    }}).mount('#app');
+  </script>
+</body>
+</html>

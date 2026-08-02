@@ -232,6 +232,12 @@ http://127.0.0.1:5000
 - `/notification-management`
   - 通知渠道与告警规则管理；规则详情按需查看状态、评估记录和投递记录
 
+### RSS monitoring
+
+Open `/rss` to manually add and manage RSS feeds, read fetched articles, and independently toggle fetching and notifications.
+
+RSS polling uses `RSS_ENABLED` and `RSS_POLL_INTERVAL`. Notifications reuse the Apprise channels configured in `/notification-management`; for Bark, add a `barks://device-key` channel and set `NOTIFICATIONS_ENABLED=true`. The global `SCHEDULER_ENABLED` setting must also be `true`; restart the service after changing environment variables.
+
 ## API
 
 - `GET /api/coins`

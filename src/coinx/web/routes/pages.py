@@ -78,3 +78,10 @@ def notification_management():
     """告警与通知管理页面。"""
     logger.info('访问告警管理页面')
     return render_template('notification_management.html')
+
+
+@pages_bp.route('/rss')
+def rss_management():
+    """RSS subscription management and article reader."""
+    logger.info('访问 RSS 订阅管理页面')
+    return render_template('rss_management.html')

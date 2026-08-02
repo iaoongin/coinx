@@ -299,3 +299,51 @@ class AlertEvaluationMetric(Base):
     run_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
     metrics_json = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, default=datetime.now)
+
+
+class RssSubscription(Base):
+    """A feed that can be fetched and optionally delivered as notifications."""
+
+    __tablename__ = 'rss_subscriptions'
+    __table_args__ = (
+        Index('idx_rss_subscriptions_enabled', 'enabled'),
+        Index('idx_rss_subscriptions_monitor_enabled', 'monitor_enabled'),
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    name = Column(String(160), nullable=False)
+    url = Column(String(500), nullable=False, unique=True)
+    site_url = Column(String(1000))
+    feed_title = Column(String(255))
+    enabled = Column(Boolean, nullable=False, default=True)
+    monitor_enabled = Column(Boolean, nullable=False, default=True)
+    notification_channel_ids = Column(JSON)
+    last_checked_at = Column(BigInteger)
+    last_success_at = Column(BigInteger)
+    last_error = Column(String(500))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class RssArticle(Base):
+    """Normalized RSS item retained for browsing and notification de-duplication."""
+
+    __tablename__ = 'rss_articles'
+    __table_args__ = (
+        UniqueConstraint('subscription_id', 'guid', name='uk_rss_article_subscription_guid'),
+        Index('idx_rss_articles_subscription_published', 'subscription_id', 'published_at'),
+        Index('idx_rss_articles_published', 'published_at'),
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    subscription_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
+    guid = Column(String(512), nullable=False)
+    title = Column(String(1000), nullable=False)
+    link = Column(String(2000), nullable=False)
+    author = Column(String(255))
+    summary = Column(Text)
+    content = Column(Text)
+    published_at = Column(BigInteger, index=True)
+    notified_at = Column(BigInteger)
+    fetched_at = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)

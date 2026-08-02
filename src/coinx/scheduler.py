@@ -1,5 +1,6 @@
 import threading
 import time
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -25,6 +26,8 @@ from .config import (
     REPAIR_HISTORY_INTERVAL,
     REPAIR_ROLLING_POINTS,
     REPAIR_TRACKED_INTERVAL,
+    RSS_ENABLED,
+    RSS_POLL_INTERVAL,
 )
 from .repositories.funding_rate import collect_funding_rates
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
@@ -104,6 +107,40 @@ def _evaluate_market_notifications(event_type):
     except Exception:
         logger.exception('市场通知评估异常: event_type=%s', event_type)
     return None
+
+
+if RSS_ENABLED:
+    @scheduled_job(
+        'interval',
+        seconds=RSS_POLL_INTERVAL,
+        id='rss_monitor_job',
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(),
+    )
+    def scheduled_rss_monitor():
+        """Fetch enabled RSS feeds and notify configured channels about new articles."""
+        started_at = time.perf_counter()
+        _mark_job_started('rss_monitor_job')
+        try:
+            from .rss_monitor import monitor_all_subscriptions
+            summary = monitor_all_subscriptions()
+            _mark_job_finished(
+                'rss_monitor_job',
+                status=summary.get('status') or 'success',
+                summary=summary,
+                started_at=started_at,
+            )
+            logger.info(
+                'RSS 定时监控完成: sources=%s new=%s status=%s',
+                summary.get('subscription_count', 0),
+                summary.get('new_count', 0),
+                summary.get('status'),
+            )
+        except Exception as exc:
+            _mark_job_finished('rss_monitor_job', status='error', error=exc, started_at=started_at)
+            logger.error('RSS 定时监控失败: %s', exc)
+            logger.exception(exc)
 
 
 def get_job_runtime_metadata(job_id):
