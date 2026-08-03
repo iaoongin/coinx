@@ -23,6 +23,7 @@ def test_task_jobs_page_renders():
     assert '部分失败'.encode('utf-8') in response.data
     assert '限流等待'.encode('utf-8') in response.data
     assert '冷却剩余'.encode('utf-8') in response.data
-    assert '最近 20 条执行记录'.encode('utf-8') in response.data
-    assert '/runs?limit=20'.encode('utf-8') in response.data
+    assert '执行记录'.encode('utf-8') in response.data
+    assert '下一页'.encode('utf-8') in response.data
+    assert '/runs?limit=5&offset='.encode('utf-8') in response.data
     assert 'history-modal'.encode('utf-8') in response.data

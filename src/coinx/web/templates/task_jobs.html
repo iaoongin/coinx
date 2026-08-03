@@ -311,6 +311,14 @@
       font-weight: 500;
     }
 
+    .history-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
     .badge {
       display: inline-flex;
       align-items: center;
@@ -570,7 +578,7 @@
           <div class="history-modal-header">
             <div>
               <h2 style="margin:0;font-size:17px;">[[ historyModalJob.display_name || historyModalJob.name ]]</h2>
-              <p class="history-heading">最近 20 条执行记录</p>
+              <p class="history-heading">执行记录</p>
             </div>
             <button class="btn" @click="closeJobHistory">关闭</button>
           </div>
@@ -588,6 +596,11 @@
               </tr>
             </tbody>
           </table>
+          <div v-if="activeJobHistoryMeta.total > activeJobHistoryMeta.limit" class="history-pagination">
+            <button class="btn" @click="changeJobHistoryPage(-1)" :disabled="activeJobHistoryMeta.offset === 0">上一页</button>
+            <span class="cell-mono">第 [[ activeHistoryPage ]] / [[ activeHistoryPageCount ]] 页，共 [[ activeJobHistoryMeta.total ]] 条</span>
+            <button class="btn" @click="changeJobHistoryPage(1)" :disabled="activeJobHistoryMeta.offset + activeJobHistoryMeta.limit >= activeJobHistoryMeta.total">下一页</button>
+          </div>
         </section>
       </div>
     </div>
@@ -611,6 +624,7 @@
         const actionLoading = ref({});
         const historyModalJob = ref(null);
         const jobHistory = ref({});
+        const jobHistoryMeta = ref({});
         const historyLoading = ref({});
         let timer = null;
 
@@ -632,6 +646,11 @@
         const runningCount = computed(() => jobs.value.filter((job) => job.runtime?.running).length);
         const pausedCount = computed(() => jobs.value.filter((job) => job.paused).length);
         const activeJobHistory = computed(() => jobHistory.value[historyModalJob.value?.id] || []);
+        const activeJobHistoryMeta = computed(() => jobHistoryMeta.value[historyModalJob.value?.id] || {
+          total: 0, limit: 5, offset: 0,
+        });
+        const activeHistoryPage = computed(() => Math.floor(activeJobHistoryMeta.value.offset / activeJobHistoryMeta.value.limit) + 1);
+        const activeHistoryPageCount = computed(() => Math.max(1, Math.ceil(activeJobHistoryMeta.value.total / activeJobHistoryMeta.value.limit)));
 
         const showFlash = (message, type = '') => {
           flash.value = { message, type };
@@ -777,22 +796,41 @@
           }
         };
 
-        const openJobHistory = async (job) => {
-          const jobId = job.id;
-          historyModalJob.value = job;
-          if (jobHistory.value[jobId]) return;
+        const loadJobHistory = async (jobId, offset = 0) => {
           historyLoading.value = { ...historyLoading.value, [jobId]: true };
           try {
-            const response = await fetch(`/api/task-jobs/${jobId}/runs?limit=20`);
+            const response = await fetch(`/api/task-jobs/${jobId}/runs?limit=5&offset=${offset}`);
             const result = await response.json();
             if (result.status !== 'success') throw new Error(result.message || 'failed to load task job runs');
             jobHistory.value = { ...jobHistory.value, [jobId]: result.data?.runs || [] };
+            jobHistoryMeta.value = {
+              ...jobHistoryMeta.value,
+              [jobId]: {
+                total: result.data?.total || 0,
+                limit: result.data?.limit || 5,
+                offset: result.data?.offset || 0,
+              },
+            };
           } catch (error) {
             console.error(error);
             showFlash(`加载任务历史失败: ${error.message}`, 'error');
           } finally {
             historyLoading.value = { ...historyLoading.value, [jobId]: false };
           }
+        };
+
+        const openJobHistory = async (job) => {
+          historyModalJob.value = job;
+          await loadJobHistory(job.id);
+        };
+
+        const changeJobHistoryPage = async (direction) => {
+          const jobId = historyModalJob.value?.id;
+          if (!jobId) return;
+          const meta = activeJobHistoryMeta.value;
+          const offset = meta.offset + direction * meta.limit;
+          if (offset < 0 || offset >= meta.total) return;
+          await loadJobHistory(jobId, offset);
         };
 
         const closeJobHistory = () => {
@@ -834,11 +872,15 @@
           actionLoading,
           historyModalJob,
           jobHistory,
+          jobHistoryMeta,
           historyLoading,
           filteredJobs,
           runningCount,
           pausedCount,
           activeJobHistory,
+          activeJobHistoryMeta,
+          activeHistoryPage,
+          activeHistoryPageCount,
           isActionLoading,
           isJobActionLoading,
           formatTime,
@@ -854,6 +896,7 @@
           jobError,
           loadJobs,
           runAction,
+          changeJobHistoryPage,
           openJobHistory,
           closeJobHistory,
           toggleAutoRefresh,

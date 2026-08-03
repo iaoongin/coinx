@@ -88,16 +88,21 @@ def test_list_task_job_runs_returns_latest_records(monkeypatch):
     ))
     monkeypatch.setattr(
         'coinx.web.routes.api_data.get_job_runs',
-        lambda job_id, limit: [
+        lambda job_id, limit, offset: [
             {'id': 2, 'job_id': job_id, 'status': 'error', 'last_started_at_ms': 2_000},
             {'id': 1, 'job_id': job_id, 'status': 'success', 'last_started_at_ms': 1_000},
         ],
     )
+    monkeypatch.setattr('coinx.web.routes.api_data.get_job_run_count', lambda _job_id: 7)
 
     response = create_test_client().get('/api/task-jobs/job-a/runs')
 
     assert response.status_code == 200
-    assert [run['id'] for run in response.get_json()['data']['runs']] == [2, 1]
+    data = response.get_json()['data']
+    assert [run['id'] for run in data['runs']] == [2, 1]
+    assert data['total'] == 7
+    assert data['limit'] == 5
+    assert data['offset'] == 0
 
 
 def test_list_task_job_runs_validates_limit_and_job_id(monkeypatch):
@@ -111,7 +116,8 @@ def test_list_task_job_runs_validates_limit_and_job_id(monkeypatch):
 
     assert client.get('/api/task-jobs/missing/runs').status_code == 404
     assert client.get('/api/task-jobs/job-a/runs?limit=0').status_code == 400
-    assert client.get('/api/task-jobs/job-a/runs?limit=101').status_code == 400
+    assert client.get('/api/task-jobs/job-a/runs?limit=51').status_code == 400
+    assert client.get('/api/task-jobs/job-a/runs?offset=-1').status_code == 400
 
 
 def test_control_task_job_runs_job(monkeypatch):

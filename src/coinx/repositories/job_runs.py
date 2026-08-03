@@ -20,6 +20,8 @@ def ensure_job_run_schema(session=None):
     db = session or get_session()
     try:
         ScheduledJobRun.__table__.create(bind=db.get_bind(), checkfirst=True)
+        for index in ScheduledJobRun.__table__.indexes:
+            index.create(bind=db.get_bind(), checkfirst=True)
     finally:
         if own_session:
             db.close()
@@ -83,28 +85,35 @@ def _serialize_run(run):
 
 
 def get_latest_job_runtime_metadata(job_ids, session=None):
-    job_ids = [job_id for job_id in (job_ids or []) if job_id]
+    job_ids = list(dict.fromkeys(job_id for job_id in (job_ids or []) if job_id))
     if not job_ids:
         return {}
     own_session = session is None
     db = session or get_session()
     try:
-        rows = (
-            db.query(ScheduledJobRun)
-            .filter(ScheduledJobRun.job_id.in_(job_ids))
-            .order_by(ScheduledJobRun.job_id.asc(), desc(ScheduledJobRun.started_at), desc(ScheduledJobRun.id))
-            .all()
-        )
-        latest = {}
-        for run in rows:
-            latest.setdefault(run.job_id, _serialize_run(run))
-        return latest
+        # Each narrow query is covered by (job_id, started_at, id); load full
+        # records by primary key only after the latest IDs have been identified.
+        latest_ids = []
+        for job_id in job_ids:
+            run_id = (
+                db.query(ScheduledJobRun.id)
+                .filter(ScheduledJobRun.job_id == job_id)
+                .order_by(desc(ScheduledJobRun.started_at), desc(ScheduledJobRun.id))
+                .limit(1)
+                .scalar()
+            )
+            if run_id is not None:
+                latest_ids.append(run_id)
+        if not latest_ids:
+            return {}
+        rows = db.query(ScheduledJobRun).filter(ScheduledJobRun.id.in_(latest_ids)).all()
+        return {run.job_id: _serialize_run(run) for run in rows}
     finally:
         if own_session:
             db.close()
 
 
-def get_job_runs(job_id, limit=20, session=None):
+def get_job_runs(job_id, limit=20, offset=0, session=None):
     own_session = session is None
     db = session or get_session()
     try:
@@ -112,10 +121,21 @@ def get_job_runs(job_id, limit=20, session=None):
             db.query(ScheduledJobRun)
             .filter(ScheduledJobRun.job_id == job_id)
             .order_by(desc(ScheduledJobRun.started_at), desc(ScheduledJobRun.id))
+            .offset(offset)
             .limit(limit)
             .all()
         )
         return [_serialize_run(run) for run in rows]
+    finally:
+        if own_session:
+            db.close()
+
+
+def get_job_run_count(job_id, session=None):
+    own_session = session is None
+    db = session or get_session()
+    try:
+        return db.query(ScheduledJobRun.id).filter(ScheduledJobRun.job_id == job_id).count()
     finally:
         if own_session:
             db.close()

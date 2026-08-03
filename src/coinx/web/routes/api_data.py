@@ -34,7 +34,7 @@ from coinx.repositories.homepage_series import (
     latest_closed_5m_open_time,
     should_refresh_homepage_series,
 )
-from coinx.repositories.job_runs import get_job_runs, get_latest_job_runtime_metadata
+from coinx.repositories.job_runs import get_job_run_count, get_job_runs, get_latest_job_runtime_metadata
 from coinx.repositories.market_structure_score import (
     get_market_structure_score_snapshot,
     get_market_structure_score_symbols,
@@ -837,17 +837,27 @@ def list_task_job_runs(job_id):
     if job is None:
         return jsonify({'status': 'error', 'message': f'job not found: {job_id}'}), 404
     try:
-        limit = int(request.args.get('limit', 20))
+        limit = int(request.args.get('limit', 5))
+        offset = int(request.args.get('offset', 0))
     except (TypeError, ValueError):
-        return jsonify({'status': 'error', 'message': 'limit must be an integer'}), 400
-    if limit < 1 or limit > 100:
-        return jsonify({'status': 'error', 'message': 'limit must be between 1 and 100'}), 400
+        return jsonify({'status': 'error', 'message': 'limit and offset must be integers'}), 400
+    if limit < 1 or limit > 50:
+        return jsonify({'status': 'error', 'message': 'limit must be between 1 and 50'}), 400
+    if offset < 0:
+        return jsonify({'status': 'error', 'message': 'offset must be non-negative'}), 400
     try:
+        total = get_job_run_count(job_id)
         return jsonify(
             {
                 'status': 'success',
                 'message': 'task job runs loaded',
-                'data': {'job_id': job_id, 'runs': get_job_runs(job_id, limit=limit)},
+                'data': {
+                    'job_id': job_id,
+                    'runs': get_job_runs(job_id, limit=limit, offset=offset),
+                    'total': total,
+                    'limit': limit,
+                    'offset': offset,
+                },
             }
         )
     except Exception as e:

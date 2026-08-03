@@ -307,6 +307,7 @@ class ScheduledJobRun(Base):
     __tablename__ = 'scheduled_job_runs'
     __table_args__ = (
         Index('idx_scheduled_job_runs_job_started', 'job_id', 'started_at'),
+        Index('idx_scheduled_job_runs_job_started_id', 'job_id', 'started_at', 'id'),
         Index('idx_scheduled_job_runs_started_at', 'started_at'),
     )
 

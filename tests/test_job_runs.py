@@ -29,14 +29,29 @@ def test_job_run_lifecycle_persists_summary_and_error(db_session):
         duration_ms=500,
         session=db_session,
     )
+    other_run_id = create_job_run('rss_monitor_job', started_at=1_500, session=db_session)
+    finish_job_run(
+        other_run_id,
+        status='partial',
+        error='one subscription failed',
+        completed_at=1_800,
+        duration_ms=300,
+        session=db_session,
+    )
 
-    latest = get_latest_job_runtime_metadata(['market_rank_refresh_job'], session=db_session)
+    latest = get_latest_job_runtime_metadata(
+        ['market_rank_refresh_job', 'rss_monitor_job', 'market_rank_refresh_job'],
+        session=db_session,
+    )
     runs = get_job_runs('market_rank_refresh_job', limit=20, session=db_session)
 
     assert latest['market_rank_refresh_job']['last_status'] == 'error'
     assert latest['market_rank_refresh_job']['last_error'] == 'upstream timeout'
     assert latest['market_rank_refresh_job']['last_duration_ms'] == 500
+    assert latest['rss_monitor_job']['id'] == other_run_id
+    assert latest['rss_monitor_job']['last_status'] == 'partial'
     assert [run['id'] for run in runs] == [failed_run_id, success_run_id]
+    assert [run['id'] for run in get_job_runs('market_rank_refresh_job', limit=1, offset=1, session=db_session)] == [success_run_id]
     assert runs[1]['last_summary'] == {'saved_count': 123}
 
 
