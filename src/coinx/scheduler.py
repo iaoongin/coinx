@@ -137,11 +137,13 @@ def _evaluate_market_notifications(event_type):
         from .notifications import (
             EVENT_FUNDING_RATE,
             EVENT_PRICE_VOLUME,
+            EVENT_TRADE_OPPORTUNITY,
             evaluate_scheduled_rules,
         )
         event_types = {
             'funding_rate': EVENT_FUNDING_RATE,
             'price_volume': EVENT_PRICE_VOLUME,
+            'trade_opportunity': EVENT_TRADE_OPPORTUNITY,
         }
         if event_type in event_types:
             return evaluate_scheduled_rules(event_types[event_type])
@@ -338,6 +340,7 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
             summary = _merge_repair_summaries([tracked_summary, top_summary])
             _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
             _evaluate_market_notifications('price_volume')
+            _evaluate_market_notifications('trade_opportunity')
             precheck_complete = summary.get('precheck_skipped_count', 0)
             task_total = (
                 (summary.get('success_count', 0) or 0)

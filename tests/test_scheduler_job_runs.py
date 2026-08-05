@@ -46,3 +46,15 @@ def test_initialize_job_run_history_recovers_interrupted_runs(monkeypatch):
     scheduler_module.initialize_job_run_history()
 
     assert calls == ['schema', 'recover']
+
+
+def test_trade_opportunity_notification_uses_scheduled_event(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        'coinx.notifications.evaluate_scheduled_rules',
+        lambda event_type: calls.append(event_type) or {'status': 'success'},
+    )
+
+    scheduler_module._evaluate_market_notifications('trade_opportunity')
+
+    assert calls == ['market.trade_opportunity.actionable']

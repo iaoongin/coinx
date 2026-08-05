@@ -73,6 +73,128 @@ def test_notification_time_is_fixed_to_china_standard_time():
     assert notifications.format_notification_time(0) == '1970-01-01 08:00:00'
 
 
+def test_trade_opportunity_rule_requires_ordered_positive_stop_range():
+    payload = {
+        'name': 'actionable',
+        'event_type': notifications.EVENT_TRADE_OPPORTUNITY,
+        'scope_type': 'trade_opportunities',
+        'scope': {},
+        'params': {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8},
+    }
+
+    validated = notifications.validate_rule_payload(payload)
+
+    assert validated['params_json'] == {'min_stop_loss_percent': 2.0, 'max_stop_loss_percent': 8.0}
+    for params in ({}, {'min_stop_loss_percent': 0, 'max_stop_loss_percent': 8}, {'min_stop_loss_percent': 8, 'max_stop_loss_percent': 2}):
+        invalid = {**payload, 'params': params}
+        try:
+            notifications.validate_rule_payload(invalid)
+        except notifications.NotificationConfigError:
+            pass
+        else:
+            raise AssertionError('expected invalid stop-loss range to fail validation')
+
+
+def _trade_opportunity(symbol, entry_state='可做多', stop_percent=-2, plan_status='ready', space_status='adequate'):
+    return {
+        'symbol': symbol,
+        'entry_state': entry_state,
+        'trend_state': '强多趋势',
+        'current_price': 100,
+        'entry_score': 70,
+        'trend_score': 45,
+        'timing_score': 25,
+        'risk_score': 0,
+        'risk_reasons': ['资金费率过热'],
+        'trade_plan': {
+            'status': plan_status,
+            'space_status': space_status,
+            'entry_price': 100,
+            'stop_loss': 98,
+            'stop_loss_percent': stop_percent,
+            'tp1': 104,
+            'tp2': 108,
+            'tp3': 112,
+            'tp1_r': 2,
+            'tp2_r': 4,
+            'tp3_r': 6,
+        },
+    }
+
+
+def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_TRADE_OPPORTUNITY, 'trade_opportunities',
+        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8},
+    )
+    snapshots = [
+        [
+            _trade_opportunity('BTCUSDT', stop_percent=-2),
+            _trade_opportunity('ETHUSDT', entry_state='可做空', stop_percent=-8),
+            _trade_opportunity('SOLUSDT', entry_state='等待回踩', stop_percent=-3),
+            _trade_opportunity('XRPUSDT', stop_percent=-3, space_status='insufficient'),
+            _trade_opportunity('DOGEUSDT', stop_percent=-9),
+        ],
+        [
+            _trade_opportunity('BTCUSDT', entry_state='观望', stop_percent=-2),
+            _trade_opportunity('ETHUSDT', entry_state='可做空', stop_percent=-8),
+            _trade_opportunity('SOLUSDT', entry_state='等待回踩', stop_percent=-3),
+            _trade_opportunity('XRPUSDT', stop_percent=-3, space_status='insufficient'),
+            _trade_opportunity('DOGEUSDT', stop_percent=-9),
+        ],
+        [
+            _trade_opportunity('BTCUSDT', stop_percent=-2),
+            _trade_opportunity('ETHUSDT', entry_state='可做空', stop_percent=-8),
+            _trade_opportunity('SOLUSDT', entry_state='等待回踩', stop_percent=-3),
+            _trade_opportunity('XRPUSDT', stop_percent=-3, space_status='insufficient'),
+            _trade_opportunity('DOGEUSDT', stop_percent=-9),
+        ],
+    ]
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {'data': snapshots.pop(0), 'cache_update_time': 1_700_000_000_000},
+    )
+
+    first = notifications.evaluate_trade_opportunity_rules(session=db_session, rule_id=rule.id)
+    repeated = notifications.evaluate_trade_opportunity_rules(session=db_session, rule_id=rule.id)
+    reentered = notifications.evaluate_trade_opportunity_rules(session=db_session, rule_id=rule.id)
+
+    assert (first['checked'], first['matched'], first['sent']) == (5, 2, 1)
+    assert (repeated['matched'], repeated['sent']) == (1, 1)
+    assert (reentered['matched'], reentered['sent']) == (2, 1)
+    deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
+    assert [item.payload_json['message']['title'] for item in deliveries] == [
+        '🔴 可做交易机会', '✅ 可做交易机会已退出', '🔴 可做交易机会',
+    ]
+    assert 'BTCUSDT  可做多' in deliveries[0].payload_json['message']['body']
+    assert '止损 98 (-2.00%)' in deliveries[0].payload_json['message']['body']
+    assert 'SOLUSDT' not in deliveries[0].payload_json['message']['body']
+
+
+def test_trade_opportunity_rule_supports_manual_evaluation_run(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_TRADE_OPPORTUNITY, 'trade_opportunities',
+        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8},
+    )
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {'data': [_trade_opportunity('BTCUSDT', stop_percent=-2)], 'cache_update_time': 1},
+    )
+
+    result = notifications.evaluate_rule_with_run(rule, 'manual', session=db_session)
+
+    assert result['status'] == 'success'
+    assert result['matched'] == 1
+    run = db_session.query(AlertEvaluationRun).filter_by(rule_id=rule.id).one()
+    assert (run.trigger_source, run.status, run.matched_count) == ('manual', 'success', 1)
+
+
 def test_telegram_body_preserves_visual_blank_lines(monkeypatch):
     telegram = type('Channel', (), {})()
     other = type('Channel', (), {})()
@@ -479,6 +601,7 @@ def test_scheduled_evaluation_creates_a_visible_run_record(db_session, monkeypat
 
 
 def test_stale_scheduled_evaluation_is_finalized(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
     monkeypatch.setattr('coinx.web.routes.api_notifications.get_session', lambda: db_session)
     channel = create_channel(db_session)
     rule = create_rule(
@@ -508,6 +631,7 @@ def test_stale_scheduled_evaluation_is_finalized(db_session, monkeypatch):
 
 
 def test_rule_state_details_default_to_all_states(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
     monkeypatch.setattr('coinx.web.routes.api_notifications.get_session', lambda: db_session)
     channel = create_channel(db_session)
     rule = create_rule(
@@ -558,5 +682,9 @@ def test_notification_management_page_renders():
 
     response = app.test_client().get('/notification-management')
 
+    body = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert '告警管理' in response.get_data(as_text=True)
+    assert '告警管理' in body
+    assert 'market.trade_opportunity.actionable' in body
+    assert '最小止损 %' in body
+    assert 'max_stop_loss_percent' in body

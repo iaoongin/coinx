@@ -26,17 +26,20 @@ from coinx.models import (
     NotificationDelivery,
 )
 from coinx.repositories.funding_rate import load_latest_funding_rates
+from coinx.repositories.trade_opportunities import get_trade_opportunity_snapshot
 from coinx.utils import logger
 
 
 EVENT_FUNDING_RATE = 'market.funding_rate.threshold'
 EVENT_PRICE_VOLUME = 'market.price_volume.threshold'
 EVENT_JOB_FAILURE = 'system.job.failure'
+EVENT_TRADE_OPPORTUNITY = 'market.trade_opportunity.actionable'
 
 EVENT_SCOPE = {
     EVENT_FUNDING_RATE: 'all_market',
     EVENT_PRICE_VOLUME: 'market_rank_top',
     EVENT_JOB_FAILURE: 'system_jobs',
+    EVENT_TRADE_OPPORTUNITY: 'trade_opportunities',
 }
 
 EVALUATION_RUN_LOCK = threading.Lock()
@@ -305,6 +308,16 @@ def validate_rule_payload(payload):
         if rank_type != 'quote_volume' or limit < 1 or limit > 500:
             raise NotificationConfigError('invalid market rank scope')
         scope = {'rank_type': rank_type, 'limit': limit}
+    elif event_type == EVENT_TRADE_OPPORTUNITY:
+        minimum = _positive_number(params.get('min_stop_loss_percent'), 'min_stop_loss_percent')
+        maximum = _positive_number(params.get('max_stop_loss_percent'), 'max_stop_loss_percent')
+        if minimum > maximum:
+            raise NotificationConfigError('min_stop_loss_percent must not exceed max_stop_loss_percent')
+        params = {
+            'min_stop_loss_percent': minimum,
+            'max_stop_loss_percent': maximum,
+        }
+        scope = {}
     else:
         job_ids = params.get('job_ids') or []
         if not isinstance(job_ids, list) or not all(isinstance(item, str) and item.strip() for item in job_ids):
@@ -621,6 +634,7 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         EVENT_FUNDING_RATE: ('资金费率异常', '资金费率已恢复', '资金费率'),
         EVENT_PRICE_VOLUME: ('价格放量异动', '价格放量异动已恢复', '价格放量异动'),
         EVENT_JOB_FAILURE: ('定时任务执行失败', '定时任务已恢复', '定时任务'),
+        EVENT_TRADE_OPPORTUNITY: ('可做交易机会', '可做交易机会已退出', '交易机会'),
     }[rule.event_type]
     if triggered and recovered:
         title = f'📊 {event_titles[2]}状态更新'
@@ -946,6 +960,146 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
             db.close()
 
 
+def evaluate_trade_opportunity_rules(session=None, rule_id=None):
+    if not config.NOTIFICATIONS_ENABLED:
+        return {'status': 'disabled', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0}
+    own_session = session is None
+    db = session or get_session()
+    started_at = time.perf_counter()
+    stages = defaultdict(float)
+    try:
+        rules = _enabled_rules(db, EVENT_TRADE_OPPORTUNITY, rule_id=rule_id)
+        if not rules:
+            return {
+                'status': 'success', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0,
+                'metrics': _evaluation_metrics(started_at, stages, symbols=0),
+            }
+
+        stage_started = time.perf_counter()
+        snapshot = get_trade_opportunity_snapshot()
+        rows = snapshot.get('data') or []
+        snapshot_time = snapshot.get('cache_update_time')
+        stages['snapshot_load_ms'] += (time.perf_counter() - stage_started) * 1000
+        symbols = [row.get('symbol') for row in rows if row.get('symbol')]
+        sent = checked = matched_count = 0
+        stop_loss_ranges = {}
+
+        for rule in rules:
+            params = rule.params_json or {}
+            minimum = float(params['min_stop_loss_percent'])
+            maximum = float(params['max_stop_loss_percent'])
+            stop_loss_ranges[str(rule.id)] = {'min': minimum, 'max': maximum}
+            stage_started = time.perf_counter()
+            states = _load_rule_states(db, rule.id, 'actionable', symbols)
+            stages['state_load_ms'] += (time.perf_counter() - stage_started) * 1000
+            events = []
+            rule_checked = 0
+            stage_started = time.perf_counter()
+            for row in rows:
+                symbol = row.get('symbol')
+                if not symbol:
+                    continue
+                plan = row.get('trade_plan') or {}
+                raw_stop_percent = plan.get('stop_loss_percent')
+                try:
+                    raw_stop_percent = float(raw_stop_percent)
+                    stop_percent = abs(raw_stop_percent)
+                except (TypeError, ValueError):
+                    raw_stop_percent = None
+                    stop_percent = None
+                actionable = (
+                    row.get('entry_state') in {'可做多', '可做空'}
+                    and plan.get('status') == 'ready'
+                    and plan.get('space_status') == 'adequate'
+                    and stop_percent is not None
+                    and minimum <= stop_percent <= maximum
+                )
+                values = {
+                    'entry_state': row.get('entry_state'),
+                    'trend_state': row.get('trend_state'),
+                    'current_price': row.get('current_price'),
+                    'entry_score': row.get('entry_score'),
+                    'trend_score': row.get('trend_score'),
+                    'timing_score': row.get('timing_score'),
+                    'risk_score': row.get('risk_score'),
+                    'risk_reasons': row.get('risk_reasons') or [],
+                    'snapshot_time': snapshot_time,
+                    'min_stop_loss_percent': minimum,
+                    'max_stop_loss_percent': maximum,
+                    'stop_loss_percent': raw_stop_percent,
+                    'trade_plan': plan,
+                }
+                checked += 1
+                rule_checked += 1
+                matched_count += int(actionable)
+                result = _observe(
+                    db, rule, symbol, 'actionable', actionable, values,
+                    f'{symbol} 可做交易机会',
+                    f'当前不满足严格可做或止损范围 {minimum:g}%..{maximum:g}%。',
+                    state=states.get(symbol), aggregate=True,
+                )
+                if result.get('state') and result['event_status']:
+                    previous = result['previous_values'] or {}
+                    if result['event_status'] == 'triggered':
+                        trigger = (
+                            f'{symbol}  {row.get("entry_state")} · 当前 {format_price(row.get("current_price"))}\n'
+                            f'入场 {format_price(plan.get("entry_price"))} · 止损 {format_price(plan.get("stop_loss"))}'
+                            f' ({raw_stop_percent:.2f}%) · TP1/2/3 {format_price(plan.get("tp1"))}'
+                            f' / {format_price(plan.get("tp2"))} / {format_price(plan.get("tp3"))}\n'
+                            f'R {plan.get("tp1_r", "-")} / {plan.get("tp2_r", "-")} / {plan.get("tp3_r", "-")}'
+                            f' · 入场/趋势/时机/风险 {row.get("entry_score", 0):.1f}'
+                            f' / {row.get("trend_score", 0):.1f} / {row.get("timing_score", 0):.1f}'
+                            f' / {row.get("risk_score", 0):.1f}'
+                            f'{(" · " + "、".join(row.get("risk_reasons") or [])) if row.get("risk_reasons") else ""}'
+                        )
+                    else:
+                        trigger = None
+                    previous_plan = previous.get('trade_plan') or {}
+                    events.append({
+                        'status': result['event_status'],
+                        'state': result['state'],
+                        'severity': abs(float(row.get('entry_score') or 0)),
+                        'triggered': trigger or f'{symbol}  {row.get("entry_state") or "-"}',
+                        'recovered': (
+                            f'{symbol}  当前 {row.get("entry_state") or "不满足"}'
+                            f' · 之前止损 {previous.get("stop_loss_percent", "-")}%'
+                            f' · 之前入场 {format_price(previous_plan.get("entry_price"))}'
+                        ),
+                    })
+            stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
+            stage_started = time.perf_counter()
+            sent += _deliver_evaluation_summary(
+                db, rule, rule_checked, events,
+                f'规则：严格可做 · 止损 {minimum:g}%..{maximum:g}% · 数据 {format_notification_time(snapshot_time)}',
+            )
+            stages['delivery_ms'] += (time.perf_counter() - stage_started) * 1000
+        stage_started = time.perf_counter()
+        db.commit()
+        stages['commit_ms'] += (time.perf_counter() - stage_started) * 1000
+        return {
+            'status': 'success', 'evaluated': len(rules), 'checked': checked,
+            'matched': matched_count, 'sent': sent,
+            'metrics': _evaluation_metrics(
+                started_at,
+                stages,
+                symbols=len(symbols),
+                snapshot_time=snapshot_time,
+                stop_loss_ranges=stop_loss_ranges,
+            ),
+        }
+    except Exception:
+        db.rollback()
+        logger.exception('交易机会告警评估失败')
+        return {
+            'status': 'error', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0,
+            'error': 'trade opportunity evaluation failed',
+            'metrics': _evaluation_metrics(started_at, stages),
+        }
+    finally:
+        if own_session:
+            db.close()
+
+
 def evaluate_job_failure_rules(metadata, session=None, rule_id=None):
     if not config.NOTIFICATIONS_ENABLED:
         return {'status': 'disabled', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0}
@@ -1031,6 +1185,8 @@ def evaluate_rule(rule, session=None, metadata=None):
         return evaluate_funding_rate_rules(session=session, rule_id=rule.id)
     if rule.event_type == EVENT_PRICE_VOLUME:
         return evaluate_price_volume_rules(session=session, rule_id=rule.id)
+    if rule.event_type == EVENT_TRADE_OPPORTUNITY:
+        return evaluate_trade_opportunity_rules(session=session, rule_id=rule.id)
     return evaluate_job_failure_rules(metadata or {}, session=session, rule_id=rule.id)
 
 
