@@ -122,6 +122,39 @@ def _trade_opportunity(symbol, entry_state='可做多', stop_percent=-2, plan_st
     }
 
 
+def test_trade_opportunity_message_uses_safe_placeholders_for_missing_optional_values():
+    body = notifications.format_trade_opportunity_trigger(
+        'BTCUSDT',
+        {
+            'entry_state': '可做多',
+            'current_price': None,
+            'entry_score': None,
+            'trend_score': None,
+            'timing_score': None,
+            'risk_score': None,
+            'risk_reasons': [],
+        },
+        {
+            'entry_price': None,
+            'stop_loss': None,
+            'stop_loss_percent': None,
+            'tp1': None,
+            'tp1_r': None,
+            'tp2': None,
+            'tp2_r': None,
+            'tp3': None,
+            'tp3_r': None,
+        },
+    )
+
+    assert '现价 -' in body
+    assert '止损 -（距离 -）' in body
+    assert '目标 TP1 - (-) · TP2 - (-) · TP3 - (-)' in body
+    assert '信号评分：入场 - · 趋势 - · 时机 - · 风险 -' in body
+    assert '风险提示' not in body
+    assert 'None' not in body
+
+
 def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_session, monkeypatch):
     configure_notifications(monkeypatch)
     channel = create_channel(db_session)
@@ -167,10 +200,18 @@ def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_
     assert (reentered['matched'], reentered['sent']) == (2, 1)
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
     assert [item.payload_json['message']['title'] for item in deliveries] == [
-        '🔴 可做交易机会', '✅ 可做交易机会已退出', '🔴 可做交易机会',
+        '🔴 可做交易机会 · 2 个', '✅ 可做交易机会已退出 · 1 个', '🔴 可做交易机会 · 1 个',
     ]
-    assert 'BTCUSDT  可做多' in deliveries[0].payload_json['message']['body']
-    assert '止损 98 (-2.00%)' in deliveries[0].payload_json['message']['body']
+    first_body = deliveries[0].payload_json['message']['body']
+    assert '01 · BTCUSDT · 可做多' in first_body
+    assert '止损 98（距离 2.00%）' in first_body
+    assert '目标 TP1 104 (2R) · TP2 108 (4R) · TP3 112 (6R)' in first_body
+    assert '信号评分：入场 70.0 · 趋势 45.0 · 时机 25.0 · 风险 0.0' in first_body
+    assert '风险提示：资金费率过热' in first_body
+    assert '规则：严格可做 · 止损范围 2%–8%' in first_body
+    assert '扫描 5 · 当前机会 2 · 已恢复 0' in first_body
+    assert 'BTCUSDT · 当前 观望' in deliveries[1].payload_json['message']['body']
+    assert '之前止损距离 2.00%' in deliveries[1].payload_json['message']['body']
     assert 'SOLUSDT' not in deliveries[0].payload_json['message']['body']
 
 

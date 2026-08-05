@@ -175,6 +175,58 @@ def format_price(value):
     return f'{value:,.8f}'.rstrip('0').rstrip('.')
 
 
+def format_trade_score(value):
+    try:
+        return f'{float(value):.1f}'
+    except (TypeError, ValueError):
+        return '-'
+
+
+def format_trade_r(value):
+    try:
+        return f'{float(value):g}R'
+    except (TypeError, ValueError):
+        return '-'
+
+
+def format_stop_distance(value):
+    try:
+        return f'{abs(float(value)):.2f}%'
+    except (TypeError, ValueError):
+        return '-'
+
+
+def format_trade_opportunity_trigger(symbol, row, plan):
+    targets = ' · '.join(
+        f'TP{index} {format_price(plan.get(f"tp{index}"))} ({format_trade_r(plan.get(f"tp{index}_r"))})'
+        for index in range(1, 4)
+    )
+    lines = [
+        f'{symbol} · {row.get("entry_state") or "-"}',
+        f'现价 {format_price(row.get("current_price"))}',
+        f'入场 {format_price(plan.get("entry_price"))}',
+        f'止损 {format_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
+        f'目标 {targets}',
+        '信号评分：'
+        f'入场 {format_trade_score(row.get("entry_score"))} · '
+        f'趋势 {format_trade_score(row.get("trend_score"))} · '
+        f'时机 {format_trade_score(row.get("timing_score"))} · '
+        f'风险 {format_trade_score(row.get("risk_score"))}',
+    ]
+    risk_reasons = [str(reason) for reason in row.get('risk_reasons') or [] if reason]
+    if risk_reasons:
+        lines.append(f'风险提示：{" · ".join(risk_reasons)}')
+    return '\n'.join(lines)
+
+
+def format_trade_opportunity_recovery(symbol, entry_state, previous, previous_plan):
+    return '\n'.join((
+        f'{symbol} · 当前 {entry_state or "不满足"}',
+        f'之前入场 {format_price(previous_plan.get("entry_price"))}',
+        f'之前止损距离 {format_stop_distance(previous.get("stop_loss_percent"))}',
+    ))
+
+
 def trend_dot(value):
     return '🟢' if value >= 0 else '🔴'
 
@@ -624,8 +676,9 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         key=lambda event: event.get('severity', 0),
         reverse=True,
     )
+    is_trade_opportunity = rule.event_type == EVENT_TRADE_OPPORTUNITY
     triggered = [
-        f'{index}. {event["triggered"]}'
+        f'{index:02d} · {event["triggered"]}' if is_trade_opportunity else f'{index}. {event["triggered"]}'
         for index, event in enumerate(triggered_events, start=1)
     ]
     recovered = [event['recovered'] for event in recovered_events]
@@ -643,13 +696,30 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     else:
         title = f'✅ {event_titles[1]}'
 
-    sections = [condition]
-    if triggered:
-        sections.append(f'🔴 当前异常 · {len(triggered)} 个\n' + '\n'.join(triggered))
-    if recovered:
-        sections.append(f'✅ 已恢复 · {len(recovered)} 个\n' + '\n'.join(recovered))
-    sections.append(f'本轮：检查 {checked} · 异常 {len(triggered)} · 恢复 {len(recovered)}')
-    sections.append(f'时间：{format_notification_time(timestamp)}')
+    if is_trade_opportunity:
+        if triggered and not recovered:
+            title = f'🔴 {event_titles[0]} · {len(triggered)} 个'
+        elif recovered and not triggered:
+            title = f'✅ {event_titles[1]} · {len(recovered)} 个'
+        sections = []
+        if triggered:
+            sections.append('\n\n'.join(triggered))
+        if recovered:
+            sections.append('\n\n'.join(
+                f'{index:02d} · {event["recovered"]}'
+                for index, event in enumerate(recovered_events, start=1)
+            ))
+        sections.append(condition)
+        sections.append(f'扫描 {checked} · 当前机会 {len(triggered)} · 已恢复 {len(recovered)}')
+        sections.append(f'推送 {format_notification_time(timestamp)}')
+    else:
+        sections = [condition]
+        if triggered:
+            sections.append(f'🔴 当前异常 · {len(triggered)} 个\n' + '\n'.join(triggered))
+        if recovered:
+            sections.append(f'✅ 已恢复 · {len(recovered)} 个\n' + '\n'.join(recovered))
+        sections.append(f'本轮：检查 {checked} · 异常 {len(triggered)} · 恢复 {len(recovered)}')
+        sections.append(f'时间：{format_notification_time(timestamp)}')
 
     payload = {
         'event_type': rule.event_type,
@@ -1083,17 +1153,7 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
                 if result.get('state') and result['event_status']:
                     previous = result['previous_values'] or {}
                     if result['event_status'] == 'triggered':
-                        trigger = (
-                            f'{symbol}  {row.get("entry_state")} · 当前 {format_price(row.get("current_price"))}\n'
-                            f'入场 {format_price(plan.get("entry_price"))} · 止损 {format_price(plan.get("stop_loss"))}'
-                            f' ({raw_stop_percent:.2f}%) · TP1/2/3 {format_price(plan.get("tp1"))}'
-                            f' / {format_price(plan.get("tp2"))} / {format_price(plan.get("tp3"))}\n'
-                            f'R {plan.get("tp1_r", "-")} / {plan.get("tp2_r", "-")} / {plan.get("tp3_r", "-")}'
-                            f' · 入场/趋势/时机/风险 {row.get("entry_score", 0):.1f}'
-                            f' / {row.get("trend_score", 0):.1f} / {row.get("timing_score", 0):.1f}'
-                            f' / {row.get("risk_score", 0):.1f}'
-                            f'{(" · " + "、".join(row.get("risk_reasons") or [])) if row.get("risk_reasons") else ""}'
-                        )
+                        trigger = format_trade_opportunity_trigger(symbol, row, plan)
                     else:
                         trigger = None
                     previous_plan = previous.get('trade_plan') or {}
@@ -1102,17 +1162,16 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
                         'state': result['state'],
                         'severity': abs(float(row.get('entry_score') or 0)),
                         'triggered': trigger or f'{symbol}  {row.get("entry_state") or "-"}',
-                        'recovered': (
-                            f'{symbol}  当前 {row.get("entry_state") or "不满足"}'
-                            f' · 之前止损 {previous.get("stop_loss_percent", "-")}%'
-                            f' · 之前入场 {format_price(previous_plan.get("entry_price"))}'
+                        'recovered': format_trade_opportunity_recovery(
+                            symbol, row.get('entry_state'), previous, previous_plan,
                         ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
             stage_started = time.perf_counter()
             sent += _deliver_evaluation_summary(
                 db, rule, rule_checked, events,
-                f'规则：严格可做 · 止损 {minimum:g}%..{maximum:g}% · 数据 {format_notification_time(snapshot_time)}',
+                f'规则：严格可做 · 止损范围 {minimum:g}%–{maximum:g}%\n'
+                f'数据 {format_notification_time(snapshot_time)}',
             )
             stages['delivery_ms'] += (time.perf_counter() - stage_started) * 1000
         stage_started = time.perf_counter()
