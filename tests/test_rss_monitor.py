@@ -4,7 +4,10 @@ from sqlalchemy.orm import sessionmaker
 
 from coinx import config, notifications
 from coinx.models import NotificationChannel, RssArticle, RssSubscription
-from coinx.rss_monitor import fetch_feed, monitor_all_subscriptions, parse_rss_document, sync_subscription
+from coinx.rss_monitor import (
+    fetch_feed, monitor_all_subscriptions, parse_rss_document, serialize_article,
+    sync_subscription,
+)
 from coinx.scheduler import _rss_summary_error
 
 
@@ -22,6 +25,30 @@ def test_parse_rss_document_extracts_items_and_cleans_html():
     assert result['items'][0]['guid'] == 'article-1'
     assert result['items'][0]['summary'] == 'Summary text'
     assert result['items'][0]['published_at'] == 1785511636000
+
+
+def test_rss_article_links_use_x_for_legacy_twitter_urls():
+    payload = b'''<rss><channel><item>
+      <guid>tweet-1</guid><title>Tweet</title>
+      <link>https://www.twitter.com/example/status/123?ref_src=rss#thread</link>
+    </item></channel></rss>'''
+
+    result = parse_rss_document(payload)
+    article = RssArticle(link='https://twitter.com/example/status/456')
+
+    assert result['items'][0]['link'] == 'https://x.com/example/status/123?ref_src=rss#thread'
+    assert serialize_article(article)['link'] == 'https://x.com/example/status/456'
+
+
+def test_rss_article_links_replace_nitter_with_x():
+    payload = b'''<rss><channel><item>
+      <guid>tweet-1</guid><title>Tweet</title>
+      <link>https://nitter.net/yuren477/status/2084982905919717485#m</link>
+    </item></channel></rss>'''
+
+    result = parse_rss_document(payload)
+
+    assert result['items'][0]['link'] == 'https://x.com/yuren477/status/2084982905919717485#m'
 
 
 def test_fetch_feed_reports_html_response_clearly(monkeypatch):

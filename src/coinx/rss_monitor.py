@@ -19,6 +19,10 @@ from coinx.utils import logger
 
 _TAG_RE = re.compile(r'<[^>]+>')
 _WHITESPACE_RE = re.compile(r'\s+')
+_X_CONTENT_HOSTS = {
+    'twitter.com', 'www.twitter.com', 'mobile.twitter.com',
+    'nitter.net', 'www.nitter.net',
+}
 
 
 def now_ms():
@@ -81,11 +85,19 @@ def _parse_timestamp(value):
 def _item_link(item):
     link = _child_text(item, 'link')
     if link:
-        return link
+        return normalize_article_link(link)
     for child in list(item):
         if _local_name(child.tag) == 'link' and child.attrib.get('href'):
-            return child.attrib['href']
+            return normalize_article_link(child.attrib['href'])
     return ''
+
+
+def normalize_article_link(link):
+    """Use X's canonical host for Twitter and Nitter article links."""
+    parsed = urlsplit((link or '').strip())
+    if parsed.scheme not in {'http', 'https'} or parsed.hostname not in _X_CONTENT_HOSTS:
+        return link
+    return urlunsplit((parsed.scheme, 'x.com', parsed.path, parsed.query, parsed.fragment))
 
 
 def parse_rss_document(payload):
@@ -186,7 +198,7 @@ def serialize_article(row, subscription=None):
         'subscription_name': subscription.name if subscription else None,
         'guid': row.guid,
         'title': row.title,
-        'link': row.link,
+        'link': normalize_article_link(row.link),
         'author': row.author,
         'summary': row.summary,
         'content': row.content,
@@ -212,7 +224,7 @@ def _notify_articles(db, subscription, articles):
     lines = [f'订阅源：{subscription.name}', f'新增文章：{len(articles)} 条', '']
     for article in articles[:10]:
         lines.append(f'• {article.title}')
-        lines.append(article.link)
+        lines.append(normalize_article_link(article.link))
     if len(articles) > 10:
         lines.append(f'其余 {len(articles) - 10} 条请在 RSS 页面查看。')
     body = '\n'.join(lines)
