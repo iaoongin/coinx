@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy import and_, or_
 
 from coinx import config
 from coinx.database import get_session
@@ -26,6 +27,7 @@ from coinx.utils import logger
 
 api_notifications_bp = Blueprint('api_notifications', __name__)
 EVALUATION_STALE_TIMEOUT_MS = 5 * 60 * 1000
+STALE_EVALUATION_MESSAGE = 'evaluation exceeded the 5-minute timeout or was interrupted by a service restart'
 
 
 def _error(message, status=400):
@@ -40,9 +42,21 @@ def _ensure_evaluation_metrics_table(db):
 def _finalize_stale_evaluations(db):
     """Mark abandoned manual and scheduled evaluations as failed."""
     cutoff = now_ms() - EVALUATION_STALE_TIMEOUT_MS
+    has_metrics = db.query(AlertEvaluationMetric.id).filter(
+        AlertEvaluationMetric.run_id == AlertEvaluationRun.id,
+    ).exists()
     rows = db.query(AlertEvaluationRun).filter(
-        AlertEvaluationRun.status == 'running',
-        AlertEvaluationRun.started_at < cutoff,
+        or_(
+            and_(
+                AlertEvaluationRun.status == 'running',
+                AlertEvaluationRun.started_at < cutoff,
+            ),
+            and_(
+                AlertEvaluationRun.status == 'error',
+                AlertEvaluationRun.error_message == STALE_EVALUATION_MESSAGE,
+                has_metrics,
+            ),
+        ),
     ).all()
     if not rows:
         return
@@ -51,8 +65,19 @@ def _finalize_stale_evaluations(db):
         if is_evaluation_run_active(db, row.id):
             logger.info('evaluation remains active; stale finalization skipped: run=%s', row.id)
             continue
+        metric = db.query(AlertEvaluationMetric.id).filter(
+            AlertEvaluationMetric.run_id == row.id,
+        ).first()
+        if metric:
+            # A metric is written atomically with the final result. Older runs
+            # from the previous implementation can have it without final status.
+            row.status = 'success'
+            row.error_message = None
+            row.completed_at = finished_at
+            logger.warning('recovered completed alert evaluation left running: run=%s', row.id)
+            continue
         row.status = 'error'
-        row.error_message = 'evaluation exceeded the 5-minute timeout or was interrupted by a service restart'
+        row.error_message = STALE_EVALUATION_MESSAGE
         row.completed_at = finished_at
     db.commit()
 

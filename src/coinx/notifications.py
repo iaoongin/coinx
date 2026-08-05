@@ -685,6 +685,48 @@ def _evaluation_metrics(started_at, stages, **extra):
     }
 
 
+def _persist_evaluation_run_result(bind, run_id, result, error_message=None):
+    """Finalize a run in a short transaction independent of the evaluator session."""
+    status = result.get('status', 'error')
+    values = {
+        'status': status,
+        'checked_count': result.get('checked', 0),
+        'matched_count': result.get('matched', 0),
+        'sent_count': result.get('sent', 0),
+        'error_message': error_message if error_message is not None else result.get('error'),
+        'completed_at': now_ms(),
+    }
+    metrics = result.get('metrics') or {}
+    last_error = None
+    for attempt in range(2):
+        try:
+            with bind.begin() as connection:
+                updated = connection.execute(
+                    AlertEvaluationRun.__table__.update()
+                    .where(AlertEvaluationRun.id == run_id)
+                    .where(AlertEvaluationRun.status == 'running')
+                    .values(**values)
+                )
+                if updated.rowcount == 0:
+                    return True
+                if metrics:
+                    connection.execute(
+                        AlertEvaluationMetric.__table__.insert().values(
+                            run_id=run_id,
+                            metrics_json=metrics,
+                        )
+                    )
+            return True
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                '告警评估运行记录收口失败: run_id=%s attempt=%s error=%s',
+                run_id, attempt + 1, exc,
+            )
+    logger.exception('告警评估运行记录收口失败且重试耗尽: run_id=%s', run_id, exc_info=last_error)
+    return False
+
+
 PRICE_VOLUME_LOOKBACK_MS = 26 * 60 * 60 * 1000
 EVALUATION_QUERY_TIMEOUT_MS = 4 * 60 * 1000
 
@@ -1225,27 +1267,18 @@ def evaluate_rule_with_run(rule, trigger_source, session=None, metadata=None):
             }
 
         result = evaluate_rule(rule, session=db, metadata=metadata)
-        run.status = result['status']
-        run.checked_count = result.get('checked', 0)
-        run.matched_count = result.get('matched', 0)
-        run.sent_count = result.get('sent', 0)
-        run.error_message = result.get('error')
-        run.completed_at = now_ms()
-        metrics = result.get('metrics') or {}
-        if metrics:
-            db.add(AlertEvaluationMetric(run_id=run.id, metrics_json=metrics))
-        db.commit()
+        if not _persist_evaluation_run_result(db.get_bind(), run.id, result):
+            raise RuntimeError('unable to finalize alert evaluation run')
         result['run_id'] = run.id
         return result
     except Exception as exc:
         db.rollback()
         if run is not None:
-            failed_run = db.get(AlertEvaluationRun, run.id)
-            if failed_run:
-                failed_run.status = 'error'
-                failed_run.error_message = str(exc)[:500]
-                failed_run.completed_at = now_ms()
-                db.commit()
+            _persist_evaluation_run_result(
+                db.get_bind(), run.id,
+                {'status': 'error', 'checked': 0, 'matched': 0, 'sent': 0},
+                error_message=str(exc)[:500],
+            )
         logger.exception('%s alert evaluation failed: rule=%s', trigger_source, rule.id)
         return {
             'status': 'error', 'checked': 0, 'matched': 0, 'sent': 0,

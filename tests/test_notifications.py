@@ -195,6 +195,32 @@ def test_trade_opportunity_rule_supports_manual_evaluation_run(db_session, monke
     assert (run.trigger_source, run.status, run.matched_count) == ('manual', 'success', 1)
 
 
+def test_evaluation_run_result_is_persisted_outside_evaluator_session(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+
+    monkeypatch.setattr(
+        notifications,
+        'evaluate_rule',
+        lambda *_args, **_kwargs: {
+            'status': 'success', 'checked': 3, 'matched': 1, 'sent': 1,
+            'metrics': {'duration_ms': 12.5, 'stage_ms': {'snapshot_load_ms': 10}},
+        },
+    )
+
+    result = notifications.evaluate_rule_with_run(rule, 'manual', session=db_session)
+
+    assert result['status'] == 'success'
+    run = db_session.query(AlertEvaluationRun).filter_by(rule_id=rule.id).one()
+    assert (run.status, run.checked_count, run.matched_count, run.sent_count) == ('success', 3, 1, 1)
+    metric = db_session.query(AlertEvaluationMetric).filter_by(run_id=run.id).one()
+    assert metric.metrics_json['duration_ms'] == 12.5
+
+
 def test_telegram_body_preserves_visual_blank_lines(monkeypatch):
     telegram = type('Channel', (), {})()
     other = type('Channel', (), {})()
@@ -627,6 +653,38 @@ def test_stale_scheduled_evaluation_is_finalized(db_session, monkeypatch):
     item = response.get_json()['data']['items'][0]
     assert item['status'] == 'error'
     assert '5-minute timeout' in item['error_message']
+    assert item['completed_at'] is not None
+
+
+def test_stale_run_with_metrics_is_recovered_as_completed(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    monkeypatch.setattr('coinx.web.routes.api_notifications.get_session', lambda: db_session)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_FUNDING_RATE, 'all_market',
+        {'threshold': 0.001, 'direction': 'absolute'},
+    )
+    run = AlertEvaluationRun(
+        rule_id=rule.id,
+        trigger_source='scheduled',
+        status='error',
+        started_at=notifications.now_ms() - 5 * 60 * 1000 - 1,
+        error_message='evaluation exceeded the 5-minute timeout or was interrupted by a service restart',
+    )
+    db_session.add(run)
+    db_session.flush()
+    db_session.add(AlertEvaluationMetric(run_id=run.id, metrics_json={'duration_ms': 38}))
+    db_session.commit()
+    if not hasattr(werkzeug, '__version__'):
+        werkzeug.__version__ = '3'
+    app = Flask(__name__)
+    app.register_blueprint(api_notifications_bp)
+
+    response = app.test_client().get(f'/api/alert-rules/{rule.id}/evaluation-runs')
+
+    assert response.status_code == 200
+    item = response.get_json()['data']['items'][0]
+    assert item['status'] == 'success'
     assert item['completed_at'] is not None
 
 
