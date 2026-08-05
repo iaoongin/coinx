@@ -39,6 +39,7 @@ from coinx.repositories.market_structure_score import (
     get_market_structure_score_snapshot,
     get_market_structure_score_symbols,
 )
+from coinx.repositories.trade_opportunities import get_trade_opportunity_snapshot
 from coinx.scheduler import (
     get_all_job_runtime_metadata,
     scheduler,
@@ -537,6 +538,25 @@ def get_market_structure_score():
         logger.error(f'加载合约市场结构评分失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load market structure score: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/trade-opportunities')
+def get_trade_opportunities():
+    try:
+        scope = request.args.get('scope', 'candidates')
+        limit = max(1, min(int(request.args.get('limit', 100)), 200))
+        snapshot = get_trade_opportunity_snapshot(symbols=get_market_structure_score_symbols()[:limit])
+        data = snapshot.get('data') or []
+        if scope != 'all':
+            candidates = {'可做多', '可做空', '等待回踩', '等待反弹'}
+            data = [
+                item for item in data
+                if item.get('entry_state') in candidates and item.get('trend_state') != '震荡'
+            ]
+        return jsonify({'status': 'success', 'data': data, 'cache_update_time': snapshot.get('cache_update_time'), 'summary': snapshot.get('summary') or {}})
+    except Exception as exc:
+        logger.exception('加载交易机会失败')
+        return jsonify({'status': 'error', 'message': str(exc)}), 500
 
 
 @api_data_bp.route('/api/market-structure-score/refresh', methods=['POST'])

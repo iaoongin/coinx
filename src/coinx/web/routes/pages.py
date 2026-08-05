@@ -59,6 +59,12 @@ def market_structure_score():
     return render_template('market_structure_score.html')
 
 
+@pages_bp.route('/trade-opportunities')
+def trade_opportunities():
+    """交易机会扫描页面。"""
+    return render_template('trade_opportunities.html')
+
+
 @pages_bp.route('/funding-rate')
 def funding_rate():
     """资金费率页面"""

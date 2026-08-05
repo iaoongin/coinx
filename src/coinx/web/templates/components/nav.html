@@ -28,8 +28,11 @@
     </div>
 
     <div class="nav-menu">
-      <button class="nav-menu-trigger{% if request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') %} active{% endif %}" type="button" aria-controls="nav-menu-analysis" aria-expanded="false" aria-haspopup="true">分析</button>
+      <button class="nav-menu-trigger{% if request.path.startswith('/trade-opportunities') or request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') %} active{% endif %}" type="button" aria-controls="nav-menu-analysis" aria-expanded="false" aria-haspopup="true">分析</button>
       <div id="nav-menu-analysis" class="nav-menu-list" aria-label="分析">
+      <a class="nav-menu-item{% if request.path.startswith('/trade-opportunities') %} active{% endif %}" href="/trade-opportunities"{% if request.path.startswith('/trade-opportunities') %} aria-current="page"{% endif %}>
+        交易机会
+      </a>
       <a class="nav-menu-item{% if request.path.startswith('/market-structure-score') %} active{% endif %}" href="/market-structure-score"{% if request.path.startswith('/market-structure-score') %} aria-current="page"{% endif %}>
         结构评分
       </a>

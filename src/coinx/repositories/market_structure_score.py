@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+import threading
 import time
 
 from coinx.coin_manager import get_active_coins
@@ -36,6 +37,9 @@ FUNDING_COLD_THRESHOLD = -0.0008
 PRICE_MOVE_RISK_THRESHOLD = 0.02
 ATR_RISK_THRESHOLD = 0.02
 MARKET_STRUCTURE_EXCHANGE_MAX_WORKERS = 4
+FUNDING_RATE_CACHE_TTL_SECONDS = 5 * 60
+_FUNDING_RATE_CACHE_LOCK = threading.Lock()
+_FUNDING_RATE_CACHE = {}
 EXCHANGE_FUNDING_LOADERS = {
     'binance': get_all_binance_funding_rates,
     'okx': get_all_okx_funding_rates,
@@ -335,12 +339,23 @@ def _load_exchange_funding_rate_maps(exchanges, target_symbols):
             return exchange, {}
 
         started_at = time.perf_counter()
-        raw_map = {}
-        try:
-            raw_map = loader() or {}
-        except Exception as exc:
-            logger.warning('批量加载交易所资金费率失败: exchange=%s error=%s', exchange, exc)
-            raw_map = {}
+        cache_key = exchange.strip().lower()
+        now = time.monotonic()
+        with _FUNDING_RATE_CACHE_LOCK:
+            cached = _FUNDING_RATE_CACHE.get(cache_key)
+        if cached is not None and now - cached['loaded_at'] < FUNDING_RATE_CACHE_TTL_SECONDS:
+            raw_map = cached['raw_map']
+            cache_status = 'hit'
+        else:
+            try:
+                raw_map = loader() or {}
+                with _FUNDING_RATE_CACHE_LOCK:
+                    _FUNDING_RATE_CACHE[cache_key] = {'loaded_at': now, 'raw_map': raw_map}
+                cache_status = 'miss'
+            except Exception as exc:
+                logger.warning('批量加载交易所资金费率失败: exchange=%s error=%s', exchange, exc)
+                raw_map = {}
+                cache_status = 'error'
 
         filtered_map = {}
         for symbol, payload in raw_map.items():
@@ -354,8 +369,9 @@ def _load_exchange_funding_rate_maps(exchanges, target_symbols):
             filtered_map[symbol] = rate
 
         logger.info(
-            '评分资金费率加载完成: exchange=%s total=%d matched=%d 耗时=%.2fs',
+            '评分资金费率加载完成: exchange=%s cache=%s total=%d matched=%d 耗时=%.2fs',
             exchange,
+            cache_status,
             len(raw_map),
             len(filtered_map),
             time.perf_counter() - started_at,

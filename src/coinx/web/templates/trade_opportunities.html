@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#101114">
+  <title>交易机会 - CoinX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    html { color-scheme: dark; }
+    body { margin: 0; background: var(--bg-primary, #101114); color: var(--text-primary, #f4f4f5); font-family: "Noto Sans SC", sans-serif; }
+    .shell { max-width: 1440px; margin: auto; padding: 24px; }
+    .head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .head h1 { margin: 0; font-size: 24px; text-wrap: balance; }
+    .head p, .neutral, .reason { color: var(--text-secondary, #a1a1aa); }
+    .head p { margin: 6px 0 0; }
+    .data-time { margin: 8px 0 0; color: var(--text-muted, #71717a); font-size: 12px; }
+    .controls { display: grid; gap: 8px; margin: 0 0 12px; }
+    .filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .filter-row.condition-row { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; }
+    .filter-row + .filter-row { padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .045); }
+    .filter-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .filter-group + .filter-group { padding-left: 14px; border-left: 1px solid rgba(255, 255, 255, .07); }
+    .filter-label { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 30px; color: var(--text-primary, #f4f4f5); font-size: 11px; font-weight: 700; text-align: center; }
+    .search-input { width: 180px; height: 30px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border-default, #2d3038); border-radius: 6px; outline: none; background: var(--bg-secondary, #16181d); color: var(--text-primary, #f4f4f5); font-size: 12px; }
+    .search-input:focus { border-color: var(--gold-primary, #d4af37); box-shadow: 0 0 0 3px rgba(212, 175, 55, .12); }
+    .chip { height: 30px; padding: 0 9px; border: 1px solid var(--border-default, #2d3038); border-radius: 999px; background: var(--bg-secondary, #16181d); color: var(--text-secondary, #a1a1aa); cursor: pointer; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .chip:hover { border-color: var(--border-strong, #575b66); color: var(--text-primary, #f4f4f5); }
+    .chip:focus-visible { outline: 2px solid #d4af37; outline-offset: 2px; }
+    .chip.active { border-color: rgba(212, 175, 55, .45); background: rgba(212, 175, 55, .10); color: var(--gold-bright, #f7d96a); }
+    .chip.chip-long { border-color: rgba(45, 212, 191, .12); background: rgba(20, 184, 166, .018); color: rgba(204, 251, 241, .42); }
+    .chip.chip-short { border-color: rgba(251, 146, 60, .12); background: rgba(234, 88, 12, .018); color: rgba(255, 237, 213, .42); }
+    .chip.chip-neutral { border-color: rgba(148, 163, 184, .14); background: rgba(100, 116, 139, .015); color: rgba(226, 232, 240, .42); }
+    .chip.chip-risk { border-color: rgba(245, 158, 11, .14); background: rgba(245, 158, 11, .018); color: rgba(254, 243, 199, .46); }
+    .chip.chip-high-risk { border-color: rgba(239, 68, 68, .14); background: rgba(220, 38, 38, .02); color: rgba(254, 226, 226, .46); }
+    .chip.chip-long.active { border-color: rgba(45, 212, 191, .64); background: rgba(20, 184, 166, .20); color: #ccfbf1; }
+    .chip.chip-short.active { border-color: rgba(251, 146, 60, .64); background: rgba(234, 88, 12, .20); color: #ffedd5; }
+    .chip.chip-neutral.active { border-color: rgba(148, 163, 184, .56); background: rgba(100, 116, 139, .20); color: #e2e8f0; }
+    .chip.chip-risk.active { border-color: rgba(245, 158, 11, .56); background: rgba(245, 158, 11, .14); color: #ffd58a; }
+    .chip.chip-high-risk.active { border-color: rgba(239, 68, 68, .56); background: rgba(239, 68, 68, .14); color: #ffafaf; }
+    .table-wrap { position: relative; overflow-x: auto; max-width: 100%; border: 1px solid var(--border-default, #2d3038); border-radius: 8px; background: var(--bg-secondary, #16181d); }
+    .scores { width: 100%; min-width: 1160px; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+    .scores th, .scores td { padding: 8px 6px; text-align: center; border-bottom: 1px solid var(--border-subtle, #292c33); white-space: nowrap; }
+    .scores thead th { position: sticky; z-index: 2; background: var(--bg-elevated, #1d2027); color: var(--text-primary, #f4f4f5); font-size: 11px; font-weight: 700; line-height: 1.25; }
+    .scores thead tr:first-child th { top: 0; padding-top: 8px; padding-bottom: 5px; color: var(--text-secondary, #a1a1aa); }
+    .scores thead tr:first-child th[rowspan] { padding-top: 0; padding-bottom: 0; color: var(--text-primary, #f4f4f5); }
+    .scores thead tr:last-child th { top: 29px; z-index: 3; padding-top: 5px; padding-bottom: 8px; border-top: 1px solid rgba(255, 255, 255, .035); }
+    .scores tbody td { color: var(--text-secondary, #a1a1aa); font-size: 12px; line-height: 1.35; vertical-align: middle; }
+    .scores tbody tr:hover { background: var(--bg-hover, #20232a); }
+    .scores th:nth-child(8), .scores td:nth-child(8), .plan-group, .scores thead tr:last-child th:first-child, .scores tbody td:nth-child(9) { border-left: 1px solid rgba(255, 255, 255, .05); }
+    .scores td:nth-child(4), .scores td:nth-child(5), .scores td:nth-child(6), .scores td:nth-child(7), .scores td:nth-child(8), .scores td:nth-child(n + 9) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .scores tbody td:nth-child(8) { color: var(--text-primary, #f4f4f5); }
+    .plan-group { text-align: center !important; color: var(--text-secondary, #a1a1aa) !important; }
+    .scores a { color: inherit; text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-weight: 700; }
+    .signal-badge { display: inline-flex; align-items: center; justify-content: center; padding: 2px 7px; border: 1px solid transparent; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+    .signal-strong-long { border-color: rgba(34, 197, 94, .55); background: linear-gradient(135deg, rgba(22, 163, 74, .30), rgba(21, 128, 61, .18)); color: #dcfce7; box-shadow: 0 0 0 1px rgba(34, 197, 94, .10), inset 0 1px 0 rgba(255, 255, 255, .05); }
+    .signal-long { border-color: rgba(45, 212, 191, .45); background: linear-gradient(135deg, rgba(20, 184, 166, .24), rgba(13, 148, 136, .14)); color: #ccfbf1; box-shadow: 0 0 0 1px rgba(45, 212, 191, .08), inset 0 1px 0 rgba(255, 255, 255, .04); }
+    .signal-neutral { border-color: rgba(148, 163, 184, .42); background: linear-gradient(135deg, rgba(100, 116, 139, .28), rgba(71, 85, 105, .16)); color: #e2e8f0; box-shadow: 0 0 0 1px rgba(148, 163, 184, .08), inset 0 1px 0 rgba(255, 255, 255, .03); }
+    .signal-short { border-color: rgba(251, 146, 60, .45); background: linear-gradient(135deg, rgba(234, 88, 12, .26), rgba(194, 65, 12, .16)); color: #ffedd5; box-shadow: 0 0 0 1px rgba(251, 146, 60, .08), inset 0 1px 0 rgba(255, 255, 255, .04); }
+    .signal-strong-short { border-color: rgba(248, 113, 113, .55); background: linear-gradient(135deg, rgba(220, 38, 38, .32), rgba(153, 27, 27, .18)); color: #fee2e2; box-shadow: 0 0 0 1px rgba(248, 113, 113, .10), inset 0 1px 0 rgba(255, 255, 255, .04); }
+    .scores tbody td.metric-positive { color: var(--positive, #4ade80); }.scores tbody td.metric-negative { color: var(--negative, #f87171); }.scores tbody td.metric-muted { color: var(--text-muted, #71717a); }
+    .metric-score { display: inline-flex; align-items: center; justify-content: center; min-width: 50px; padding: 2px 6px; border-radius: 6px; font-weight: 700; }
+    .entry-score.metric-positive .metric-score { background: rgba(34, 197, 94, .08); box-shadow: inset 0 0 0 1px rgba(34, 197, 94, .12); }
+    .entry-score.metric-negative .metric-score { background: rgba(248, 113, 113, .08); box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .12); }
+    .risk-score { display: inline-flex; align-items: center; justify-content: center; min-width: 42px; padding: 2px 6px; border: 1px solid transparent; border-radius: 6px; }
+    .risk-score.risk-medium { border-color: rgba(245, 158, 11, .18); background: rgba(245, 158, 11, .12); color: #ffd58a; }
+    .risk-score.risk-high { border-color: rgba(239, 68, 68, .18); background: rgba(239, 68, 68, .12); color: #ffafaf; }
+    .scores tbody td.long { color: #4ade80; }.scores tbody td.short { color: #f87171; }.reason { position: relative; z-index: 1; display: block; width: 108px; margin: 3px auto 0; color: var(--text-muted, #71717a); cursor: help; font-size: 11px; font-weight: 400; line-height: 1.35; }
+    .reason-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .reason::after { content: attr(data-tip); position: absolute; z-index: 50; top: calc(100% + 7px); left: 50%; display: none; width: max-content; min-width: 180px; max-width: 280px; padding: 8px 10px; transform: translateX(-50%); border: 1px solid var(--border-default, #2d3038); border-radius: 6px; background: rgba(11, 15, 23, .98); box-shadow: var(--shadow-card); color: var(--text-secondary, #a1a1aa); font-size: 12px; line-height: 1.5; text-align: left; white-space: normal; pointer-events: none; }
+    .reason:hover, .reason:focus-visible { z-index: 100; }
+    .reason:hover::after, .reason:focus-visible::after { display: block; }
+    .reason:focus-visible { outline: 2px solid var(--gold-primary, #d4af37); outline-offset: 2px; }
+    .plan-cell { min-width: 88px; color: var(--text-primary, #f4f4f5); font-size: 12px; font-weight: 600; }
+    .plan-percent { display: block; margin-top: 2px; color: var(--text-secondary, #a1a1aa); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: 500; }
+    .plan-r { margin-left: 3px; color: var(--text-muted, #71717a); font-size: 10px; font-weight: 500; }
+    .plan-percent.profit { color: #4ade80; }.plan-percent.loss { color: #f87171; }
+    .space-warning { display: block; margin-top: 2px; color: #ffd58a; font-size: 10px; font-weight: 600; }
+    .help-tip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: 4px; border: 1px solid var(--border-subtle, #3a3d45); border-radius: 50%; color: var(--text-muted, #71717a); font-size: 10px; font-weight: 700; line-height: 1; cursor: help; user-select: none; vertical-align: middle; }
+    .help-tip:hover, .help-tip:focus-visible { border-color: var(--gold-primary, #d4af37); color: var(--gold-bright, #f7d96a); background: rgba(212, 175, 55, .08); outline: 2px solid var(--gold-primary, #d4af37); outline-offset: 2px; }
+    .help-tip::after { content: attr(data-tip); position: absolute; z-index: 50; top: calc(100% + 10px); left: 50%; display: none; width: max-content; min-width: 220px; max-width: 300px; padding: 10px 12px; transform: translateX(-50%); border: 1px solid var(--border-default, #2d3038); border-radius: 6px; background: rgba(11, 15, 23, .98); box-shadow: var(--shadow-card); color: var(--text-secondary, #a1a1aa); font-size: 12px; font-weight: 500; line-height: 1.5; text-align: left; white-space: normal; pointer-events: none; }
+    .help-tip::before { content: ''; position: absolute; z-index: 50; top: calc(100% + 4px); left: 50%; display: none; transform: translateX(-50%); border: 6px solid transparent; border-bottom-color: var(--border-default, #2d3038); pointer-events: none; }
+    .help-tip:hover::after, .help-tip:hover::before, .help-tip:focus-visible::after, .help-tip:focus-visible::before { display: block; }
+    @media (max-width: 720px) {
+      .shell { padding: 12px; }
+      .head { align-items: start; flex-direction: column; }
+      .filter-row { align-items: flex-start; flex-direction: column; }
+      .filter-row.condition-row { display: flex; }
+      .filter-group { flex-wrap: wrap; }
+      .filter-group + .filter-group { padding-top: 6px; padding-left: 0; border-top: 1px solid rgba(255, 255, 255, .07); border-left: 0; }
+      .search-input { width: min(100%, 240px); }
+      .scores th, .scores td { padding: 8px 6px; }
+      .scores thead tr:first-child th:nth-child(3), .scores tbody td:nth-child(3),
+      .scores thead tr:first-child th:nth-child(5), .scores tbody td:nth-child(5) { display: none; }
+      .plan-cell { min-width: 78px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    {% include 'components/nav.html' %}
+    <main class="shell">
+      <header class="head">
+        <div>
+          <h1>交易机会</h1>
+          <p>基于 5m / 1h / 4h 价格结构、OI、订单流与风险的入场扫描。</p>
+          <div v-if="dataTime" class="data-time">数据时间 [[ formatTime(dataTime) ]]</div>
+        </div>
+      </header>
+      <section class="controls" aria-label="交易机会筛选">
+        <div class="filter-row">
+          <input v-model="searchText" class="search-input" type="search" placeholder="搜索币种，例如 BTC">
+        </div>
+        <div class="filter-row condition-row">
+          <div class="filter-group">
+            <span class="filter-label">范围</span>
+            <button class="chip" :class="{ active: scope === 'actionable' }" @click="load('actionable')">可做</button>
+            <button class="chip" :class="{ active: scope === 'candidates' }" @click="load('candidates')">候选</button>
+            <button class="chip" :class="{ active: scope === 'all' }" @click="load('all')">全部</button>
+          </div>
+          <div class="filter-group">
+            <span class="filter-label">入场</span>
+            <button class="chip" :class="{ active: entryFilter === 'all' }" @click="entryFilter = 'all'">不限</button>
+            <button class="chip chip-long" :class="{ active: entryFilter === '可做多' }" @click="entryFilter = '可做多'">可做多</button>
+            <button class="chip chip-long" :class="{ active: entryFilter === '等待回踩' }" @click="entryFilter = '等待回踩'">等待回踩</button>
+            <button class="chip chip-short" :class="{ active: entryFilter === '等待反弹' }" @click="entryFilter = '等待反弹'">等待反弹</button>
+            <button class="chip chip-short" :class="{ active: entryFilter === '可做空' }" @click="entryFilter = '可做空'">可做空</button>
+          </div>
+        </div>
+        <div class="filter-row condition-row">
+          <div class="filter-group">
+            <span class="filter-label">趋势</span>
+            <button class="chip" :class="{ active: trendFilter === 'all' }" @click="trendFilter = 'all'">不限</button>
+            <button class="chip chip-long" :class="{ active: trendFilter === 'long' }" @click="trendFilter = 'long'">多头</button>
+            <button class="chip chip-neutral" :class="{ active: trendFilter === 'neutral' }" @click="trendFilter = 'neutral'">震荡</button>
+            <button class="chip chip-short" :class="{ active: trendFilter === 'short' }" @click="trendFilter = 'short'">空头</button>
+          </div>
+          <div class="filter-group">
+            <span class="filter-label">风险</span>
+            <button class="chip" :class="{ active: riskFilter === 'all' }" @click="riskFilter = 'all'">不限</button>
+            <button class="chip" :class="{ active: riskFilter === 'none' }" @click="riskFilter = 'none'">无风险</button>
+            <button class="chip chip-risk" :class="{ active: riskFilter === 'warn' }" @click="riskFilter = 'warn'">有风险</button>
+            <button class="chip chip-high-risk" :class="{ active: riskFilter === 'high' }" @click="riskFilter = 'high'">高风险</button>
+          </div>
+        </div>
+      </section>
+      <div v-if="error" class="neutral" aria-live="polite">[[ error ]]</div>
+      <div v-else class="table-wrap">
+        <table class="scores">
+          <colgroup>
+            <col style="width: 7%"><col style="width: 8%"><col style="width: 8%">
+            <col style="width: 6%"><col style="width: 6%"><col style="width: 6%"><col style="width: 8%">
+            <col style="width: 9%"><col style="width: 8.4%"><col style="width: 8.4%"><col style="width: 8.4%"><col style="width: 8.4%"><col style="width: 8.4%">
+          </colgroup>
+          <thead>
+            <tr>
+              <th rowspan="2">币种 <span class="help-tip" tabindex="0" aria-label="永续合约交易对。" data-tip="永续合约交易对。">?</span></th>
+              <th rowspan="2">入场 <span class="help-tip" tabindex="0" aria-label="由入场分划分的当前操作状态。" data-tip="入场分≥65：可做多；20 至 64：等待回踩；-19 至 19：观望；-64 至 -20：等待反弹；≤-65：可做空。">?</span></th>
+              <th rowspan="2">趋势 <span class="help-tip" tabindex="0" aria-label="由趋势分划分的价格与合约数据方向。" data-tip="趋势分≥30 为强多趋势，10 至 29 为多头趋势，-9 至 9 为震荡，-29 至 -10 为空头趋势，≤-30 为强空趋势。">?</span></th>
+              <th rowspan="2">入场分 <span class="help-tip" tabindex="0" aria-label="最终入场评分：方向分叠加风险分后的结果。" data-tip="最终分。先计算方向分＝趋势分＋时机分；再按同一方向扣除风险分。正数偏多、负数偏空，绝对值越大代表入场条件越完整。">?</span></th>
+              <th rowspan="2">趋势分 <span class="help-tip" tabindex="0" aria-label="价格结构、OI 变化与订单流共同描述的方向强度。" data-tip="方向强度，范围约 -50 至 +50。价格结构最多±25，OI 与价格是否同向最多±15，订单流最多±10。正数偏多，负数偏空，绝对值越大趋势越一致。">?</span></th>
+              <th rowspan="2">时机分 <span class="help-tip" tabindex="0" aria-label="回踩或反弹后的价格位置，以及最新 OI 和订单流是否配合。" data-tip="入场位置，范围 -40 至 +40。EMA20 回踩/反弹后收回最多±30，最新 5m 的 OI 与订单流确认最多±10。与趋势同方向会提高入场分，反向表示不宜追价。">?</span></th>
+              <th rowspan="2">风险分 <span class="help-tip" tabindex="0" aria-label="资金费率、OI 过快增长和短周期波动的扣分，范围为 0 到 -30。" data-tip="只扣分，不改变多空方向；下方列出触发的具体原因。0 表示未触发风险；资金费率过热、1 小时 OI 增速过快、短周期波动过大各扣 10，最多扣 30。">?</span></th>
+              <th rowspan="2">当前价 <span class="help-tip" tabindex="0" aria-label="评分参与交易所按持仓价值加权的最新已收盘 5m 价格。" data-tip="评分参与交易所按持仓价值加权的最新已收盘 5m 价格。与交易机会中的 Binance 执行入场价是不同口径。">?</span></th>
+              <th colspan="5" class="plan-group">交易机会 <span class="help-tip" tabindex="0" aria-label="Binance 价格结构生成的执行参考。" data-tip="执行参考：入场价、止损和止盈位根据 Binance 5m 的已确认结构位生成；结构不足时以 ATR 距离补足。">?</span></th>
+            </tr>
+            <tr>
+              <th>入场</th><th>止损</th><th>止盈1</th><th>止盈2</th><th>止盈3</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="loading"><td colspan="13" class="neutral">加载中…</td></tr>
+            <tr v-else-if="!filteredRows.length"><td colspan="13" class="neutral">暂无匹配结果</td></tr>
+            <tr v-for="row in filteredRows" :key="row.symbol" class="opportunity-row">
+              <td><a :href="`/coin-detail?symbol=${row.symbol}`">[[ row.symbol.replace(/USDT$/, '') ]]</a></td>
+              <td><span class="signal-badge" :class="entryClass(row.entry_state)">[[ row.entry_state ]]</span></td>
+              <td><span class="signal-badge" :class="trendClass(row.trend_state)">[[ row.trend_state ]]</span></td>
+              <td class="entry-score" :class="metricClass(row.entry_score)"><span class="metric-score">[[ score(row.entry_score) ]]</span></td>
+              <td :class="metricClass(row.trend_score)">[[ score(row.trend_score) ]]</td><td :class="metricClass(row.timing_score)">[[ score(row.timing_score) ]]</td>
+              <td><span class="risk-score" :class="riskClass(row.risk_score)">[[ score(row.risk_score) ]]</span><span class="reason" tabindex="0" :aria-label="(row.risk_reasons || []).join('、') || '无风险原因'" :data-tip="(row.risk_reasons || []).join('、') || '无风险原因'"><span class="reason-text">[[ (row.risk_reasons || []).join('、') || '--' ]]</span></span></td>
+              <td>[[ price(row.current_price) ]]</td>
+              <template v-if="row.trade_plan?.status === 'ready'">
+                <td class="plan-cell" :class="{ 'space-insufficient': row.trade_plan.space_status === 'insufficient' }">[[ price(row.trade_plan.entry_price) ]]<span v-if="row.trade_plan.space_status === 'insufficient'" class="space-warning">空间不足</span></td>
+                <td class="plan-cell">[[ price(row.trade_plan.stop_loss) ]]<span class="plan-percent loss">[[ planPercent(row.trade_plan.stop_loss_percent) ]]</span></td>
+                <td class="plan-cell">[[ price(row.trade_plan.tp1) ]]<span class="plan-percent profit">[[ planPercent(row.trade_plan.tp1_percent) ]]<span class="plan-r">· [[ planR(row.trade_plan.tp1_r) ]]</span></span></td>
+                <td class="plan-cell">[[ price(row.trade_plan.tp2) ]]<span class="plan-percent profit">[[ planPercent(row.trade_plan.tp2_percent) ]]<span class="plan-r">· [[ planR(row.trade_plan.tp2_r) ]]</span></span></td>
+                <td class="plan-cell">[[ price(row.trade_plan.tp3) ]]<span class="plan-percent profit">[[ planPercent(row.trade_plan.tp3_percent) ]]<span class="plan-r">· [[ planR(row.trade_plan.tp3_r) ]]</span></span></td>
+              </template>
+              <td v-else colspan="5" class="neutral">[[ row.trade_plan?.reason || '--' ]]</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+  <script>
+    const { createApp, ref, computed } = Vue;
+    createApp({
+      delimiters: ['[[', ']]'],
+      setup() {
+        const rows = ref([]); const scope = ref('candidates'); const loading = ref(true); const error = ref(''); const dataTime = ref(null);
+        const searchText = ref(''); const entryFilter = ref('all'); const trendFilter = ref('all'); const riskFilter = ref('all');
+        const score = value => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(1)}` : '--';
+        const price = value => typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 6 }) : '--';
+        const planPercent = value => typeof value === 'number' ? `${value > 0 ? '+' : ''}${value.toFixed(2)}%` : '--';
+        const planR = value => typeof value === 'number' ? `${value.toFixed(2)}R` : '--';
+        const riskClass = value => {
+          const magnitude = Math.abs(Number(value));
+          if (!Number.isFinite(magnitude) || magnitude === 0) return '';
+          return magnitude >= 20 ? 'risk-high' : 'risk-medium';
+        };
+        const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '--';
+        const entryClass = value => ({ '可做多': 'signal-strong-long', '等待回踩': 'signal-neutral', '可做空': 'signal-strong-short', '等待反弹': 'signal-neutral' }[value] || 'signal-neutral');
+        const trendClass = value => ({ '强多趋势': 'signal-strong-long', '多头趋势': 'signal-long', '强空趋势': 'signal-strong-short', '空头趋势': 'signal-short' }[value] || 'signal-neutral');
+        const metricClass = value => typeof value === 'number' ? (value > 0 ? 'metric-positive' : value < 0 ? 'metric-negative' : 'metric-muted') : 'metric-muted';
+        const filteredRows = computed(() => {
+          const keyword = searchText.value.trim().toUpperCase();
+          return rows.value.filter(row => {
+            const entryState = String(row.entry_state || '');
+            const trendState = String(row.trend_state || '');
+            const riskMagnitude = Math.abs(Number(row.risk_score) || 0);
+            const hasExecutablePlan = row.trade_plan?.status === 'ready' && row.trade_plan?.space_status === 'adequate';
+            const matchesScope = scope.value !== 'actionable' || (['可做多', '可做空'].includes(entryState) && hasExecutablePlan);
+            const matchesSymbol = !keyword || String(row.symbol || '').toUpperCase().includes(keyword);
+            const matchesEntry = entryFilter.value === 'all' || entryState === entryFilter.value;
+            const matchesTrend = trendFilter.value === 'all'
+              || (trendFilter.value === 'long' && trendState.includes('多'))
+              || (trendFilter.value === 'short' && trendState.includes('空'))
+              || (trendFilter.value === 'neutral' && trendState === '震荡');
+            const matchesRisk = riskFilter.value === 'all'
+              || (riskFilter.value === 'none' && riskMagnitude === 0)
+              || (riskFilter.value === 'warn' && riskMagnitude > 0)
+              || (riskFilter.value === 'high' && riskMagnitude >= 20);
+            return matchesScope && matchesSymbol && matchesEntry && matchesTrend && matchesRisk;
+          });
+        });
+        const load = async next => {
+          scope.value = next; loading.value = true; error.value = '';
+          try {
+            const response = await fetch(`/api/trade-opportunities?scope=${next === 'all' ? 'all' : 'candidates'}`);
+            const payload = await response.json();
+            if (!response.ok || payload.status !== 'success') throw Error(payload.message || '加载失败');
+            rows.value = payload.data || [];
+            dataTime.value = payload.cache_update_time || null;
+          } catch (exception) { error.value = exception.message; rows.value = []; }
+          finally { loading.value = false; }
+        };
+        load('candidates');
+        return { rows, filteredRows, scope, loading, error, dataTime, searchText, entryFilter, trendFilter, riskFilter, load, score, price, planPercent, planR, formatTime, entryClass, trendClass, metricClass, riskClass };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

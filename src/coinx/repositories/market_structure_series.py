@@ -20,7 +20,7 @@ FIVE_MINUTES_MS = 5 * 60 * 1000
 MARKET_STRUCTURE_BULK_QUERY_THRESHOLD = 8
 MARKET_STRUCTURE_INTERVALS = ('5m', '15m', '30m', '1h', '4h', '6h', '12h', '24h')
 MARKET_STRUCTURE_COMPONENT_MAX_WORKERS = 4
-MARKET_STRUCTURE_KLINE_POINTS = 80
+MARKET_STRUCTURE_KLINE_POINTS = 120
 
 
 @dataclass(frozen=True)
@@ -243,7 +243,7 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
     if not symbols:
         return {}
 
-    if len(symbols) <= MARKET_STRUCTURE_BULK_QUERY_THRESHOLD:
+    if len(symbols) <= MARKET_STRUCTURE_BULK_QUERY_THRESHOLD and lookback_ms is None:
         records_by_symbol = {symbol: {} for symbol in symbols}
         for symbol in symbols:
             target_times = _build_change_target_times(
@@ -312,6 +312,99 @@ def _load_kline_model_map(session, model, symbols, upper_bound=None, exchange=No
         point = _build_kline_point(row)
         records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
     return records_by_symbol
+
+
+def load_market_structure_aggregated_kline_maps(
+    session,
+    exchange,
+    symbols,
+    upper_bound=None,
+    intervals=None,
+    lookback_points=72,
+):
+    """Return strict UTC-aligned 5m aggregations without transferring raw history."""
+    intervals = intervals or {}
+    records_by_interval = {name: {symbol: {} for symbol in symbols} for name in intervals}
+    if not symbols or not intervals:
+        return records_by_interval
+
+    owns_session = session is None
+    session = session or get_session()
+    try:
+        for name, interval_ms in intervals.items():
+            started_at = time.perf_counter()
+            interval_ms = int(interval_ms)
+            expected_points = interval_ms // FIVE_MINUTES_MS
+            lower_bound = None
+            if upper_bound is not None:
+                # One extra bucket accommodates a partially formed latest bucket.
+                lower_bound = max(0, int(upper_bound) - (int(lookback_points) + 1) * interval_ms)
+
+            bucket_time = (
+                func.floor(MarketKline.open_time / interval_ms) * interval_ms
+            ).label('bucket_time')
+            aggregate_query = session.query(
+                MarketKline.symbol.label('symbol'),
+                bucket_time,
+                func.max(MarketKline.high_price).label('high_price'),
+                func.min(MarketKline.low_price).label('low_price'),
+                func.sum(MarketKline.quote_volume).label('quote_volume'),
+                func.max(MarketKline.open_time).label('last_open_time'),
+            ).filter(
+                MarketKline.exchange == exchange,
+                MarketKline.symbol.in_(symbols),
+                MarketKline.period == '5m',
+            )
+            if upper_bound is not None:
+                aggregate_query = aggregate_query.filter(MarketKline.open_time <= upper_bound)
+            if lower_bound is not None:
+                aggregate_query = aggregate_query.filter(MarketKline.open_time >= lower_bound)
+            aggregate_query = aggregate_query.group_by(MarketKline.symbol, bucket_time).having(
+                func.count(MarketKline.open_time) == expected_points,
+                func.max(MarketKline.open_time) - func.min(MarketKline.open_time)
+                == (expected_points - 1) * FIVE_MINUTES_MS,
+            )
+            aggregate = aggregate_query.subquery()
+            rows = session.query(
+                aggregate.c.symbol,
+                aggregate.c.bucket_time,
+                aggregate.c.high_price,
+                aggregate.c.low_price,
+                MarketKline.close_price,
+                aggregate.c.quote_volume,
+            ).join(
+                aggregate,
+                and_(
+                    MarketKline.symbol == aggregate.c.symbol,
+                    MarketKline.open_time == aggregate.c.last_open_time,
+                ),
+            ).filter(
+                MarketKline.exchange == exchange,
+                MarketKline.period == '5m',
+            ).order_by(aggregate.c.symbol, aggregate.c.bucket_time).all()
+            for row in rows:
+                point = MarketStructureKlinePoint(
+                    symbol=row.symbol,
+                    open_time=int(row.bucket_time),
+                    high_price=float(row.high_price) if row.high_price is not None else None,
+                    low_price=float(row.low_price) if row.low_price is not None else None,
+                    close_price=float(row.close_price) if row.close_price is not None else None,
+                    quote_volume=float(row.quote_volume) if row.quote_volume is not None else None,
+                    taker_buy_quote_volume=None,
+                )
+                records_by_interval[name].setdefault(point.symbol, {})[point.open_time] = point
+            logger.info(
+                '评分聚合 Kline 加载完成: exchange=%s interval=%s symbols=%d buckets=%d 耗时=%.2fs',
+                exchange,
+                name,
+                len(symbols),
+                len(rows),
+                time.perf_counter() - started_at,
+            )
+    finally:
+        if owns_session:
+            session.close()
+    return records_by_interval
 
 
 def _load_taker_vol_model_map(session, model, symbols, upper_bound=None, exchange=None, period='5m', lookback_ms=None):
@@ -400,7 +493,14 @@ def _load_quote_volume_24h_map(session, model, symbols, upper_bound=None, exchan
     }
 
 
-def load_market_structure_exchange_maps(session, exchange, symbols, upper_bound=None):
+def load_market_structure_exchange_maps(
+    session,
+    exchange,
+    symbols,
+    upper_bound=None,
+    kline_lookback_ms=None,
+    include_quote_volume_24h=True,
+):
     exchange = exchange.lower()
     try:
         adapter = get_exchange_adapter(exchange)
@@ -447,7 +547,7 @@ def load_market_structure_exchange_maps(session, exchange, symbols, upper_bound=
             symbols,
             upper_bound=upper_bound,
             exchange=exchange,
-            lookback_ms=_MARKET_STRUCTURE_KLINE_LOOKBACK_MS,
+            lookback_ms=kline_lookback_ms or _MARKET_STRUCTURE_KLINE_LOOKBACK_MS,
         )
         duration = time.perf_counter() - started_at
         component_durations['kline'] = duration
@@ -488,8 +588,9 @@ def load_market_structure_exchange_maps(session, exchange, symbols, upper_bound=
         'oi': _load_oi,
         'kline': _load_kline,
         'taker': _load_taker_period_map,
-        'quote_volume_24h': _load_quote_volume_24h,
     }
+    if include_quote_volume_24h:
+        component_loaders['quote_volume_24h'] = _load_quote_volume_24h
     component_results = {}
     max_workers = min(MARKET_STRUCTURE_COMPONENT_MAX_WORKERS, len(component_loaders))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -504,7 +605,7 @@ def load_market_structure_exchange_maps(session, exchange, symbols, upper_bound=
     oi_map = component_results['oi']
     kline_map = component_results['kline']
     taker_maps_by_period = component_results['taker']
-    quote_volume_24h_map = component_results['quote_volume_24h']
+    quote_volume_24h_map = component_results.get('quote_volume_24h', {})
 
     total_duration = time.perf_counter() - start_time
     slowest_component = 'N/A'
