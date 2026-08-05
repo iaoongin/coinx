@@ -34,7 +34,6 @@ def start_startup_repair():
 
 
 def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
-    initialize_job_run_history()
     if not SCHEDULER_ENABLED:
         logger.info('调度器已禁用（SCHEDULER_ENABLED=false），跳过自动调度与启动补采')
         return {
@@ -42,6 +41,7 @@ def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
             'repair_thread': None,
             'tracked_coins': [],
         }
+    initialize_job_run_history()
     logger.info('开始启动运行时服务')
     try:
         from coinx.rss_monitor import ensure_rss_schema

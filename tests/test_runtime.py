@@ -41,14 +41,14 @@ def test_start_runtime_services_starts_scheduler_and_bootstrap(monkeypatch):
     assert calls == ['history_initialized', 'fake_start_scheduler', 'scheduler_started', 'fake_startup_repair', 'repair_started']
 
 
-def test_start_runtime_services_initializes_job_history_when_scheduler_disabled(monkeypatch):
+def test_start_runtime_services_skips_job_history_when_scheduler_disabled(monkeypatch):
     calls = []
     monkeypatch.setattr(runtime, 'SCHEDULER_ENABLED', False)
     monkeypatch.setattr(runtime, 'initialize_job_run_history', lambda: calls.append('history_initialized'))
 
     result = runtime.start_runtime_services()
 
-    assert calls == ['history_initialized']
+    assert calls == []
     assert result == {
         'scheduler_thread': None,
         'repair_thread': None,
