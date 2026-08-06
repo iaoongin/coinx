@@ -306,3 +306,33 @@ def test_opportunity_api_hides_non_candidates_and_neutral_trends_by_default(monk
     assert [item['symbol'] for item in response.get_json()['data']] == ['BTCUSDT']
     response = client.get('/api/trade-opportunities?scope=all')
     assert len(response.get_json()['data']) == 3
+
+
+def test_coin_detail_opportunity_api_returns_only_the_requested_contract(monkeypatch):
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_trade_opportunity_snapshot',
+        lambda **kwargs: {
+            'cache_update_time': 123,
+            'data': [
+                {'symbol': 'BTCUSDT', 'entry_state': '可做多', 'trade_plan': {'status': 'ready'}},
+                {'symbol': 'ETHUSDT', 'entry_state': '观望'},
+            ],
+        },
+    )
+    client = _client()
+
+    response = client.get('/api/coin-detail/btcusdt/trade-opportunity')
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['data'] == {
+        'symbol': 'BTCUSDT',
+        'as_of': 123,
+        'opportunity': {'symbol': 'BTCUSDT', 'entry_state': '可做多', 'trade_plan': {'status': 'ready'}},
+    }
+
+
+def test_coin_detail_opportunity_api_rejects_invalid_symbols():
+    response = _client().get('/api/coin-detail/%20/trade-opportunity')
+
+    assert response.status_code == 400

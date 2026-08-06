@@ -9,14 +9,14 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'detail.exchange_distribution' in template
     assert '<h2 class="overview-heading">基础信息</h2>' in template
     assert '<h2 class="overview-heading">交易所持仓分布</h2>' in template
-    assert template.index('<h2 class="overview-heading">交易所持仓分布</h2>') < template.index('<h2>市场结构评分</h2>')
+    assert template.index('<h2 class="overview-heading">交易所持仓分布</h2>') < template.index('<h2>交易机会</h2>')
     assert template.count('数据时间：') == 6
     assert 'formatTime(detail.as_of)' in template
-    assert 'formatTime(structureScoreAsOf)' in template
+    assert 'formatTime(opportunityAsOf)' in template
     assert 'formatTime(series.anchor_time)' in template
-    assert 'structureScoreAsOf.value = result.data?.as_of || null' in template
+    assert 'opportunityAsOf.value = result.data?.as_of || null' in template
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;' in template
-    assert 'structureScore.value?.total_score' in template
+    assert 'opportunity?.entry_state' in template
     assert 'detail.data_status' in template
     assert '当前合约状态：[[ statusText ]]' in template
     assert '缺少：[[ missingExchangeDetails ]]' in template
@@ -25,6 +25,7 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert "missing_open_interest_history: '缺少持仓历史'" in template
     assert '<span v-if="detail" class="status"' not in template
     assert 'coinx.contract-detail.recent' in template
+    assert r'/^[\p{L}\p{N}_-]{2,50}$/u.test(value)' in template
     assert 'loadSymbolOptions' in template
     assert "fetch('/api/coins-config')" in template
     assert 'switchSymbol' in template
@@ -35,7 +36,13 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'selectionRequired.value = true' in template
     assert '.chart, .chart-state { height: 260px; }' in template
     assert '.range-bar { align-items: stretch; flex-direction: column; gap: 8px; }' in template
-    assert '.score-layout > div { min-width: 0; }' in template
+    assert '.opportunity-panel { display: grid;' in template
+    assert ".opportunity-panel.no-plan { grid-template-columns: minmax(0, 1fr); }" in template
+    assert ':class="{ \'no-plan\': !tradePlanReady }"' in template
+    assert 'v-if="tradePlanReady" class="opportunity-plan"' in template
+    assert 'opportunityConclusion' in template
+    assert 'opportunityTrendClass' in template
+    assert "isCandidateOpportunity ? '等待入场' : '入场'" in template
     assert '.table-wrap { max-width: 100%; overflow-x: auto;' in template
     assert '@media (max-width: 768px)' in template
     assert '.detail-header { align-items: stretch; flex-direction: column;' in template
@@ -45,7 +52,7 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'openInterestChartEl' in template
     assert 'flowChartEl' in template
     assert 'fundingChartEl' in template
-    assert 'scoreComponents' in template
+    assert 'opportunity.risk_reasons' in template
     assert 'chartCompact' in template
     assert 'chartMoney' in template
     assert 'formatPercent(row.price_change_percent)' in template
@@ -62,14 +69,14 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert "visualMap:{show:false,dimension:1,seriesIndex:[0]" in template
     assert 'x.open_interest])' in template
     assert 'tooltip:{valueFormatter:value=>formatRate(value)}' in template
-    assert '/structure-score`' in template
-    assert 'loadStructureScore(); loadSeries();' in template
+    assert '/trade-opportunity`' in template
+    assert 'loadOpportunity(); loadSeries();' in template
     assert "bottom: 68" in template
     assert 'grid: { left: 12, right: 12, top: 34, bottom: 68, containLabel: true }' in template
     assert "legend: { bottom: 4" in template
     assert 'const disposeCharts' in template
     assert 'class="btn section-refresh"' in template
-    assert '@click="loadStructureScore" :disabled="scoreLoading"' in template
+    assert '@click="loadOpportunity" :disabled="opportunityLoading"' in template
     assert '@click="loadSeries" :disabled="seriesLoading"' in template
     assert "axisPointer: { type: 'cross' }" in template
     assert 'const syncChartPointers' in template

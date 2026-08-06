@@ -67,10 +67,15 @@ test.describe('币种详情测试', () => {
     expect(menuBounds.right).toBeLessThanOrEqual(menuBounds.viewportWidth);
   });
 
-  test('渲染结构评分与历史趋势并支持切换范围', async ({ page }) => {
+  test('渲染交易机会与历史趋势并支持切换范围', async ({ page }) => {
+    const opportunityRequest = page.waitForRequest(request => request.url().includes('/trade-opportunity'));
     await visit(page, '/coin-detail?symbol=BTCUSDT');
-    await expect(page.getByText('市场结构评分', { exact: true })).toBeVisible();
-    await expect(page.getByText('趋势', { exact: true }).first()).toBeVisible();
+    await opportunityRequest;
+    await expect(page.getByText('交易机会', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('入场', { exact: true }).last()).toBeVisible();
+    await expect(page.getByText('目标1', { exact: true })).toBeVisible();
+    await expect(page.getByText('目标2', { exact: true })).toBeVisible();
+    await expect(page.getByText('目标3', { exact: true })).toBeVisible();
     await expect(page.locator('.chart canvas')).toHaveCount(4);
     const chartWidths = await page.locator('.chart canvas').evaluateAll(canvases => canvases.map(canvas => canvas.getBoundingClientRect().width));
     expect(chartWidths.every(width => width > 300)).toBeTruthy();

@@ -91,13 +91,17 @@
     .chart-panel { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 10px; min-width: 0; }
     .chart-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
     .chart { height: 360px; width: 100%; }.chart-state { height: 360px; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; }
-    .score-layout { display: grid; grid-template-columns: 230px 1fr; gap: 12px; }
-    .score-layout > div { min-width: 0; }
-    .score-summary { border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; padding: 16px; }
-    .score-total { font: 700 34px var(--font-mono); color: var(--gold-primary); }.score-signal { margin: 6px 0; font-weight: 600; }.score-advice { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
-    .score-components { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-    .score-component { padding: 10px; background: var(--bg-secondary); border-radius: 5px; }.score-component span { display: block; color: var(--text-muted); font-size: 11px; }.score-component strong { display: block; margin-top: 5px; font-family: var(--font-mono); }
-    @media (max-width: 900px) { .overview-layout { grid-template-columns: 1fr; } .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts { grid-template-columns: 1fr; }.score-layout { grid-template-columns: 1fr; }.score-components { grid-template-columns: repeat(3, 1fr); } }
+    .opportunity-panel { display: grid; grid-template-columns: minmax(260px, 42fr) minmax(320px, 58fr); overflow: hidden; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-card); }
+    .opportunity-panel.no-plan { grid-template-columns: minmax(0, 1fr); }
+    .opportunity-summary, .opportunity-plan { min-width: 0; padding: 16px; }
+    .opportunity-summary { border-right: 1px solid var(--border-default); }.opportunity-panel.no-plan .opportunity-summary { border-right: 0; }
+    .opportunity-kicker { color: var(--text-muted); font-size: 11px; }.opportunity-state { margin-top: 5px; font: 700 20px var(--font-mono); }.opportunity-state.long { color: var(--positive); }.opportunity-state.short { color: var(--negative); }.opportunity-state.waiting { color: var(--gold-primary); }.opportunity-state.neutral { color: var(--text-secondary); }
+    .opportunity-price { margin-top: 12px; font: 600 24px var(--font-mono); }.opportunity-meta, .opportunity-conclusion { margin-top: 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }.opportunity-conclusion { color: var(--text-primary); }
+    .opportunity-scores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+    .opportunity-score { padding: 9px; border-radius: 5px; background: var(--bg-secondary); }.opportunity-score span { display: block; color: var(--text-muted); font-size: 11px; }.opportunity-score strong { display: block; margin-top: 4px; font-family: var(--font-mono); }
+    .opportunity-plan-title { margin: 0 0 9px; color: var(--text-muted); font-size: 11px; }.plan-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 31px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }.plan-row:last-of-type { border-bottom: 0; }.plan-label { color: var(--text-muted); }.plan-value { font-family: var(--font-mono); text-align: right; }.plan-stop .plan-value { color: var(--negative); }.plan-target .plan-value { color: var(--positive); }
+    .opportunity-risk { margin-top: 12px; color: var(--gold-primary); font-size: 12px; line-height: 1.5; }
+    @media (max-width: 900px) { .overview-layout { grid-template-columns: 1fr; } .summary-grid, .exchange-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .charts, .opportunity-panel { grid-template-columns: 1fr; }.opportunity-summary { border-right: 0; border-bottom: 1px solid var(--border-default); }.opportunity-panel.no-plan .opportunity-summary { border-bottom: 0; } }
     @media (max-width: 768px) {
       .detail-shell { padding: 12px 0 20px; }
       .nav-container { scrollbar-width: none; }
@@ -125,9 +129,8 @@
       .charts { gap: 10px; }
       .chart-panel { padding: 8px; }
       .chart, .chart-state { height: 260px; }
-      .score-summary { padding: 12px; }
-      .score-components { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
-      .score-component { padding: 8px; }
+      .opportunity-summary, .opportunity-plan { padding: 12px; }
+      .opportunity-scores { gap: 6px; }
     }
   </style>
 </head>
@@ -178,10 +181,10 @@
           <article class="metric"><div class="metric-label">最新价格</div><div class="metric-value">[[ formatPrice(summary.latest_price) ]]</div><div class="metric-sub" :class="tone(summary.price_change_24h_percent)">24h [[ formatPercent(summary.price_change_24h_percent) ]]</div></article>
           <article class="metric"><div class="metric-label">总持仓价值</div><div class="metric-value">[[ formatCompact(summary.open_interest_value, '$') ]]</div><div class="metric-sub">持仓量 [[ formatCompact(summary.open_interest) ]]</div></article>
           <article class="metric"><div class="metric-label">资金费率</div><div class="metric-value" :class="tone(summary.funding_rate)">[[ formatRate(summary.funding_rate) ]]</div><div class="metric-sub">预测 [[ formatRate(summary.predicted_funding_rate) ]]</div></article>
-          <article class="metric"><div class="metric-label">市场结构评分</div><div class="metric-value">[[ scoreValue ]]</div><div class="metric-sub">[[ scoreDescription ]]</div></article>
+          <article class="metric"><div class="metric-label">交易机会</div><div class="metric-value" :class="opportunityStateClass">[[ opportunity?.entry_state || '加载中' ]]</div><div class="metric-sub" :class="opportunityTrendClass">[[ opportunity?.trend_state || '等待交易机会数据' ]]</div></article>
             </section>
             <section v-else class="summary-grid" aria-label="核心摘要加载中">
-          <article class="metric" v-for="label in ['最新价格', '总持仓价值', '资金费率', '市场结构评分']" :key="label"><div class="metric-label">[[ label ]]</div><div class="metric-sub">正在加载摘要...</div></article>
+          <article class="metric" v-for="label in ['最新价格', '总持仓价值', '资金费率', '交易机会']" :key="label"><div class="metric-label">[[ label ]]</div><div class="metric-sub">正在加载摘要...</div></article>
             </section>
           </section>
 
@@ -198,17 +201,36 @@
         </div>
 
         <section class="section">
-          <div class="section-heading"><h2>市场结构评分</h2><div class="section-heading-actions"><span v-if="structureScoreAsOf" class="section-updated">数据时间：[[ formatTime(structureScoreAsOf) ]]</span><button class="btn section-refresh" type="button" @click="loadStructureScore" :disabled="scoreLoading">[[ scoreLoading ? '加载中' : '刷新' ]]</button></div></div>
-          <div v-if="scoreLoading" class="empty">正在计算结构评分...</div>
-          <div v-else-if="scoreError" class="notice">[[ scoreError ]] <button class="btn" @click="loadStructureScore">重试</button></div>
-          <div v-else-if="structureScore" class="score-layout">
-            <div class="score-summary"><div class="score-total">[[ scoreValue ]]</div><div class="score-signal">[[ structureScore.trade_signal || 'N/A' ]] · 风险[[ structureScore.risk_level || 'N/A' ]]</div><div class="score-advice">[[ scoreDescription ]]</div></div>
-            <div>
-              <div class="score-components"><div class="score-component" v-for="item in scoreComponents" :key="item.key"><span>[[ item.label ]]</span><strong :class="tone(item.value)">[[ formatScore(item.value) ]]</strong><span>[[ item.description ]]</span></div></div>
-              <div class="table-wrap" style="margin-top:10px" v-if="structureScore.exchange_scores?.length"><table><thead><tr><th>交易所</th><th>权重</th><th>总分</th><th>加权分</th><th>趋势</th><th>动量</th><th>仓位</th></tr></thead><tbody><tr v-for="row in structureScore.exchange_scores" :key="row.exchange"><td>[[ row.exchange ]]</td><td>[[ formatPercent((row.weight || 0) * 100, false) ]]</td><td :class="tone(row.total_score)">[[ formatScore(row.total_score) ]]</td><td>[[ formatScore(row.weighted_total_score) ]]</td><td>[[ row.trend_direction || 'N/A' ]]</td><td>[[ row.momentum_direction || 'N/A' ]]</td><td>[[ row.position_structure || 'N/A' ]]</td></tr></tbody></table></div>
+          <div class="section-heading"><h2>交易机会</h2><div class="section-heading-actions"><span v-if="opportunityAsOf" class="section-updated">数据时间：[[ formatTime(opportunityAsOf) ]]</span><button class="btn section-refresh" type="button" @click="loadOpportunity" :disabled="opportunityLoading">[[ opportunityLoading ? '加载中' : '刷新' ]]</button></div></div>
+          <div v-if="opportunityLoading" class="empty">正在加载交易机会...</div>
+          <div v-else-if="opportunityError" class="notice">[[ opportunityError ]] <button class="btn" @click="loadOpportunity">重试</button></div>
+          <div v-else-if="opportunity" class="opportunity-panel" :class="{ 'no-plan': !tradePlanReady }">
+            <div class="opportunity-summary">
+              <div class="opportunity-kicker">信号判断</div>
+              <div class="opportunity-state" :class="opportunityStateClass">[[ opportunity.entry_state || '暂无机会' ]]</div>
+              <div class="opportunity-price">[[ formatPrice(opportunity.current_price) ]]</div>
+              <div class="opportunity-meta">当前价格 · <span :class="opportunityTrendClass">[[ opportunity.trend_state || '趋势未知' ]]</span></div>
+              <div class="opportunity-scores">
+                <div class="opportunity-score"><span>入场</span><strong :class="tone(opportunity.entry_score)">[[ formatScore(opportunity.entry_score) ]]</strong></div>
+                <div class="opportunity-score"><span>趋势</span><strong :class="tone(opportunity.trend_score)">[[ formatScore(opportunity.trend_score) ]]</strong></div>
+                <div class="opportunity-score"><span>时机</span><strong :class="tone(opportunity.timing_score)">[[ formatScore(opportunity.timing_score) ]]</strong></div>
+                <div class="opportunity-score"><span>风险</span><strong :class="tone(opportunity.risk_score)">[[ formatScore(opportunity.risk_score) ]]</strong></div>
+              </div>
+              <div class="opportunity-conclusion">结论：[[ opportunityConclusion ]]</div>
+              <div v-if="opportunity.risk_reasons?.length" class="opportunity-risk">风险提示：[[ opportunity.risk_reasons.join('、') ]]</div>
+              <div v-else-if="opportunity.trade_plan?.reason" class="opportunity-risk">执行计划：[[ opportunity.trade_plan.reason ]]</div>
+            </div>
+            <div v-if="tradePlanReady" class="opportunity-plan">
+              <div class="opportunity-plan-title">执行计划</div>
+              <div class="plan-row"><span class="plan-label">[[ isCandidateOpportunity ? '等待入场' : '入场' ]]</span><strong class="plan-value">[[ formatPrice(tradePlan.entry_price) ]]</strong></div>
+              <div class="plan-row plan-stop"><span class="plan-label">止损</span><strong class="plan-value">[[ formatPrice(tradePlan.stop_loss) ]]（距离 [[ stopLossDistance ]]）</strong></div>
+              <div class="plan-row plan-target"><span class="plan-label">目标1</span><strong class="plan-value">[[ formatPrice(tradePlan.tp1) ]]（[[ formatR(tradePlan.tp1_r) ]]）</strong></div>
+              <div class="plan-row plan-target"><span class="plan-label">目标2</span><strong class="plan-value">[[ formatPrice(tradePlan.tp2) ]]（[[ formatR(tradePlan.tp2_r) ]]）</strong></div>
+              <div class="plan-row plan-target"><span class="plan-label">目标3</span><strong class="plan-value">[[ formatPrice(tradePlan.tp3) ]]（[[ formatR(tradePlan.tp3_r) ]]）</strong></div>
+              <div v-if="tradePlan.space_reason" class="opportunity-risk">[[ tradePlan.space_reason ]]</div>
             </div>
           </div>
-          <div v-else class="empty">暂无结构评分</div>
+          <div v-else class="empty">暂无该合约的交易机会</div>
         </section>
 
         <section class="section">
@@ -257,7 +279,7 @@
       setup() {
         const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref(''); const selectionRequired = ref(false);
         const symbolQuery = ref(''); const symbolOptions = ref([]); const recentSymbols = ref([]); const showSymbolMenu = ref(false);
-        const structureScore = ref(null); const structureScoreAsOf = ref(null); const scoreLoading = ref(false); const scoreError = ref('');
+        const opportunity = ref(null); const opportunityAsOf = ref(null); const opportunityLoading = ref(false); const opportunityError = ref('');
         const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
         const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const symbolSearchEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
@@ -281,9 +303,20 @@
             return `${exchange}（${reasonText || '数据不完整'}）`;
           }).join('、');
         });
-        const scoreValue = computed(() => structureScore.value?.total_score == null ? 'N/A' : Number(structureScore.value.total_score).toFixed(1));
-        const scoreDescription = computed(() => structureScore.value?.operation_advice || structureScore.value?.trade_signal || '暂无评分');
-        const scoreComponents = computed(() => { const score = structureScore.value || {}; return [{ key:'trend', label:'趋势', value:score.trend_score, description:score.trend_direction }, { key:'momentum', label:'动量', value:score.momentum_score, description:score.momentum_direction }, { key:'position', label:'仓位', value:score.position_score, description:score.position_structure }, { key:'sentiment', label:'情绪', value:score.sentiment_score, description:score.sentiment_state }, { key:'risk', label:'风险', value:score.risk_score, description:score.risk_level }]; });
+        const tradePlan = computed(() => opportunity.value?.trade_plan || null);
+        const tradePlanReady = computed(() => tradePlan.value?.status === 'ready');
+        const stopLossDistance = computed(() => tradePlan.value?.stop_loss_percent == null ? 'N/A' : `${Math.abs(Number(tradePlan.value.stop_loss_percent)).toFixed(2)}%`);
+        const opportunityStateClass = computed(() => ({ '可做多': 'long', '可做空': 'short', '等待回踩': 'waiting', '等待反弹': 'waiting' }[opportunity.value?.entry_state] || 'neutral'));
+        const opportunityTrendClass = computed(() => Number(opportunity.value?.trend_score) > 0 ? 'positive' : Number(opportunity.value?.trend_score) < 0 ? 'negative' : '');
+        const isCandidateOpportunity = computed(() => ['等待回踩', '等待反弹'].includes(opportunity.value?.entry_state));
+        const opportunityConclusion = computed(() => ({
+          '可做多': '多头条件完整，可执行。',
+          '可做空': '空头条件完整，可执行。',
+          '等待回踩': '等待回踩至入场价后再确认。',
+          '等待反弹': '等待反弹至入场价后再确认。',
+          '观望': '当前条件不足，暂不制定执行计划。',
+          '数据不足': '数据不足，暂不制定执行计划。',
+        }[opportunity.value?.entry_state] || '当前暂无可执行交易计划。'));
         const hasMarketSeries = computed(() => series.value.market?.length); const hasFlowSeries = computed(() => series.value.flow?.length); const hasFundingSeries = computed(() => series.value.funding_rate?.length);
         const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未知';
         const tone = value => value == null || Number(value) === 0 ? '' : Number(value) > 0 ? 'positive' : 'negative';
@@ -312,21 +345,22 @@
         const renderCharts = () => { disposeCharts(); if (hasMarketSeries.value) { makeChart(priceChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'价格',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatPrice(value)},data:series.value.market.map(x=>[x.time,x.price])},{name:'成交量',type:'bar',yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.volume])}] }); makeChart(openInterestChartEl.value, { yAxis:[{type:'value',scale:true,axisLabel:{formatter:value=>chartMoney(value)}},{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}], series:[{name:'持仓价值',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>chartMoney(value)},data:series.value.market.map(x=>[x.time,x.open_interest_value])},{name:'持仓量',type:'line',showSymbol:false,yAxisIndex:1,tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.market.map(x=>[x.time,x.open_interest])}] }); } if (hasFlowSeries.value) makeChart(flowChartEl.value, { yAxis:{type:'value',scale:true,axisLabel:{formatter:value=>chartCompact(value)}}, series:[{name:'主动买入',type:'line',showSymbol:false,lineStyle:{color:'#4ade80'},itemStyle:{color:'#4ade80'},tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.buy_volume])},{name:'主动卖出',type:'line',showSymbol:false,lineStyle:{color:'#f87171'},itemStyle:{color:'#f87171'},tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>[x.time,x.sell_volume])},{name:'净流入',type:'bar',tooltip:{valueFormatter:value=>chartCompact(value)},data:series.value.flow.map(x=>({value:[x.time,x.net_inflow],itemStyle:{color:x.net_inflow >= 0 ? '#4ade80' : '#f87171'}}))}] }); if (hasFundingSeries.value) makeChart(fundingChartEl.value, { visualMap:{show:false,dimension:1,seriesIndex:[0],pieces:[{gt:0,color:'#4ade80'},{lt:0,color:'#f87171'},{value:0,color:'#a1a1aa'}]}, yAxis:{type:'value',scale:true,axisLabel:{formatter:v=>(v*100).toFixed(3)+'%'}}, series:[{name:'结算费率',type:'line',showSymbol:false,tooltip:{valueFormatter:value=>formatRate(value)},data:series.value.funding_rate.map(x=>[x.time,x.funding_rate])}] }); syncChartPointers(); };
         const loadSeries = async () => { const requestedSymbol = symbol.value; const requestedRange = selectedRange.value; seriesLoading.value = true; seriesError.value = ''; disposeCharts(); try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/series?range=${requestedRange}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value || requestedRange !== selectedRange.value) return; series.value = result.data; } catch(err) { if (requestedSymbol !== symbol.value || requestedRange !== selectedRange.value) return; seriesError.value = `趋势加载失败：${err.message}`; series.value = {market:[],flow:[],funding_rate:[]}; } finally { if (requestedSymbol === symbol.value && requestedRange === selectedRange.value) { seriesLoading.value = false; await nextTick(); renderCharts(); } } };
         const changeRange = value => { selectedRange.value = value; loadSeries(); };
-        const loadStructureScore = async () => { const requestedSymbol = symbol.value; scoreLoading.value = true; scoreError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/structure-score`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; structureScore.value = result.data?.structure_score || null; structureScoreAsOf.value = result.data?.as_of || null; } catch(err) { if (requestedSymbol !== symbol.value) return; scoreError.value = `结构评分加载失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) scoreLoading.value = false; } };
-        const isValidSymbol = value => /^[A-Z0-9_-]{2,50}$/.test(value);
+        const loadOpportunity = async () => { const requestedSymbol = symbol.value; opportunityLoading.value = true; opportunityError.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}/trade-opportunity`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; opportunity.value = result.data?.opportunity || null; opportunityAsOf.value = result.data?.as_of || null; } catch(err) { if (requestedSymbol !== symbol.value) return; opportunityError.value = `交易机会加载失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) opportunityLoading.value = false; } };
+        const isValidSymbol = value => /^[\p{L}\p{N}_-]{2,50}$/u.test(value);
         const readRecentSymbols = () => { try { const saved = JSON.parse(localStorage.getItem('coinx.contract-detail.recent') || '[]'); recentSymbols.value = Array.isArray(saved) ? saved.map(item => typeof item === 'string' ? item.trim().toUpperCase() : '').filter(isValidSymbol).slice(0, 10) : []; } catch (_) { recentSymbols.value = []; } };
         const recordRecentSymbol = value => { const normalized = value.trim().toUpperCase(); recentSymbols.value = [normalized, ...recentSymbols.value.filter(item => item !== normalized)].slice(0, 10); try { localStorage.setItem('coinx.contract-detail.recent', JSON.stringify(recentSymbols.value)); } catch (_) {} };
         const loadSymbolOptions = async () => { try { const response = await fetch('/api/coins-config'); const result = await response.json(); if (!response.ok || result.status !== 'success') return; const symbols = Object.keys(result.data || {}).map(item => item.trim().toUpperCase()).filter(isValidSymbol); symbolOptions.value = [...new Set([...symbols, ...recentSymbols.value])].sort(); } catch (_) {} };
-        const resetDetailState = () => { detail.value = null; structureScore.value = null; structureScoreAsOf.value = null; series.value = { market: [], flow: [], funding_rate: [] }; seriesError.value = ''; scoreError.value = ''; disposeCharts(); };
-        const switchSymbol = value => { const normalized = (value || '').trim().toUpperCase(); if (!normalized || normalized === symbol.value) { showSymbolMenu.value = false; return; } symbol.value = normalized; selectionRequired.value = false; symbolQuery.value = ''; showSymbolMenu.value = false; resetDetailState(); history.pushState({}, '', `/coin-detail?symbol=${encodeURIComponent(normalized)}`); loadData(); loadStructureScore(); loadSeries(); };
+        const resetDetailState = () => { detail.value = null; opportunity.value = null; opportunityAsOf.value = null; series.value = { market: [], flow: [], funding_rate: [] }; seriesError.value = ''; opportunityError.value = ''; disposeCharts(); };
+        const switchSymbol = value => { const normalized = (value || '').trim().toUpperCase(); if (!normalized || normalized === symbol.value) { showSymbolMenu.value = false; return; } symbol.value = normalized; selectionRequired.value = false; symbolQuery.value = ''; showSymbolMenu.value = false; resetDetailState(); history.pushState({}, '', `/coin-detail?symbol=${encodeURIComponent(normalized)}`); loadData(); loadOpportunity(); loadSeries(); };
         const selectFirstSymbol = () => { if (filteredSymbols.value.length) switchSymbol(filteredSymbols.value[0]); };
         const toggleSymbolMenu = async () => { showSymbolMenu.value = !showSymbolMenu.value; if (showSymbolMenu.value) { await nextTick(); symbolSearchEl.value?.focus(); } };
         const closeSymbolMenu = event => { if (!event.currentTarget.contains(event.relatedTarget)) showSymbolMenu.value = false; };
         const loadData = async () => { const requestedSymbol = symbol.value; if (!requestedSymbol) { selectionRequired.value = true; return; } loading.value = true; error.value = ''; try { const response = await fetch(`/api/coin-detail/${encodeURIComponent(requestedSymbol)}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载失败'); if (requestedSymbol !== symbol.value) return; detail.value = result.data; recordRecentSymbol(requestedSymbol); await nextTick(); renderCharts(); } catch (err) { if (requestedSymbol !== symbol.value) return; error.value = err.message === 'contract detail not found' ? '暂无该合约的已存储数据' : `加载数据失败：${err.message}`; } finally { if (requestedSymbol === symbol.value) loading.value = false; } };
         const goBack = () => history.length > 1 ? history.back() : location.assign('/');
-        onMounted(() => { readRecentSymbols(); loadSymbolOptions(); const requestedSymbol = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); symbol.value = requestedSymbol || recentSymbols.value[0] || ''; if (symbol.value) { if (!requestedSymbol) history.replaceState({}, '', `/coin-detail?symbol=${encodeURIComponent(symbol.value)}`); loadData(); loadStructureScore(); loadSeries(); } else { selectionRequired.value = true; } });
+        onMounted(() => { readRecentSymbols(); loadSymbolOptions(); const requestedSymbol = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); symbol.value = requestedSymbol || recentSymbols.value[0] || ''; if (symbol.value) { if (!requestedSymbol) history.replaceState({}, '', `/coin-detail?symbol=${encodeURIComponent(symbol.value)}`); loadData(); loadOpportunity(); loadSeries(); } else { selectionRequired.value = true; } });
         const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
-        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, statusText, missingExchangeDetails, structureScore, structureScoreAsOf, scoreLoading, scoreError, scoreValue, scoreDescription, scoreComponents, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, formatSignedCompact, formatSignedPrice, changeRange, loadData, loadStructureScore, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
+        const formatR = value => value == null ? 'N/A' : `${Number(value).toFixed(2)}R`;
+        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, statusText, missingExchangeDetails, opportunity, opportunityAsOf, opportunityLoading, opportunityError, tradePlan, tradePlanReady, stopLossDistance, opportunityStateClass, opportunityTrendClass, isCandidateOpportunity, opportunityConclusion, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, formatSignedCompact, formatSignedPrice, formatR, changeRange, loadData, loadOpportunity, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
       }
     }).mount('#app');
   </script>

@@ -518,8 +518,20 @@ const test = base.extend({
           }}));
           return;
         }
-        if (pathname.endsWith('/structure-score')) {
-          await route.fulfill(jsonResponse({ status: 'success', data: { symbol: 'BTCUSDT', structure_score: mockCoinDetail.structure_score } }));
+        if (pathname.endsWith('/trade-opportunity')) {
+          await route.fulfill(jsonResponse({ status: 'success', data: {
+            symbol: 'BTCUSDT',
+            as_of: 1711526400000,
+            opportunity: {
+              symbol: 'BTCUSDT', entry_state: '可做多', trend_state: '强多趋势', current_price: 69234.12,
+              entry_score: 72.4, trend_score: 41.2, timing_score: 34.5, risk_score: -10,
+              risk_reasons: ['资金费率过热'],
+              trade_plan: {
+                status: 'ready', entry_price: 69234.12, stop_loss: 66464.76, stop_loss_percent: -4,
+                tp1: 74772.84, tp2: 77542.2, tp3: 83080.92, tp1_r: 2, tp2_r: 3, tp3_r: 5,
+              },
+            },
+          }}));
           return;
         }
         await route.fulfill(

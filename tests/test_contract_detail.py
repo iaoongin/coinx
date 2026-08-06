@@ -140,6 +140,18 @@ def test_coin_detail_api_returns_repository_payload(monkeypatch):
     assert response.get_json()['data']['symbol'] == 'BTCUSDT'
 
 
+def test_coin_detail_api_accepts_chinese_contract_symbols(monkeypatch):
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_contract_detail',
+        lambda symbol: {'symbol': symbol, 'data_status': 'complete'},
+    )
+
+    response = _client().get('/api/coin-detail/龙虾USDT')
+
+    assert response.status_code == 200
+    assert response.get_json()['data']['symbol'] == '龙虾USDT'
+
+
 def test_contract_chart_series_aggregates_exchanges(db_session):
     timestamp = 1711526400000
     db_session.add_all([

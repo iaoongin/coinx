@@ -64,6 +64,7 @@ MARKET_STRUCTURE_MARKET_SERIES_TYPES = {
 }
 
 TASK_JOB_ACTIONS = {'run', 'pause', 'resume'}
+CONTRACT_SYMBOL_PATTERN = re.compile(r'[\w-]{2,50}', flags=re.UNICODE)
 TASK_JOB_LABELS = {
     'market_rank_refresh_job': '行情榜快照刷新',
     'rss_monitor_job': 'RSS 订阅监控',
@@ -713,7 +714,7 @@ def update_data():
 @api_data_bp.route('/api/coin-detail/<symbol>')
 def get_coin_detail(symbol):
     normalized_symbol = symbol.strip().upper()
-    if not re.fullmatch(r'[A-Z0-9_-]{2,50}', normalized_symbol):
+    if not CONTRACT_SYMBOL_PATTERN.fullmatch(normalized_symbol):
         return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
 
     logger.info('开始加载合约详情: %s', normalized_symbol)
@@ -732,7 +733,7 @@ def get_coin_detail(symbol):
 def get_coin_detail_series(symbol):
     normalized_symbol = symbol.strip().upper()
     range_key = request.args.get('range', '24h')
-    if not re.fullmatch(r'[A-Z0-9_-]{2,50}', normalized_symbol):
+    if not CONTRACT_SYMBOL_PATTERN.fullmatch(normalized_symbol):
         return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
     if range_key not in RANGE_HOURS:
         return jsonify({'status': 'error', 'message': 'invalid range'}), 400
@@ -748,7 +749,7 @@ def get_coin_detail_series(symbol):
 @api_data_bp.route('/api/coin-detail/<symbol>/structure-score')
 def get_coin_detail_structure_score(symbol):
     normalized_symbol = symbol.strip().upper()
-    if not re.fullmatch(r'[A-Z0-9_-]{2,50}', normalized_symbol):
+    if not CONTRACT_SYMBOL_PATTERN.fullmatch(normalized_symbol):
         return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
     try:
         data = get_contract_structure_score(normalized_symbol)
@@ -757,6 +758,31 @@ def get_coin_detail_structure_score(symbol):
         logger.error('加载合约结构评分失败: %s, 错误: %s', normalized_symbol, e)
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load contract structure score: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/coin-detail/<symbol>/trade-opportunity')
+def get_coin_detail_trade_opportunity(symbol):
+    normalized_symbol = symbol.strip().upper()
+    if not CONTRACT_SYMBOL_PATTERN.fullmatch(normalized_symbol):
+        return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
+    try:
+        snapshot = get_trade_opportunity_snapshot(symbols=[normalized_symbol])
+        opportunity = next(
+            (item for item in snapshot.get('data') or [] if item.get('symbol') == normalized_symbol),
+            None,
+        )
+        return jsonify({
+            'status': 'success',
+            'message': 'contract trade opportunity loaded',
+            'data': {
+                'symbol': normalized_symbol,
+                'as_of': snapshot.get('cache_update_time'),
+                'opportunity': opportunity,
+            },
+        })
+    except Exception as exc:
+        logger.exception('加载合约交易机会失败: %s', normalized_symbol)
+        return jsonify({'status': 'error', 'message': f'failed to load contract trade opportunity: {str(exc)}'}), 500
 
 
 @api_data_bp.route('/api/market-rank')
