@@ -286,6 +286,7 @@ def _build_trade_plan(entry_state, metric):
         'source_exchange': 'binance',
         'status': 'ready',
         'entry_price': entry_price,
+        'atr': atr,
         'stop_loss': stop_loss,
         'stop_source': stop_source,
         'tp1': targets[0],

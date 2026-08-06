@@ -84,8 +84,23 @@ def test_trade_opportunity_rule_requires_ordered_positive_stop_range():
 
     validated = notifications.validate_rule_payload(payload)
 
-    assert validated['params_json'] == {'min_stop_loss_percent': 2.0, 'max_stop_loss_percent': 8.0}
-    for params in ({}, {'min_stop_loss_percent': 0, 'max_stop_loss_percent': 8}, {'min_stop_loss_percent': 8, 'max_stop_loss_percent': 2}):
+    assert validated['params_json'] == {
+        'min_stop_loss_percent': 2.0,
+        'max_stop_loss_percent': 8.0,
+        'trigger_confirmations': 2,
+        'recovery_confirmations': 3,
+        'better_entry_threshold': 0.5,
+        'better_entry_unit': 'r',
+    }
+    for params in (
+        {},
+        {'min_stop_loss_percent': 0, 'max_stop_loss_percent': 8},
+        {'min_stop_loss_percent': 8, 'max_stop_loss_percent': 2},
+        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8, 'trigger_confirmations': 0},
+        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8, 'recovery_confirmations': 13},
+        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8, 'better_entry_threshold': -0.1},
+        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8, 'better_entry_unit': 'percent'},
+    ):
         invalid = {**payload, 'params': params}
         try:
             notifications.validate_rule_payload(invalid)
@@ -149,7 +164,7 @@ def test_trade_opportunity_message_uses_safe_placeholders_for_missing_optional_v
 
     assert '现价 -' in body
     assert '止损 -（距离 -）' in body
-    assert '目标 TP1 - (-) · TP2 - (-) · TP3 - (-)' in body
+    assert '目标1 - (-)\n目标2 - (-)\n目标3 - (-)' in body
     assert '信号评分：入场 - · 趋势 - · 时机 - · 风险 -' in body
     assert '风险提示' not in body
     assert 'None' not in body
@@ -160,7 +175,12 @@ def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_
     channel = create_channel(db_session)
     rule = create_rule(
         db_session, channel, notifications.EVENT_TRADE_OPPORTUNITY, 'trade_opportunities',
-        {'min_stop_loss_percent': 2, 'max_stop_loss_percent': 8},
+        {
+            'min_stop_loss_percent': 2,
+            'max_stop_loss_percent': 8,
+            'trigger_confirmations': 1,
+            'recovery_confirmations': 1,
+        },
     )
     snapshots = [
         [
@@ -200,19 +220,96 @@ def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_
     assert (reentered['matched'], reentered['sent']) == (2, 1)
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
     assert [item.payload_json['message']['title'] for item in deliveries] == [
-        '🔴 可做交易机会 · 2 个', '✅ 可做交易机会已退出 · 1 个', '🔴 可做交易机会 · 1 个',
+        '🟢🔴 可做交易机会 · 2 个', '⚪ 可做交易机会已退出 · 1 个', '🟢 可做交易机会 · 1 个',
     ]
     first_body = deliveries[0].payload_json['message']['body']
-    assert '01 · BTCUSDT · 可做多' in first_body
+    assert '01\nBTCUSDT · 可做多' in first_body
     assert '止损 98（距离 2.00%）' in first_body
-    assert '目标 TP1 104 (2R) · TP2 108 (4R) · TP3 112 (6R)' in first_body
+    assert '目标1 104 (2R)\n目标2 108 (4R)\n目标3 112 (6R)' in first_body
     assert '信号评分：入场 70.0 · 趋势 45.0 · 时机 25.0 · 风险 0.0' in first_body
     assert '风险提示：资金费率过热' in first_body
     assert '规则：严格可做 · 止损范围 2%–8%' in first_body
-    assert '扫描 5 · 当前机会 2 · 已恢复 0' in first_body
+    assert '扫描 5 · 当前机会 2 · 更优更新 0 · 已恢复 0' in first_body
     assert 'BTCUSDT · 当前 观望' in deliveries[1].payload_json['message']['body']
     assert '之前止损距离 2.00%' in deliveries[1].payload_json['message']['body']
     assert 'SOLUSDT' not in deliveries[0].payload_json['message']['body']
+
+
+def test_trade_opportunity_rule_debounces_trigger_and_recovery(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_TRADE_OPPORTUNITY, 'trade_opportunities',
+        {
+            'min_stop_loss_percent': 2,
+            'max_stop_loss_percent': 8,
+            'trigger_confirmations': 2,
+            'recovery_confirmations': 3,
+        },
+    )
+    snapshots = [
+        [_trade_opportunity('BTCUSDT')],
+        [_trade_opportunity('BTCUSDT')],
+        [_trade_opportunity('BTCUSDT', entry_state='观望')],
+        [_trade_opportunity('BTCUSDT')],
+        [_trade_opportunity('BTCUSDT', entry_state='观望')],
+        [_trade_opportunity('BTCUSDT', entry_state='观望')],
+        [_trade_opportunity('BTCUSDT', entry_state='观望')],
+    ]
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {'data': snapshots.pop(0), 'cache_update_time': 1_700_000_000_000},
+    )
+
+    results = [
+        notifications.evaluate_trade_opportunity_rules(session=db_session, rule_id=rule.id)
+        for _ in range(7)
+    ]
+
+    assert [result['sent'] for result in results] == [0, 1, 0, 0, 0, 0, 1]
+    deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
+    assert [delivery.payload_json['message']['title'] for delivery in deliveries] == [
+        '🟢 可做交易机会 · 1 个', '⚪ 可做交易机会已退出 · 1 个',
+    ]
+    assert '连续确认 2 次触发 · 连续失配 3 次退出' in deliveries[0].payload_json['message']['body']
+
+
+def test_trade_opportunity_rule_notifies_only_materially_better_entries(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_TRADE_OPPORTUNITY, 'trade_opportunities',
+        {
+            'min_stop_loss_percent': 2,
+            'max_stop_loss_percent': 8,
+            'trigger_confirmations': 1,
+            'recovery_confirmations': 3,
+            'better_entry_threshold': 0.5,
+            'better_entry_unit': 'r',
+        },
+    )
+    improved = _trade_opportunity('BTCUSDT')
+    improved['current_price'] = 98
+    improved['trade_plan'].update({'entry_price': 98, 'stop_loss': 96})
+    snapshots = [[_trade_opportunity('BTCUSDT')], [improved], [improved]]
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {'data': snapshots.pop(0), 'cache_update_time': 1_700_000_000_000},
+    )
+
+    results = [
+        notifications.evaluate_trade_opportunity_rules(session=db_session, rule_id=rule.id)
+        for _ in range(3)
+    ]
+
+    assert [result['sent'] for result in results] == [1, 1, 0]
+    deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
+    assert deliveries[1].payload_json['message']['title'] == '🟡 交易机会更新'
+    assert '01\nBTCUSDT · 可做多 · 更优入场' in deliveries[1].payload_json['message']['body']
+    assert '上次入场 100 → 新入场 98' in deliveries[1].payload_json['message']['body']
+    assert '改善 2（阈值 0.5R）' in deliveries[1].payload_json['message']['body']
 
 
 def test_trade_opportunity_rule_supports_manual_evaluation_run(db_session, monkeypatch):

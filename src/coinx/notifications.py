@@ -34,6 +34,10 @@ EVENT_FUNDING_RATE = 'market.funding_rate.threshold'
 EVENT_PRICE_VOLUME = 'market.price_volume.threshold'
 EVENT_JOB_FAILURE = 'system.job.failure'
 EVENT_TRADE_OPPORTUNITY = 'market.trade_opportunity.actionable'
+TRADE_OPPORTUNITY_TRIGGER_CONFIRMATIONS = 2
+TRADE_OPPORTUNITY_RECOVERY_CONFIRMATIONS = 3
+TRADE_OPPORTUNITY_BETTER_ENTRY_THRESHOLD = 0.5
+TRADE_OPPORTUNITY_BETTER_ENTRY_UNITS = {'r', 'atr'}
 
 EVENT_SCOPE = {
     EVENT_FUNDING_RATE: 'all_market',
@@ -189,6 +193,13 @@ def format_trade_r(value):
         return '-'
 
 
+def format_trade_targets(plan):
+    return [
+        f'目标{index} {format_price(plan.get(f"tp{index}"))} ({format_trade_r(plan.get(f"tp{index}_r"))})'
+        for index in range(1, 4)
+    ]
+
+
 def format_stop_distance(value):
     try:
         return f'{abs(float(value)):.2f}%'
@@ -197,16 +208,12 @@ def format_stop_distance(value):
 
 
 def format_trade_opportunity_trigger(symbol, row, plan):
-    targets = ' · '.join(
-        f'TP{index} {format_price(plan.get(f"tp{index}"))} ({format_trade_r(plan.get(f"tp{index}_r"))})'
-        for index in range(1, 4)
-    )
     lines = [
         f'{symbol} · {row.get("entry_state") or "-"}',
         f'现价 {format_price(row.get("current_price"))}',
         f'入场 {format_price(plan.get("entry_price"))}',
         f'止损 {format_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
-        f'目标 {targets}',
+        *format_trade_targets(plan),
         '信号评分：'
         f'入场 {format_trade_score(row.get("entry_score"))} · '
         f'趋势 {format_trade_score(row.get("trend_score"))} · '
@@ -224,6 +231,64 @@ def format_trade_opportunity_recovery(symbol, entry_state, previous, previous_pl
         f'{symbol} · 当前 {entry_state or "不满足"}',
         f'之前入场 {format_price(previous_plan.get("entry_price"))}',
         f'之前止损距离 {format_stop_distance(previous.get("stop_loss_percent"))}',
+    ))
+
+
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def trade_entry_improvement(previous_values, entry_state, plan, threshold, unit):
+    """Return the favorable entry-price change when it clears the configured threshold."""
+    if threshold <= 0:
+        return None
+    baseline = (
+        previous_values.get('_last_better_entry_values')
+        or previous_values.get('_last_triggered_values')
+        or previous_values
+    )
+    if baseline.get('entry_state') != entry_state:
+        return None
+    previous_plan = baseline.get('trade_plan') or {}
+    previous_entry = _float_or_none(previous_plan.get('entry_price'))
+    current_entry = _float_or_none(plan.get('entry_price'))
+    if previous_entry is None or current_entry is None:
+        return None
+    if entry_state == '可做多':
+        improvement = previous_entry - current_entry
+    elif entry_state == '可做空':
+        improvement = current_entry - previous_entry
+    else:
+        return None
+    if improvement <= 0:
+        return None
+    if unit == 'r':
+        stop_loss = _float_or_none(previous_plan.get('stop_loss'))
+        scale = abs(previous_entry - stop_loss) if stop_loss is not None else None
+    else:
+        scale = _float_or_none(plan.get('atr'))
+    if scale is None or scale <= 0 or improvement < threshold * scale:
+        return None
+    return {
+        'improvement': improvement,
+        'previous_values': baseline,
+        'threshold': threshold,
+        'unit': unit,
+    }
+
+
+def format_trade_opportunity_update(symbol, row, plan, update):
+    previous_plan = (update['previous_values'].get('trade_plan') or {})
+    unit_label = 'R' if update['unit'] == 'r' else 'ATR'
+    return '\n'.join((
+        f'{symbol} · {row.get("entry_state") or "-"} · 更优入场',
+        f'上次入场 {format_price(previous_plan.get("entry_price"))} → 新入场 {format_price(plan.get("entry_price"))}',
+        f'改善 {format_price(update["improvement"])}（阈值 {update["threshold"]:g}{unit_label}）',
+        f'止损 {format_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
+        *format_trade_targets(plan),
     ))
 
 
@@ -365,9 +430,37 @@ def validate_rule_payload(payload):
         maximum = _positive_number(params.get('max_stop_loss_percent'), 'max_stop_loss_percent')
         if minimum > maximum:
             raise NotificationConfigError('min_stop_loss_percent must not exceed max_stop_loss_percent')
+        try:
+            trigger_confirmations = int(
+                params.get('trigger_confirmations', TRADE_OPPORTUNITY_TRIGGER_CONFIRMATIONS),
+            )
+            recovery_confirmations = int(
+                params.get('recovery_confirmations', TRADE_OPPORTUNITY_RECOVERY_CONFIRMATIONS),
+            )
+        except (TypeError, ValueError) as exc:
+            raise NotificationConfigError('invalid trade opportunity confirmation count') from exc
+        if not 1 <= trigger_confirmations <= 12:
+            raise NotificationConfigError('invalid trigger_confirmations')
+        if not 1 <= recovery_confirmations <= 12:
+            raise NotificationConfigError('invalid recovery_confirmations')
+        try:
+            better_entry_threshold = float(
+                params.get('better_entry_threshold', TRADE_OPPORTUNITY_BETTER_ENTRY_THRESHOLD),
+            )
+        except (TypeError, ValueError) as exc:
+            raise NotificationConfigError('invalid better_entry_threshold') from exc
+        if not 0 <= better_entry_threshold <= 10:
+            raise NotificationConfigError('invalid better_entry_threshold')
+        better_entry_unit = params.get('better_entry_unit', 'r')
+        if better_entry_unit not in TRADE_OPPORTUNITY_BETTER_ENTRY_UNITS:
+            raise NotificationConfigError('invalid better_entry_unit')
         params = {
             'min_stop_loss_percent': minimum,
             'max_stop_loss_percent': maximum,
+            'trigger_confirmations': trigger_confirmations,
+            'recovery_confirmations': recovery_confirmations,
+            'better_entry_threshold': better_entry_threshold,
+            'better_entry_unit': better_entry_unit,
         }
         scope = {}
     else:
@@ -551,9 +644,20 @@ def _cas_update_alert_state(db, state, values):
     return False
 
 
+def _record_better_trade_entry(db, state, values):
+    """Advance the comparison baseline only after queuing a better-entry notice."""
+    stored_values = dict(state.last_value_json or {})
+    stored_values['_last_better_entry_values'] = dict(values)
+    return _cas_update_alert_state(db, state, {
+        'last_value_json': stored_values,
+        'updated_at': datetime.now(),
+    })
+
+
 def _observe(
     db, rule, subject_key, dimension_key, matched, values, title, summary,
-    consecutive_matches=None, recovery_confirmations=1, state=None, aggregate=False,
+    consecutive_matches=None, trigger_confirmations=1, recovery_confirmations=1,
+    state=None, aggregate=False,
 ):
     """Apply the normal/triggered/recovered state machine for one observation."""
     timestamp = now_ms()
@@ -592,10 +696,11 @@ def _observe(
         if matched:
             observed_values['_recovery_count'] = 0
             observed_values['_last_triggered_values'] = dict(observed_values)
-            if previous != 'triggered':
+            if previous != 'triggered' and consecutive_value >= trigger_confirmations:
                 next_state = 'triggered'
                 next_triggered_at = timestamp
                 event_status = 'triggered'
+                observed_values['_last_better_entry_values'] = dict(observed_values)
         elif previous == 'triggered':
             recovery_count += 1
             observed_values['_recovery_count'] = recovery_count
@@ -676,12 +781,18 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         key=lambda event: event.get('severity', 0),
         reverse=True,
     )
+    updated_events = sorted(
+        (event for event in events if event['status'] == 'updated'),
+        key=lambda event: event.get('severity', 0),
+        reverse=True,
+    )
     is_trade_opportunity = rule.event_type == EVENT_TRADE_OPPORTUNITY
     triggered = [
-        f'{index:02d} · {event["triggered"]}' if is_trade_opportunity else f'{index}. {event["triggered"]}'
+        f'{index:02d}\n{event["triggered"]}' if is_trade_opportunity else f'{index}. {event["triggered"]}'
         for index, event in enumerate(triggered_events, start=1)
     ]
     recovered = [event['recovered'] for event in recovered_events]
+    updated = [event['updated'] for event in updated_events]
     timestamp = now_ms()
     event_titles = {
         EVENT_FUNDING_RATE: ('资金费率异常', '资金费率已恢复', '资金费率'),
@@ -693,24 +804,36 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         title = f'📊 {event_titles[2]}状态更新'
     elif triggered:
         title = f'🔴 {event_titles[0]}'
+    elif updated:
+        title = f'🟡 {event_titles[2]}更新'
     else:
         title = f'✅ {event_titles[1]}'
 
     if is_trade_opportunity:
         if triggered and not recovered:
-            title = f'🔴 {event_titles[0]} · {len(triggered)} 个'
+            directions = {event.get('direction') for event in triggered_events}
+            indicator = '🟢' if directions == {'可做多'} else ('🔴' if directions == {'可做空'} else '🟢🔴')
+            title = f'{indicator} {event_titles[0]} · {len(triggered)} 个'
         elif recovered and not triggered:
-            title = f'✅ {event_titles[1]} · {len(recovered)} 个'
+            title = f'⚪ {event_titles[1]} · {len(recovered)} 个'
         sections = []
         if triggered:
             sections.append('\n\n'.join(triggered))
+        if updated:
+            sections.append('\n\n'.join(
+                f'{index:02d}\n{event["updated"]}'
+                for index, event in enumerate(updated_events, start=1)
+            ))
         if recovered:
             sections.append('\n\n'.join(
-                f'{index:02d} · {event["recovered"]}'
+                f'{index:02d}\n{event["recovered"]}'
                 for index, event in enumerate(recovered_events, start=1)
             ))
         sections.append(condition)
-        sections.append(f'扫描 {checked} · 当前机会 {len(triggered)} · 已恢复 {len(recovered)}')
+        sections.append(
+            f'扫描 {checked} · 当前机会 {len(triggered)} · '
+            f'更优更新 {len(updated)} · 已恢复 {len(recovered)}',
+        )
         sections.append(f'推送 {format_notification_time(timestamp)}')
     else:
         sections = [condition]
@@ -1100,6 +1223,16 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
             params = rule.params_json or {}
             minimum = float(params['min_stop_loss_percent'])
             maximum = float(params['max_stop_loss_percent'])
+            trigger_confirmations = int(
+                params.get('trigger_confirmations', TRADE_OPPORTUNITY_TRIGGER_CONFIRMATIONS),
+            )
+            recovery_confirmations = int(
+                params.get('recovery_confirmations', TRADE_OPPORTUNITY_RECOVERY_CONFIRMATIONS),
+            )
+            better_entry_threshold = float(
+                params.get('better_entry_threshold', TRADE_OPPORTUNITY_BETTER_ENTRY_THRESHOLD),
+            )
+            better_entry_unit = params.get('better_entry_unit', 'r')
             stop_loss_ranges[str(rule.id)] = {'min': minimum, 'max': maximum}
             stage_started = time.perf_counter()
             states = _load_rule_states(db, rule.id, 'actionable', symbols)
@@ -1144,12 +1277,23 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
                 checked += 1
                 rule_checked += 1
                 matched_count += int(actionable)
+                state = states.get(symbol)
                 result = _observe(
                     db, rule, symbol, 'actionable', actionable, values,
                     f'{symbol} 可做交易机会',
                     f'当前不满足严格可做或止损范围 {minimum:g}%..{maximum:g}%。',
-                    state=states.get(symbol), aggregate=True,
+                    trigger_confirmations=trigger_confirmations,
+                    recovery_confirmations=recovery_confirmations,
+                    state=state, aggregate=True,
                 )
+                better_entry = None
+                if actionable and state and state.state == 'triggered':
+                    better_entry = trade_entry_improvement(
+                        state.last_value_json or {}, row.get('entry_state'), plan,
+                        better_entry_threshold, better_entry_unit,
+                    )
+                    if better_entry and not _record_better_trade_entry(db, state, values):
+                        better_entry = None
                 if result.get('state') and result['event_status']:
                     previous = result['previous_values'] or {}
                     if result['event_status'] == 'triggered':
@@ -1161,9 +1305,18 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
                         'status': result['event_status'],
                         'state': result['state'],
                         'severity': abs(float(row.get('entry_score') or 0)),
+                        'direction': row.get('entry_state'),
                         'triggered': trigger or f'{symbol}  {row.get("entry_state") or "-"}',
                         'recovered': format_trade_opportunity_recovery(
                             symbol, row.get('entry_state'), previous, previous_plan,
+                        ),
+                    })
+                if better_entry:
+                    events.append({
+                        'status': 'updated',
+                        'severity': better_entry['improvement'],
+                        'updated': format_trade_opportunity_update(
+                            symbol, row, plan, better_entry,
                         ),
                     })
             stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
@@ -1171,6 +1324,8 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
             sent += _deliver_evaluation_summary(
                 db, rule, rule_checked, events,
                 f'规则：严格可做 · 止损范围 {minimum:g}%–{maximum:g}%\n'
+                f'连续确认 {trigger_confirmations} 次触发 · 连续失配 {recovery_confirmations} 次退出\n'
+                f'更优入场阈值 {better_entry_threshold:g}{better_entry_unit.upper()}\n'
                 f'数据 {format_notification_time(snapshot_time)}',
             )
             stages['delivery_ms'] += (time.perf_counter() - stage_started) * 1000
