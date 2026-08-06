@@ -110,7 +110,6 @@ class MarketOpenInterestHist(Base):
     __tablename__ = 'market_open_interest_hist'
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_moih_exchange_symbol_period_time'),
-        Index('idx_moih_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
         Index('idx_moih_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
     )
 
@@ -130,7 +129,6 @@ class MarketKline(Base):
     __tablename__ = 'market_klines'
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'open_time', name='uk_mk_exchange_symbol_period_open_time'),
-        Index('idx_mk_exchange_symbol_period_open_time', 'exchange', 'symbol', 'period', 'open_time'),
         Index('idx_mk_symbol_period_exchange_open_time', 'symbol', 'period', 'exchange', 'open_time'),
     )
 
@@ -158,7 +156,6 @@ class MarketTakerBuySellVol(Base):
     __tablename__ = 'market_taker_buy_sell_vol'
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_mtbsv_exchange_symbol_period_time'),
-        Index('idx_mtbsv_exchange_symbol_period_time', 'exchange', 'symbol', 'period', 'event_time'),
         Index('idx_mtbsv_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
     )
 

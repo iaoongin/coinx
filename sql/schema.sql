@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS market_open_interest_hist (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_moih_exchange_symbol_period_time (exchange, symbol, period, event_time),
-    KEY idx_moih_exchange_symbol_period_time (exchange, symbol, period, event_time),
     KEY idx_moih_symbol_period_exchange_time (symbol, period, exchange, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所持仓量历史数据表';
 
@@ -98,7 +97,6 @@ CREATE TABLE IF NOT EXISTS market_klines (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_mk_exchange_symbol_period_open_time (exchange, symbol, period, open_time),
-    KEY idx_mk_exchange_symbol_period_open_time (exchange, symbol, period, open_time),
     KEY idx_mk_symbol_period_exchange_open_time (symbol, period, exchange, open_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所K线历史数据表';
 
@@ -115,7 +113,6 @@ CREATE TABLE IF NOT EXISTS market_taker_buy_sell_vol (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_mtbsv_exchange_symbol_period_time (exchange, symbol, period, event_time),
-    KEY idx_mtbsv_exchange_symbol_period_time (exchange, symbol, period, event_time),
     KEY idx_mtbsv_symbol_period_exchange_time (symbol, period, exchange, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所主动买入卖出量历史数据表';
 
