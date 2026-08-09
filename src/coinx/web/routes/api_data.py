@@ -23,6 +23,7 @@ from coinx.config import (
     REPAIR_HISTORY_INTERVAL,
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
     REPAIR_ROLLING_POINTS,
+    COLLECTION_SCHEDULER_ONLY,
     SCHEDULER_ENABLED,
     TIME_INTERVALS,
 )
@@ -45,6 +46,7 @@ from coinx.scheduler import (
     scheduler,
 )
 from coinx.utils import logger
+from coinx.web.time_params import request_as_of_ms
 
 
 api_data_bp = Blueprint('api_data', __name__)
@@ -77,6 +79,16 @@ TASK_JOB_LABELS = {
 
 def _default_exchange_repair_workers(exchanges=None):
     return resolve_repair_worker_count(exchanges or ENABLED_EXCHANGES)
+
+
+def _collection_scheduler_only_response(operation):
+    return jsonify(
+        {
+            'status': 'error',
+            'code': 'COLLECTION_SCHEDULER_ONLY',
+            'message': f'{operation} is disabled: collection is scheduler-only',
+        }
+    ), 409
 
 
 def _format_scheduler_job(job, runtime=None):
@@ -217,7 +229,11 @@ def _is_complete_homepage_payload(coins_data):
         return False
 
     for coin in coins_data:
-        if coin.get('status') != 'complete':
+        # ``status=partial`` may only mean an optional exchange does not list
+        # the symbol.  The homepage is complete when its required aggregated
+        # series are present; exchange coverage remains visible in each coin's
+        # ``missing_exchanges`` and ``exchange_statuses`` fields.
+        if coin.get('status') == 'empty':
             return False
 
     coin = coins_data[0]
@@ -268,12 +284,14 @@ def _start_market_structure_refresh_async(symbols, series_types=None, exchanges=
     if not symbols:
         return False
 
+    refresh_lock = MARKET_STRUCTURE_REFRESH_LOCK
     refresh_thread = threading.Thread(
         target=_run_market_structure_refresh,
         kwargs={
             'symbols': symbols,
             'series_types': series_types or list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
             'exchanges': exchanges or list(ENABLED_EXCHANGES),
+            '_refresh_lock': refresh_lock,
         },
     )
     refresh_thread.daemon = True
@@ -300,9 +318,13 @@ def _wait_for_refresh_completion(refresh_lock, summary_getter, message, poll_int
     }
 
 
-def _run_market_structure_refresh(symbols, series_types, exchanges=None):
+def _run_market_structure_refresh(symbols, series_types, exchanges=None, _refresh_lock=None):
     global MARKET_STRUCTURE_LAST_REFRESH_SUMMARY
-    if not MARKET_STRUCTURE_REFRESH_LOCK.acquire(blocking=False):
+    # Capture the lock object for this run. Test harnesses and process reloads
+    # may replace the module global while a daemon refresh is still finishing;
+    # releasing the current global in ``finally`` can then unlock another run.
+    refresh_lock = _refresh_lock or MARKET_STRUCTURE_REFRESH_LOCK
+    if not refresh_lock.acquire(blocking=False):
         logger.info('市场结构评分补齐正在执行，跳过重复触发')
         return {
             'status': 'skipped',
@@ -402,11 +424,12 @@ def _run_market_structure_refresh(symbols, series_types, exchanges=None):
         MARKET_STRUCTURE_LAST_REFRESH_SUMMARY = summary
         return summary
     finally:
-        MARKET_STRUCTURE_REFRESH_LOCK.release()
+        refresh_lock.release()
 
 
-def _get_homepage_cache_anchor():
-    return latest_closed_5m_open_time(int(time.time() * 1000))
+def _get_homepage_cache_anchor(as_of_ms=None):
+    anchor_source = int(as_of_ms) if as_of_ms is not None else int(time.time() * 1000)
+    return latest_closed_5m_open_time(anchor_source)
 
 
 def _get_homepage_cache_key(symbols, anchor_time):
@@ -525,7 +548,11 @@ def get_market_structure_score():
             except Exception:
                 symbols = symbols[:100]
 
-        snapshot = get_market_structure_score_snapshot(symbols=symbols)
+        as_of_ms = request_as_of_ms()
+        snapshot_kwargs = {'symbols': symbols}
+        if as_of_ms is not None:
+            snapshot_kwargs['now_ms'] = as_of_ms
+        snapshot = get_market_structure_score_snapshot(**snapshot_kwargs)
         return jsonify(
             {
                 'status': 'success',
@@ -535,6 +562,8 @@ def get_market_structure_score():
                 'summary': snapshot.get('summary') or {},
             }
         )
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载合约市场结构评分失败: {e}')
         logger.exception(e)
@@ -546,7 +575,11 @@ def get_trade_opportunities():
     try:
         scope = request.args.get('scope', 'candidates')
         limit = max(1, min(int(request.args.get('limit', 100)), 200))
-        snapshot = get_trade_opportunity_snapshot(symbols=get_market_structure_score_symbols()[:limit])
+        as_of_ms = request_as_of_ms()
+        snapshot_kwargs = {'symbols': get_market_structure_score_symbols()[:limit]}
+        if as_of_ms is not None:
+            snapshot_kwargs['now_ms'] = as_of_ms
+        snapshot = get_trade_opportunity_snapshot(**snapshot_kwargs)
         data = snapshot.get('data') or []
         if scope != 'all':
             candidates = {'可做多', '可做空', '等待回踩', '等待反弹'}
@@ -555,6 +588,8 @@ def get_trade_opportunities():
                 if item.get('entry_state') in candidates and item.get('trend_state') != '震荡'
             ]
         return jsonify({'status': 'success', 'data': data, 'cache_update_time': snapshot.get('cache_update_time'), 'summary': snapshot.get('summary') or {}})
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 400
     except Exception as exc:
         logger.exception('加载交易机会失败')
         return jsonify({'status': 'error', 'message': str(exc)}), 500
@@ -563,6 +598,8 @@ def get_trade_opportunities():
 @api_data_bp.route('/api/market-structure-score/refresh', methods=['POST'])
 def refresh_market_structure_score():
     logger.info('开始触发合约市场结构评分滚动修补')
+    if COLLECTION_SCHEDULER_ONLY:
+        return _collection_scheduler_only_response('market structure refresh')
     try:
         payload = request.get_json(silent=True) or {}
         force = request.args.get('force', 'false').lower() == 'true' or bool(payload.get('force', False))
@@ -611,7 +648,12 @@ def get_coins():
     logger.info('开始从历史序列加载首页数据')
     try:
         active_coins = get_active_coins()
-        cache_anchor = _get_homepage_cache_anchor()
+        as_of_ms = request_as_of_ms()
+        cache_anchor = (
+            _get_homepage_cache_anchor(as_of_ms)
+            if as_of_ms is not None
+            else _get_homepage_cache_anchor()
+        )
         cache_key = _get_homepage_cache_key(active_coins, cache_anchor)
 
         # 检查是否强制跳过缓存
@@ -626,11 +668,37 @@ def get_coins():
             logger.info('强制跳过缓存')
 
         snapshot_start = time.perf_counter()
-        snapshot = get_homepage_series_snapshot(active_coins)
+        snapshot_kwargs = {'symbols': active_coins}
+        if as_of_ms is not None:
+            snapshot_kwargs['now_ms'] = as_of_ms
+        snapshot = get_homepage_series_snapshot(**snapshot_kwargs)
         snapshot_ms = (time.perf_counter() - snapshot_start) * 1000
 
         if active_coins and not _is_complete_homepage_payload(snapshot.get('data') or []):
             logger.info('首页历史序列不完整，跳过后台补全，返回现有数据')
+            # Historical replay is read-only; live auto-repair is also disabled
+            # when collection is restricted to scheduler jobs.
+            if as_of_ms is None and HOMEPAGE_SERIES_REPAIR_ENABLED and not COLLECTION_SCHEDULER_ONLY:
+                try:
+                    homepage_refresh_started = False
+                    if should_refresh_homepage_series(active_coins):
+                        homepage_refresh_started = bool(_start_homepage_refresh_async(
+                            active_coins, series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES)
+                        ))
+                    if homepage_refresh_started:
+                        score_symbols = get_market_structure_score_symbols()
+                        score_only_symbols = [
+                            symbol for symbol in score_symbols if symbol not in set(active_coins)
+                        ]
+                        if score_only_symbols:
+                            _start_market_structure_refresh_async(
+                                score_only_symbols,
+                                series_types=list(MARKET_STRUCTURE_MARKET_SERIES_TYPES),
+                            )
+                except Exception:
+                    logger.exception('首页不完整时触发后台补全失败')
+            elif as_of_ms is None and HOMEPAGE_SERIES_REPAIR_ENABLED and COLLECTION_SCHEDULER_ONLY:
+                logger.info('采集仅允许由调度任务触发，跳过首页请求补采')
 
         formatted_data = _format_homepage_coins_payload(snapshot['data'])
         payload = {
@@ -648,6 +716,8 @@ def get_coins():
             f'锚点={cache_anchor}, 聚合耗时={snapshot_ms:.2f}ms, 总耗时={elapsed_ms:.2f}ms'
         )
         return jsonify(payload)
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载首页数据失败: {e}')
         logger.exception(e)
@@ -657,6 +727,8 @@ def get_coins():
 @api_data_bp.route('/api/update')
 def update_data():
     logger.info('开始触发首页滚动修补')
+    if COLLECTION_SCHEDULER_ONLY:
+        return _collection_scheduler_only_response('homepage refresh')
     try:
         force = request.args.get('force', 'false').lower() == 'true'
         wait_for_completion = request.args.get('wait', 'false').lower() == 'true'
@@ -719,10 +791,16 @@ def get_coin_detail(symbol):
 
     logger.info('开始加载合约详情: %s', normalized_symbol)
     try:
-        detail_data = get_contract_detail(normalized_symbol)
+        as_of_ms = request_as_of_ms()
+        detail_kwargs = {'symbol': normalized_symbol}
+        if as_of_ms is not None:
+            detail_kwargs['now_ms'] = as_of_ms
+        detail_data = get_contract_detail(**detail_kwargs)
         if detail_data is None:
             return jsonify({'status': 'error', 'message': 'contract detail not found'}), 404
         return jsonify({'status': 'success', 'message': 'coin detail loaded', 'data': detail_data})
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载币种详情失败: {symbol}, 错误: {e}')
         logger.exception(e)
@@ -738,8 +816,14 @@ def get_coin_detail_series(symbol):
     if range_key not in RANGE_HOURS:
         return jsonify({'status': 'error', 'message': 'invalid range'}), 400
     try:
-        data = load_contract_chart_series(normalized_symbol, range_key=range_key)
+        as_of_ms = request_as_of_ms()
+        chart_kwargs = {'range_key': range_key}
+        if as_of_ms is not None:
+            chart_kwargs['as_of_ms'] = as_of_ms
+        data = load_contract_chart_series(normalized_symbol, **chart_kwargs)
         return jsonify({'status': 'success', 'message': 'contract series loaded', 'data': data})
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error('加载合约趋势失败: %s, 错误: %s', normalized_symbol, e)
         logger.exception(e)
@@ -752,8 +836,14 @@ def get_coin_detail_structure_score(symbol):
     if not CONTRACT_SYMBOL_PATTERN.fullmatch(normalized_symbol):
         return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
     try:
-        data = get_contract_structure_score(normalized_symbol)
+        as_of_ms = request_as_of_ms()
+        score_kwargs = {'symbol': normalized_symbol}
+        if as_of_ms is not None:
+            score_kwargs['now_ms'] = as_of_ms
+        data = get_contract_structure_score(**score_kwargs)
         return jsonify({'status': 'success', 'message': 'contract structure score loaded', 'data': data})
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error('加载合约结构评分失败: %s, 错误: %s', normalized_symbol, e)
         logger.exception(e)
@@ -766,7 +856,11 @@ def get_coin_detail_trade_opportunity(symbol):
     if not CONTRACT_SYMBOL_PATTERN.fullmatch(normalized_symbol):
         return jsonify({'status': 'error', 'message': 'invalid contract symbol'}), 400
     try:
-        snapshot = get_trade_opportunity_snapshot(symbols=[normalized_symbol])
+        as_of_ms = request_as_of_ms()
+        snapshot_kwargs = {'symbols': [normalized_symbol]}
+        if as_of_ms is not None:
+            snapshot_kwargs['now_ms'] = as_of_ms
+        snapshot = get_trade_opportunity_snapshot(**snapshot_kwargs)
         opportunity = next(
             (item for item in snapshot.get('data') or [] if item.get('symbol') == normalized_symbol),
             None,
@@ -780,6 +874,8 @@ def get_coin_detail_trade_opportunity(symbol):
                 'opportunity': opportunity,
             },
         })
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 400
     except Exception as exc:
         logger.exception('加载合约交易机会失败: %s', normalized_symbol)
         return jsonify({'status': 'error', 'message': f'failed to load contract trade opportunity: {str(exc)}'}), 500
@@ -793,8 +889,12 @@ def get_market_rank():
         rank_type = request.args.get('type', 'price_change')
         direction = request.args.get('direction', 'down')
         limit = int(request.args.get('limit', 100))
+        as_of_ms = request_as_of_ms()
         
-        data = get_market_tickers(rank_type=rank_type, direction=direction, limit=limit)
+        ticker_kwargs = {'rank_type': rank_type, 'direction': direction, 'limit': limit}
+        if as_of_ms is not None:
+            ticker_kwargs['as_of_ms'] = as_of_ms
+        data = get_market_tickers(**ticker_kwargs)
         
         formatted_data = []
         for idx, item in enumerate(data, 1):
@@ -807,7 +907,16 @@ def get_market_rank():
                 'quote_volume': float(item.quote_volume) if item.quote_volume else None,
             })
         
-        close_time = get_latest_close_time()
+        # The ranked rows already carry the snapshot close_time. Reusing it
+        # avoids a second ClickHouse round trip on every market-rank request;
+        # retain the database lookup for empty/legacy row objects.
+        close_time = getattr(data[0], 'close_time', None) if data else None
+        if close_time is None:
+            close_time = (
+                get_latest_close_time(as_of_ms=as_of_ms)
+                if as_of_ms is not None
+                else get_latest_close_time()
+            )
         
         return jsonify({
             'status': 'success',
@@ -815,6 +924,8 @@ def get_market_rank():
             'data': formatted_data,
             'snapshot_time': close_time,
         })
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载行情榜数据失败: {e}')
         logger.exception(e)
@@ -825,6 +936,8 @@ def get_market_rank():
 def refresh_market_rank():
     """手动触发行情榜快照刷新"""
     logger.info('开始触发行情榜快照刷新')
+    if COLLECTION_SCHEDULER_ONLY:
+        return _collection_scheduler_only_response('market rank refresh')
     try:
         summary = refresh_market_tickers()
         if summary.get('status') != 'success':
@@ -863,9 +976,10 @@ def list_task_jobs():
         return jsonify(
             {
                 'status': 'success',
-                'message': 'scheduler jobs loaded',
+                'message': '任务列表加载成功',
                 'data': {
                     'scheduler_enabled': SCHEDULER_ENABLED,
+                    'collection_scheduler_only': COLLECTION_SCHEDULER_ONLY,
                     'scheduler_running': bool(scheduler.running),
                     'jobs': jobs,
                 },
@@ -874,29 +988,29 @@ def list_task_jobs():
     except Exception as e:
         logger.error(f'加载任务列表失败: {e}')
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to load task jobs: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'加载任务列表失败：{str(e)}'}), 500
 
 
 @api_data_bp.route('/api/task-jobs/<job_id>/runs')
 def list_task_job_runs(job_id):
     job = scheduler.get_job(job_id)
     if job is None:
-        return jsonify({'status': 'error', 'message': f'job not found: {job_id}'}), 404
+        return jsonify({'status': 'error', 'message': f'未找到任务：{job_id}'}), 404
     try:
         limit = int(request.args.get('limit', 5))
         offset = int(request.args.get('offset', 0))
     except (TypeError, ValueError):
-        return jsonify({'status': 'error', 'message': 'limit and offset must be integers'}), 400
+        return jsonify({'status': 'error', 'message': 'limit 和 offset 必须是整数'}), 400
     if limit < 1 or limit > 50:
-        return jsonify({'status': 'error', 'message': 'limit must be between 1 and 50'}), 400
+        return jsonify({'status': 'error', 'message': 'limit 必须在 1 到 50 之间'}), 400
     if offset < 0:
-        return jsonify({'status': 'error', 'message': 'offset must be non-negative'}), 400
+        return jsonify({'status': 'error', 'message': 'offset 不能为负数'}), 400
     try:
         total = get_job_run_count(job_id)
         return jsonify(
             {
                 'status': 'success',
-                'message': 'task job runs loaded',
+                'message': '任务执行记录加载成功',
                 'data': {
                     'job_id': job_id,
                     'runs': get_job_runs(job_id, limit=limit, offset=offset),
@@ -909,7 +1023,7 @@ def list_task_job_runs(job_id):
     except Exception as e:
         logger.error('加载任务运行记录失败: job_id=%s error=%s', job_id, e)
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to load task job runs: {str(e)}'}), 500
+        return jsonify({'status': 'error', 'message': f'加载任务执行记录失败：{str(e)}'}), 500
 
 
 @api_data_bp.route('/api/task-jobs/<job_id>/action', methods=['POST'])
@@ -917,13 +1031,12 @@ def control_task_job(job_id):
     payload = request.get_json(silent=True) or {}
     action = (payload.get('action') or '').strip().lower()
     if action not in TASK_JOB_ACTIONS:
-        return jsonify({'status': 'error', 'message': f'unsupported action: {action}'}), 400
+        return jsonify({'status': 'error', 'message': f'不支持的操作：{action}'}), 400
     job = scheduler.get_job(job_id)
     if job is None:
-        return jsonify({'status': 'error', 'message': f'job not found: {job_id}'}), 404
+        return jsonify({'status': 'error', 'message': f'未找到任务：{job_id}'}), 404
     if not SCHEDULER_ENABLED and action in {'pause', 'resume'}:
-        return jsonify({'status': 'error', 'message': 'scheduler is disabled by SCHEDULER_ENABLED=false'}), 409
-
+        return jsonify({'status': 'error', 'message': '调度器已由 SCHEDULER_ENABLED=false 禁用，不能暂停或恢复任务'}), 409
     try:
         if action == 'run':
             if SCHEDULER_ENABLED:
@@ -933,7 +1046,7 @@ def control_task_job(job_id):
             elif _start_manual_task_job(job):
                 message = f'任务已在后台手动执行: {job_id}'
             else:
-                return jsonify({'status': 'error', 'message': f'job is already running: {job_id}'}), 409
+                return jsonify({'status': 'error', 'message': f'任务已在运行：{job_id}'}), 409
         elif action == 'pause':
             job.pause()
             message = f'任务已暂停: {job_id}'
@@ -955,4 +1068,6 @@ def control_task_job(job_id):
     except Exception as e:
         logger.error(f'执行任务操作失败: job_id={job_id} action={action} error={e}')
         logger.exception(e)
-        return jsonify({'status': 'error', 'message': f'failed to {action} job: {str(e)}'}), 500
+        action_labels = {'run': '执行', 'pause': '暂停', 'resume': '恢复'}
+        action_label = action_labels.get(action, action)
+        return jsonify({'status': 'error', 'message': f'{action_label}任务失败：{str(e)}'}), 500

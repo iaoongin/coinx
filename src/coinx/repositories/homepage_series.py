@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from functools import lru_cache
@@ -10,6 +11,7 @@ from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
 from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS, HOMEPAGE_WINDOW_HEALTH_THRESHOLD
 from coinx.database import get_session
+from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.utils import logger
 from coinx.models import (
     MarketKline,
@@ -123,13 +125,13 @@ def format_funding_rate(rate):
     return f"{float(rate) * 100:.3f}%"
 
 
-def format_funding_countdown(next_funding_time):
+def format_funding_countdown(next_funding_time, now_ms=None):
     """格式化下次结算倒计时"""
     if next_funding_time is None:
         return 'N/A'
 
-    now_ms = int(__import__('time').time() * 1000)
-    diff_ms = int(next_funding_time) - now_ms
+    anchor = int(now_ms) if now_ms is not None else int(__import__('time').time() * 1000)
+    diff_ms = int(next_funding_time) - anchor
 
     if diff_ms <= 0:
         return '已结算'
@@ -186,6 +188,17 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
         MarketTakerBuySellVol.exchange == exchange,
         MarketTakerBuySellVol.period == '5m',
     ).group_by(MarketTakerBuySellVol.symbol).all()
+    if upper_bound is not None:
+        latest_query = session.query(
+            MarketTakerBuySellVol.symbol,
+            func.max(MarketTakerBuySellVol.event_time).label('latest_time')
+        ).filter(
+            MarketTakerBuySellVol.symbol.in_(symbols),
+            MarketTakerBuySellVol.exchange == exchange,
+            MarketTakerBuySellVol.period == '5m',
+            MarketTakerBuySellVol.event_time <= int(upper_bound),
+        ).group_by(MarketTakerBuySellVol.symbol)
+        latest_rows = latest_query.all()
 
     if not latest_rows:
         total_ms = (_time.time() - func_start) * 1000
@@ -218,16 +231,16 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
             SUM(CASE WHEN v.event_time >= :base_48h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_48h,
             SUM(CASE WHEN v.event_time >= :base_72h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_72h,
             SUM(CASE WHEN v.event_time >= :base_168h THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_168h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_5m   THEN 1 ELSE 0 END) / 1   * 100, 1) AS health_5m,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_15m  THEN 1 ELSE 0 END) / 3   * 100, 1) AS health_15m,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_30m  THEN 1 ELSE 0 END) / 6   * 100, 1) AS health_30m,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_1h   THEN 1 ELSE 0 END) / 12  * 100, 1) AS health_1h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_4h   THEN 1 ELSE 0 END) / 48  * 100, 1) AS health_4h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_12h  THEN 1 ELSE 0 END) / 144 * 100, 1) AS health_12h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_24h  THEN 1 ELSE 0 END) / 288 * 100, 1) AS health_24h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_48h  THEN 1 ELSE 0 END) / 576 * 100, 1) AS health_48h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_72h  THEN 1 ELSE 0 END) / 864 * 100, 1) AS health_72h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_168h THEN 1 ELSE 0 END) / 2016 * 100, 1) AS health_168h
+            ROUND(SUM(CASE WHEN v.event_time >= :base_5m   THEN 1 ELSE 0 END) * 100.0 / 1,    1) AS health_5m,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_15m  THEN 1 ELSE 0 END) * 100.0 / 3,    1) AS health_15m,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_30m  THEN 1 ELSE 0 END) * 100.0 / 6,    1) AS health_30m,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_1h   THEN 1 ELSE 0 END) * 100.0 / 12,   1) AS health_1h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_4h   THEN 1 ELSE 0 END) * 100.0 / 48,   1) AS health_4h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_12h  THEN 1 ELSE 0 END) * 100.0 / 144,  1) AS health_12h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_24h  THEN 1 ELSE 0 END) * 100.0 / 288,  1) AS health_24h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_48h  THEN 1 ELSE 0 END) * 100.0 / 576,  1) AS health_48h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_72h  THEN 1 ELSE 0 END) * 100.0 / 864,  1) AS health_72h,
+            ROUND(SUM(CASE WHEN v.event_time >= :base_168h THEN 1 ELSE 0 END) * 100.0 / 2016, 1) AS health_168h
         FROM market_taker_buy_sell_vol v
         JOIN market_klines k
           ON k.exchange = v.exchange AND k.symbol = v.symbol AND k.period = v.period AND k.open_time = v.event_time
@@ -236,6 +249,7 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
           AND v.period = '5m'
           AND k.period = '5m'
           AND v.event_time >= :lower_bound
+          AND v.event_time <= :upper_bound
         GROUP BY v.symbol
     """)
 
@@ -247,6 +261,7 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
     params = {
         'exchange': exchange,
         'lower_bound': unified_base - int(_interval_to_ms('168h')) + FIVE_MINUTES_MS,
+        'upper_bound': int(upper_bound) if upper_bound is not None else int(__import__('time').time() * 1000),
         **{f'sym_{i}': s for i, s in enumerate(symbol_latest)},
     }
     params.update(base_boundaries)
@@ -820,6 +835,8 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
     )
     if hasattr(model, 'exchange') and exchange is not None:
         latest_query = latest_query.filter(model.exchange == exchange)
+    if upper_bound is not None:
+        latest_query = latest_query.filter(time_field <= int(upper_bound))
     latest_query = latest_query.group_by(model.symbol)
 
     symbol_latest = {}
@@ -892,6 +909,8 @@ def _load_kline_model_map(session, model, symbols, symbol_latest=None, upper_bou
         )
         if hasattr(model, 'exchange') and exchange is not None:
             latest_query = latest_query.filter(model.exchange == exchange)
+        if upper_bound is not None:
+            latest_query = latest_query.filter(time_field <= int(upper_bound))
         latest_query = latest_query.group_by(model.symbol)
 
         symbol_latest = {}
@@ -1003,7 +1022,122 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     return oi_map, kline_map, net_inflow_map, unified_latest
 
 
-def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
+def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None):
+    """Load homepage point maps and net-flow windows directly from ClickHouse."""
+    from types import SimpleNamespace
+
+    repo = get_clickhouse_repository()
+    symbols = list(symbols or [])
+    empty = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, _empty_net_inflow_map(symbols), {})
+    if not symbols:
+        return empty
+
+    upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
+    # Include the exact 168h target point used by the MySQL repository.
+    lower = max(0, upper - _interval_to_ms('168h'))
+    oi_rows = repo.market_rows(
+        'market_open_interest_hist',
+        'symbol, event_time, sum_open_interest, sum_open_interest_value',
+        symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
+        lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
+    )
+    kline_rows = repo.market_rows(
+        'market_klines',
+        'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
+        symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
+        lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
+    )
+    taker_rows = [] if _has_unreliable_taker_source(exchange) else repo.market_rows(
+        'market_taker_buy_sell_vol',
+        'symbol, event_time, buy_vol, sell_vol',
+        symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
+        lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
+    )
+
+    oi_by_symbol = {symbol: {} for symbol in symbols}
+    latest_by_symbol = {}
+    for row in oi_rows:
+        point = _build_open_interest_point(SimpleNamespace(**row))
+        oi_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
+        latest_by_symbol[point.symbol] = max(latest_by_symbol.get(point.symbol, 0), point.event_time)
+
+    all_klines = {symbol: {} for symbol in symbols}
+    for row in kline_rows:
+        point = _build_kline_point(SimpleNamespace(**row))
+        all_klines.setdefault(point.symbol, {})[point.open_time] = point
+
+    target_times = {}
+    for symbol in symbols:
+        latest = latest_by_symbol.get(symbol)
+        target_times[symbol] = set()
+        if latest is not None:
+            target_times[symbol].add(latest)
+            target_times[symbol].update(latest - _interval_to_ms(interval) for interval in TIME_INTERVALS)
+
+    selected_oi = {
+        symbol: {timestamp: point for timestamp, point in points.items() if timestamp in target_times.get(symbol, set())}
+        for symbol, points in oi_by_symbol.items()
+    }
+    selected_kline = {
+        symbol: {timestamp: point for timestamp, point in points.items() if timestamp in target_times.get(symbol, set())}
+        for symbol, points in all_klines.items()
+    }
+
+    net_result = _empty_net_inflow_map(symbols)
+    intervals = [
+        ('5m', 1), ('15m', 3), ('30m', 6), ('1h', 12), ('4h', 48),
+        ('12h', 144), ('24h', 288), ('48h', 576), ('72h', 864), ('168h', 2016),
+    ]
+    taker_by_symbol = {symbol: [] for symbol in symbols}
+    for row in taker_rows:
+        taker_by_symbol.setdefault(row['symbol'], []).append(row)
+    latest_taker_by_symbol = {
+        symbol: max(int(row['event_time']) for row in rows)
+        for symbol, rows in taker_by_symbol.items()
+        if rows
+    }
+    unified_taker_base = next(iter(latest_taker_by_symbol.values()), None)
+    for symbol, rows in taker_by_symbol.items():
+        if not rows or unified_taker_base is None:
+            continue
+        for interval, expected in intervals:
+            base = unified_taker_base - _interval_to_ms(interval) + FIVE_MINUTES_MS
+            selected = [
+                row for row in rows
+                if base <= int(row['event_time']) <= upper
+                and all_klines.get(symbol, {}).get(int(row['event_time'])) is not None
+            ]
+            if not selected:
+                # MySQL's grouped query still reports a zero health value for
+                # an existing symbol when the window has no joined rows.
+                net_result[symbol]['health'][interval] = 0.0
+                continue
+            net = 0.0
+            net_value = 0.0
+            for row in selected:
+                delta = float(row.get('buy_vol') or 0) - float(row.get('sell_vol') or 0)
+                net += delta
+                price_point = all_klines.get(symbol, {}).get(int(row['event_time']))
+                if price_point is not None and price_point.close_price is not None:
+                    net_value += delta * float(price_point.close_price)
+            net_result[symbol]['net_inflow'][interval] = net
+            net_result[symbol]['net_inflow_value'][interval] = net_value
+            net_result[symbol]['health'][interval] = round(len(selected) * 100.0 / expected, 1)
+
+    unified_latest = {}
+    for symbol in symbols:
+        if symbol in latest_by_symbol and all_klines.get(symbol):
+            unified_latest[symbol] = min(latest_by_symbol[symbol], max(all_klines[symbol]))
+    return selected_oi, selected_kline, net_result, unified_latest
+
+
+def _aggregate_homepage_series_maps(
+    session,
+    symbols,
+    upper_bound=None,
+    exchange_maps_override=None,
+    exchange_adapters_override=None,
+):
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import time as _time
 
@@ -1024,6 +1158,14 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
     # 并行查询支持的交易所
     def load_exchange(exchange):
         """Load one exchange in a worker thread."""
+        if exchange_maps_override is not None:
+            return (
+                exchange,
+                exchange_maps_override.get(exchange),
+                (exchange_adapters_override or {}).get(exchange),
+                None,
+            )
+
         from coinx.database import get_session
         thread_session = get_session()
         adapter = None
@@ -1065,6 +1207,11 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
 
     elapsed = _time.perf_counter() - start_time
     logger.info('Homepage parallel exchange load done: exchanges=%s duration=%.2fs', len(exchanges), elapsed)
+
+    # Futures complete in arbitrary order. Keep API arrays in configured
+    # exchange order so a MySQL/ClickHouse replay compares deterministically.
+    empty_map = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, {}, {})
+    exchange_maps = {exchange: exchange_maps.get(exchange, empty_map) for exchange in exchanges}
 
     primary_exchange = PRIMARY_PRICE_EXCHANGE.lower()
 
@@ -1480,14 +1627,112 @@ def _aggregate_homepage_series_maps(session, symbols, upper_bound=None):
 
 
 def _load_homepage_series_maps(session, symbols, upper_bound=None):
+    if session is None and is_clickhouse_read():
+        # ClickHouse replay has no MySQL exchange-loading workers to naturally
+        # warm the support caches. Warm each adapter once before the symbol
+        # aggregation loop so symbol_support_state() does not perform one
+        # remote instruments/contracts request per symbol.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        supported_exchanges = set(_normalize_exchange_list(get_supported_exchange_ids()))
+        exchange_maps = {}
+        exchange_adapters = {}
+        empty_map = (
+            {symbol: {} for symbol in symbols},
+            {symbol: {} for symbol in symbols},
+            _empty_net_inflow_map(symbols),
+            {},
+        )
+        def prepare_adapter(exchange):
+            try:
+                adapter = get_exchange_adapter(exchange)
+            except Exception as exc:
+                logger.warning('ClickHouse exchange adapter unavailable: exchange=%s error=%s', exchange, exc)
+                return exchange, None
+            warm = getattr(adapter, 'warm_symbol_support_cache', None)
+            if warm is not None:
+                started = __import__('time').perf_counter()
+                try:
+                    warm()
+                    logger.info(
+                        'ClickHouse exchange support cache warmed: exchange=%s ms=%.0f',
+                        exchange,
+                        (__import__('time').perf_counter() - started) * 1000,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        'ClickHouse exchange support cache warm failed: exchange=%s error=%s',
+                        exchange,
+                        exc,
+                    )
+            return exchange, adapter
+
+        enabled_exchanges = _get_enabled_exchanges()
+        warm_exchanges = [exchange for exchange in enabled_exchanges if exchange in supported_exchanges]
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(warm_exchanges)))) as executor:
+            futures = {
+                executor.submit(prepare_adapter, exchange): exchange
+                for exchange in warm_exchanges
+            }
+            for future in as_completed(futures):
+                exchange, adapter = future.result()
+                exchange_adapters[exchange] = adapter
+
+        for exchange in enabled_exchanges:
+            if exchange not in supported_exchanges:
+                exchange_maps[exchange] = empty_map
+                exchange_adapters[exchange] = None
+                continue
+            exchange_maps[exchange] = _load_homepage_exchange_maps_clickhouse(
+                exchange, symbols, upper_bound=upper_bound
+            )
+
+        aggregate_oi_map, selected_kline_map, _, coverage_map = _aggregate_homepage_series_maps(
+            None,
+            symbols,
+            upper_bound=upper_bound,
+            exchange_maps_override=exchange_maps,
+            exchange_adapters_override=exchange_adapters,
+        )
+        funding_rate_map = _load_latest_funding_rates_compat(
+            symbols,
+            as_of_ms=upper_bound,
+        )
+        return aggregate_oi_map, selected_kline_map, coverage_map, funding_rate_map
+
     aggregate_oi_map, selected_kline_map, _, coverage_map = _aggregate_homepage_series_maps(
         session, symbols, upper_bound=upper_bound
     )
-    funding_rate_map = load_latest_funding_rates(symbols, session=session)
+    funding_rate_map = _load_latest_funding_rates_compat(
+        symbols,
+        session=session,
+        as_of_ms=upper_bound,
+    )
     return aggregate_oi_map, selected_kline_map, coverage_map, funding_rate_map
 
 
-def _build_coin_payload(symbol, oi, kline_by_time, coverage=None, funding_rate=None):
+def _load_latest_funding_rates_compat(symbols, session=None, as_of_ms=None):
+    """Call the funding-rate loader while supporting legacy test/plugin callables.
+
+    The production loader accepts ``as_of_ms`` and must receive it for deterministic
+    replay. Older injected callables may only accept ``symbols`` and ``session``;
+    only that specific signature mismatch is allowed to fall back.
+    """
+    try:
+        return load_latest_funding_rates(
+            symbols,
+            session=session,
+            as_of_ms=as_of_ms,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument 'as_of_ms'" not in str(exc):
+            raise
+        if session is None:
+            return load_latest_funding_rates(symbols)
+        return load_latest_funding_rates(symbols, session=session)
+
+
+def _build_coin_payload(symbol, oi, kline_by_time, coverage=None, funding_rate=None, now_ms=None):
     common_times = sorted(set(oi).intersection(kline_by_time))
     oi_times = sorted(oi)
     included_exchanges = list((coverage or {}).get('included_exchanges') or (coverage or {}).get('source_exchanges') or [])
@@ -1636,7 +1881,7 @@ def _build_coin_payload(symbol, oi, kline_by_time, coverage=None, funding_rate=N
         'funding_rate': funding_rate_value,
         'funding_rate_formatted': format_funding_rate(funding_rate_value),
         'next_funding_time': next_funding_time,
-        'next_funding_time_formatted': format_funding_countdown(next_funding_time),
+        'next_funding_time_formatted': format_funding_countdown(next_funding_time, now_ms),
     }
 
 
@@ -1647,7 +1892,7 @@ def _get_symbols(symbols):
 def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
     target_symbols = _get_symbols(symbols)
     own_session = session is None
-    db = session or get_session()
+    db = None if session is None and is_clickhouse_read() else (session or get_session())
 
     try:
         if not target_symbols:
@@ -1673,6 +1918,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
                 kline_by_time=recent_klines_map.get(symbol, {}),
                 coverage=coverage_map.get(symbol, {}),
                 funding_rate=funding_rate_map.get(symbol),
+                now_ms=now_ms,
             )
             if coin is None:
                 continue
@@ -1688,7 +1934,7 @@ def _build_homepage_series_snapshot(symbols=None, session=None, now_ms=None):
             'cache_update_time': update_time,
         }
     finally:
-        if own_session:
+        if own_session and db is not None:
             db.close()
 
 
@@ -1707,7 +1953,7 @@ def get_homepage_series_update_time(symbols=None, session=None, now_ms=None):
 def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     target_symbols = _get_symbols(symbols)
     own_session = session is None
-    db = session or get_session()
+    db = None if session is None and is_clickhouse_read() else (session or get_session())
 
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
@@ -1738,5 +1984,5 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
 
         return False
     finally:
-        if own_session:
+        if own_session and db is not None:
             db.close()

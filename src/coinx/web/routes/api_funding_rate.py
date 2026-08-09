@@ -2,7 +2,7 @@ import time
 
 from flask import Blueprint, jsonify, request
 
-from coinx.config import FUNDING_RATE_ABNORMAL_THRESHOLD
+from coinx.config import COLLECTION_SCHEDULER_ONLY, FUNDING_RATE_ABNORMAL_THRESHOLD
 from coinx.repositories.funding_rate import (
     collect_funding_rates,
     load_abnormal_funding_rates,
@@ -15,6 +15,7 @@ from coinx.repositories.homepage_series import (
     format_funding_rate,
 )
 from coinx.utils import logger
+from coinx.web.time_params import request_as_of_ms
 
 
 api_funding_rate_bp = Blueprint('api_funding_rate', __name__)
@@ -35,8 +36,9 @@ def get_funding_rates():
         page_size = min(max(page_size, 1), 200)
         sort_by = request.args.get('sort_by', 'funding_rate')
         sort_order = request.args.get('sort_order', 'desc')
+        as_of_ms = request_as_of_ms()
 
-        page_result = load_latest_funding_rate_page(
+        page_kwargs = dict(
             keyword=keyword,
             show_abnormal_only=show_abnormal_only,
             sort_by=sort_by,
@@ -45,6 +47,9 @@ def get_funding_rates():
             page_size=page_size,
             threshold=FUNDING_RATE_ABNORMAL_THRESHOLD,
         )
+        if as_of_ms is not None:
+            page_kwargs['as_of_ms'] = as_of_ms
+        page_result = load_latest_funding_rate_page(**page_kwargs)
 
         page_data = []
         for rate_obj in page_result['data']:
@@ -59,14 +64,17 @@ def get_funding_rates():
                 'funding_rate': funding_rate,
                 'funding_rate_formatted': format_funding_rate(funding_rate),
                 'next_funding_time': next_funding_time,
-                'next_funding_time_formatted': format_funding_countdown(next_funding_time),
+                'next_funding_time_formatted': format_funding_countdown(next_funding_time, as_of_ms),
                 'mark_price': rate_obj['mark_price'],
                 'is_abnormal': rate_obj['is_abnormal'],
                 'event_time': rate_obj['event_time'],
             })
 
         visible_symbols = [item['symbol'] for item in page_data]
-        sparkline_map = load_funding_rate_sparklines(visible_symbols, hours=24)
+        sparkline_kwargs = {'hours': 24}
+        if as_of_ms is not None:
+            sparkline_kwargs['as_of_ms'] = as_of_ms
+        sparkline_map = load_funding_rate_sparklines(visible_symbols, **sparkline_kwargs)
         for item in page_data:
             item['sparkline'] = sparkline_map.get(item['symbol'], [])
 
@@ -80,6 +88,8 @@ def get_funding_rates():
             'threshold': FUNDING_RATE_ABNORMAL_THRESHOLD,
             'stats': page_result['stats'],
         })
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载资金费率数据失败: {e}')
         logger.exception(e)
@@ -92,8 +102,12 @@ def get_abnormal_funding_rates():
     logger.info('开始加载异常资金费率数据')
     try:
         threshold = request.args.get('threshold', FUNDING_RATE_ABNORMAL_THRESHOLD, type=float)
+        as_of_ms = request_as_of_ms()
 
-        abnormal_rates = load_abnormal_funding_rates(threshold=threshold)
+        abnormal_kwargs = {'threshold': threshold}
+        if as_of_ms is not None:
+            abnormal_kwargs['as_of_ms'] = as_of_ms
+        abnormal_rates = load_abnormal_funding_rates(**abnormal_kwargs)
 
         data = []
         for rate_obj in abnormal_rates:
@@ -108,7 +122,7 @@ def get_abnormal_funding_rates():
                 'funding_rate': funding_rate,
                 'funding_rate_formatted': format_funding_rate(funding_rate),
                 'next_funding_time': next_funding_time,
-                'next_funding_time_formatted': format_funding_countdown(next_funding_time),
+                'next_funding_time_formatted': format_funding_countdown(next_funding_time, as_of_ms),
                 'mark_price': float(rate_obj['mark_price']) if rate_obj['mark_price'] is not None else None,
                 'event_time': int(rate_obj['event_time']) if rate_obj['event_time'] else None,
             })
@@ -121,6 +135,8 @@ def get_abnormal_funding_rates():
             'data': data,
             'threshold': threshold,
         })
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载异常资金费率数据失败: {e}')
         logger.exception(e)
@@ -131,6 +147,14 @@ def get_abnormal_funding_rates():
 def refresh_funding_rates():
     """手动触发资金费率采集"""
     logger.info('手动触发资金费率采集')
+    if COLLECTION_SCHEDULER_ONLY:
+        return jsonify(
+            {
+                'status': 'error',
+                'code': 'COLLECTION_SCHEDULER_ONLY',
+                'message': 'funding rate collection is disabled: collection is scheduler-only',
+            }
+        ), 409
     try:
         count = collect_funding_rates()
         return jsonify({'status': 'success', 'message': 'funding rates collected', 'count': count})
@@ -147,8 +171,12 @@ def get_funding_rate_history(symbol):
     try:
         hours = request.args.get('hours', 1, type=int)
         hours = min(max(hours, 1), 168)
+        as_of_ms = request_as_of_ms()
 
-        history = load_funding_rate_history(symbol, hours=hours)
+        history_kwargs = {'hours': hours}
+        if as_of_ms is not None:
+            history_kwargs['as_of_ms'] = as_of_ms
+        history = load_funding_rate_history(symbol, **history_kwargs)
 
         data = []
         for rate_obj in history:
@@ -172,6 +200,8 @@ def get_funding_rate_history(symbol):
             'symbol': symbol,
             'hours': hours,
         })
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         logger.error(f'加载资金费率历史失败: {symbol}, 错误: {e}')
         logger.exception(e)

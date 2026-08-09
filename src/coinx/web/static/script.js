@@ -90,7 +90,7 @@ function loadCoinsData() {
   // 在后台更新数据
   fetchJsonWithTimeout("/api/update?force=true&wait=true")
     .then((updateResult) => {
-      if (updateResult.status === "success") {
+      if (updateResult.status === "success" || updateResult.code === "COLLECTION_SCHEDULER_ONLY") {
         // 更新成功后再获取数据
         return fetchJsonWithTimeout("/api/coins?wait=true");
       } else {
@@ -212,7 +212,7 @@ function updateData() {
 
   fetchJsonWithTimeout("/api/update?force=true&wait=true")
     .then((updateResult) => {
-      if (updateResult.status === "success") {
+      if (updateResult.status === "success" || updateResult.code === "COLLECTION_SCHEDULER_ONLY") {
         // 更新成功后再获取数据
         return fetchJsonWithTimeout("/api/coins?wait=true");
       } else {

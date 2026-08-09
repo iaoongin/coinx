@@ -45,10 +45,14 @@ def test_start_runtime_services_skips_job_history_when_scheduler_disabled(monkey
     calls = []
     monkeypatch.setattr(runtime, 'SCHEDULER_ENABLED', False)
     monkeypatch.setattr(runtime, 'initialize_job_run_history', lambda: calls.append('history_initialized'))
+    monkeypatch.setattr(
+        'coinx.rss_monitor.ensure_rss_schema',
+        lambda: calls.append('rss_schema_initialized'),
+    )
 
     result = runtime.start_runtime_services()
 
-    assert calls == []
+    assert calls == ['rss_schema_initialized']
     assert result == {
         'scheduler_thread': None,
         'repair_thread': None,

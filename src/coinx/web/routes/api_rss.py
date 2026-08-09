@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 
 from flask import Blueprint, jsonify, request
+from coinx.config import COLLECTION_SCHEDULER_ONLY
 
 from coinx.database import get_session
 from coinx.models import RssArticle, RssSubscription
@@ -122,6 +123,14 @@ def delete_rss_subscription(subscription_id):
 
 @api_rss_bp.route('/api/rss/subscriptions/<int:subscription_id>/refresh', methods=['POST'])
 def refresh_rss_subscription(subscription_id):
+    if COLLECTION_SCHEDULER_ONLY:
+        return jsonify(
+            {
+                'status': 'error',
+                'code': 'COLLECTION_SCHEDULER_ONLY',
+                'message': 'RSS refresh is disabled: collection is scheduler-only',
+            }
+        ), 409
     db = get_session()
     try:
         ensure_rss_schema(db.get_bind())

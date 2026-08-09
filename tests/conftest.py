@@ -79,7 +79,25 @@ def fresh_market_structure_lock(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def allow_manual_collection_routes_in_tests(monkeypatch):
+    """Keep legacy route tests explicit while production may be scheduler-only."""
+    for module in (
+        'coinx.web.routes.api_data',
+        'coinx.web.routes.api_funding_rate',
+        'coinx.web.routes.api_config',
+        'coinx.web.routes.api_rss',
+    ):
+        monkeypatch.setattr(f'{module}.COLLECTION_SCHEDULER_ONLY', False, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def patch_get_session(monkeypatch, test_db):
     """将所有 get_session() 调用重定向到测试数据库"""
     maker = sessionmaker(bind=test_db)
     monkeypatch.setattr('coinx.database.get_session', maker)
+
+
+@pytest.fixture(autouse=True)
+def use_mysql_market_writer_for_unit_tests(monkeypatch):
+    """Keep existing ORM tests isolated from the production CK write switch."""
+    monkeypatch.setattr('coinx.config.MARKET_WRITE_BACKEND', 'mysql')

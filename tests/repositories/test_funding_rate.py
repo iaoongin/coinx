@@ -200,6 +200,24 @@ class TestLoadLatestFundingRates:
         result = load_latest_funding_rates(['NONEXISTUSDT'], session=db_session)
         assert result == {}
 
+    def test_load_latest_funding_rates_respects_as_of(self, db_session):
+        save_funding_rates([
+            {
+                'symbol': 'BTCUSDT', 'period': '5m', 'event_time': 1000,
+                'funding_rate': 0.001, 'predicted_rate': 0.002,
+                'next_funding_time': 2000, 'mark_price': 100.0, 'exchange': 'binance',
+            },
+            {
+                'symbol': 'BTCUSDT', 'period': '5m', 'event_time': 2000,
+                'funding_rate': 0.003, 'predicted_rate': 0.004,
+                'next_funding_time': 3000, 'mark_price': 101.0, 'exchange': 'binance',
+            },
+        ], session=db_session)
+
+        result = load_latest_funding_rates(['BTCUSDT'], session=db_session, as_of_ms=1500)
+        assert result['BTCUSDT']['event_time'] == 1000
+        assert result['BTCUSDT']['funding_rate'] == 0.001
+
 
 class TestLoadFundingRateHistory:
     """Test load_funding_rate_history function"""

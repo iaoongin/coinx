@@ -164,6 +164,91 @@ def _build_values_list(model, exchange, records):
     return values_list
 
 
+def _normalize_open_interest_records_clickhouse(exchange, records):
+    """Fill OI units from ClickHouse K-line prices when CK is the writer."""
+    groups = {}
+    for record in records:
+        if record.get('sum_open_interest_value') is None:
+            continue
+        symbol = record.get('symbol')
+        period = record.get('period')
+        event_time = record.get('event_time')
+        if symbol and period and event_time is not None:
+            groups.setdefault((symbol, period), []).append(int(event_time))
+    if not groups:
+        return records
+
+    from coinx.read_backend import get_clickhouse_repository
+
+    prices = {}
+    repository = get_clickhouse_repository()
+    for (symbol, period), event_times in groups.items():
+        rows = repository.market_rows(
+            'market_klines',
+            'symbol, open_time, close_price',
+            symbols=[symbol],
+            exchange=exchange,
+            period=period,
+            time_column='open_time',
+            lower_bound=min(event_times),
+            upper_bound=max(event_times),
+            order_by='symbol, open_time',
+        )
+        prices.update({
+            (symbol, period, int(row['open_time'])): float(row['close_price'])
+            for row in rows
+            if row.get('close_price') not in (None, 0)
+        })
+
+    normalized = []
+    for record in records:
+        value = record.get('sum_open_interest_value')
+        price = prices.get((record.get('symbol'), record.get('period'), record.get('event_time')))
+        if value is not None and price:
+            record = {**record, 'sum_open_interest': float(value) / price}
+        normalized.append(record)
+    return normalized
+
+
+def _clickhouse_series_rows(exchange, series_type, records):
+    model = get_series_model(series_type)
+    version = datetime.now()
+    rows = _build_values_list(model, exchange, records)
+    columns = [column.name for column in model.__table__.columns if column.name != 'id']
+    # MarketFundingRate predates the CK version column in the ORM model.  CK
+    # still needs the explicit version field for ReplacingMergeTree updates.
+    if model is MarketFundingRate and 'updated_at' not in columns:
+        columns.append('updated_at')
+    for row in rows:
+        row['created_at'] = row.get('created_at') or version
+        row['updated_at'] = version
+    return columns, rows
+
+
+def _upsert_series_records_clickhouse(exchange, series_type, records, batch_size):
+    from coinx.write_backend import get_clickhouse_write_repository, market_write_lock
+
+    if series_type == 'open_interest_hist':
+        records = _normalize_open_interest_records_clickhouse(exchange, records)
+    effective_batch_size = max(1, int(batch_size or len(records) or 1))
+    table = get_series_model(series_type).__tablename__
+    affected = 0
+    with market_write_lock(table, exchange):
+        for index in range(0, len(records), effective_batch_size):
+            columns, rows = _clickhouse_series_rows(
+                exchange,
+                series_type,
+                records[index:index + effective_batch_size],
+            )
+            affected += get_clickhouse_write_repository().insert_rows(
+                table,
+                columns,
+                rows,
+                batch_id=f'{exchange}_{series_type}_{time.time_ns()}',
+            )
+    return affected
+
+
 def _sort_values_list(series_type, values_list):
     key_fields = SERIES_KEY_FIELDS[series_type]
     return sorted(values_list, key=lambda values: tuple(values[field] for field in key_fields))
@@ -261,6 +346,10 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
     if not records:
         return 0
 
+    from coinx.write_backend import is_clickhouse_write
+    if is_clickhouse_write():
+        return _upsert_series_records_clickhouse(exchange, series_type, records, batch_size)
+
     model = get_series_model(series_type)
     own_session = session is None
     db = session or get_session()
@@ -308,6 +397,10 @@ def upsert_series_records_in_batches(exchange, series_type, records, batch_size,
 def upsert_series_records(exchange, series_type, records, session=None):
     if not records:
         return 0
+
+    from coinx.write_backend import is_clickhouse_write
+    if is_clickhouse_write():
+        return _upsert_series_records_clickhouse(exchange, series_type, records, len(records))
 
     model = get_series_model(series_type)
     key_fields = SERIES_KEY_FIELDS[series_type]
@@ -383,6 +476,30 @@ def upsert_series_records(exchange, series_type, records, session=None):
 def get_existing_series_timestamps(exchange, series_type, symbols, timestamps, period='5m', session=None):
     if not symbols or not timestamps:
         return {symbol: set() for symbol in symbols or []}
+
+    from coinx.write_backend import is_clickhouse_write
+    if is_clickhouse_write():
+        from coinx.read_backend import get_clickhouse_repository
+
+        time_column = 'open_time' if series_type == 'klines' else 'event_time'
+        rows = get_clickhouse_repository().market_rows(
+            get_series_model(series_type).__tablename__,
+            f'symbol, {time_column}',
+            symbols=symbols,
+            exchange=exchange,
+            period=period,
+            time_column=time_column,
+            lower_bound=min(timestamps),
+            upper_bound=max(timestamps),
+            order_by=f'symbol, {time_column}',
+        )
+        existing = {symbol: set() for symbol in symbols}
+        wanted = {int(timestamp) for timestamp in timestamps}
+        for row in rows:
+            value = row.get(time_column)
+            if value is not None and int(value) in wanted:
+                existing.setdefault(str(row['symbol']), set()).add(int(value))
+        return existing
 
     model = get_series_model(series_type)
     timestamp_field = 'open_time' if series_type == 'klines' else 'event_time'

@@ -34,7 +34,21 @@ def start_startup_repair():
 
 
 def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
+    from coinx.write_backend import is_clickhouse_write, market_write_health
+    if is_clickhouse_write():
+        write_health = market_write_health()
+        logger.info('ClickHouse market write preflight: %s', write_health)
+        if not write_health.get('healthy'):
+            raise RuntimeError(f"ClickHouse market write preflight failed: {write_health}")
+
     if not SCHEDULER_ENABLED:
+        # RSS is MySQL control-plane data and must be initialized even when
+        # the scheduler is intentionally disabled for a manual test run.
+        try:
+            from coinx.rss_monitor import ensure_rss_schema
+            ensure_rss_schema()
+        except Exception as exc:
+            logger.warning('RSS 数据表初始化失败，将在 RSS 任务执行时重试: %s', exc)
         logger.info('调度器已禁用（SCHEDULER_ENABLED=false），跳过自动调度与启动补采')
         return {
             'scheduler_thread': None,

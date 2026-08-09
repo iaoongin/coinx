@@ -1,3 +1,5 @@
+import os
+
 from coinx.repositories.homepage_series import (
     FIVE_MINUTES_MS,
     TIME_INTERVALS,
@@ -1038,6 +1040,39 @@ def test_get_homepage_series_data_prewarms_symbol_support_cache_before_symbol_lo
     assert len(support_calls) == 4
 
 
+def test_clickhouse_homepage_prewarms_support_cache_before_loading_maps(monkeypatch):
+    import coinx.repositories.homepage_series as homepage
+
+    monkeypatch.setattr(homepage, 'is_clickhouse_read', lambda: True)
+    monkeypatch.setattr(homepage, '_get_enabled_exchanges', lambda: ['okx'])
+    monkeypatch.setattr(homepage, 'get_supported_exchange_ids', lambda: ['okx'])
+
+    state = {'warmed': False, 'load_saw_warmed': False, 'warm_calls': 0}
+
+    class FakeAdapter:
+        def warm_symbol_support_cache(self):
+            state['warm_calls'] += 1
+            state['warmed'] = True
+
+        def symbol_support_state(self, symbol, series_type=None, session=None):
+            return {'state': 'unsupported', 'supported': False, 'known': True}
+
+    monkeypatch.setattr(homepage, 'get_exchange_adapter', lambda exchange: FakeAdapter())
+
+    def fake_load(exchange, symbols, upper_bound=None):
+        state['load_saw_warmed'] = state['warmed']
+        empty = {symbol: {} for symbol in symbols}
+        return empty, empty.copy(), homepage._empty_net_inflow_map(symbols), {}
+
+    monkeypatch.setattr(homepage, '_load_homepage_exchange_maps_clickhouse', fake_load)
+    monkeypatch.setattr(homepage, '_aggregate_homepage_series_maps', lambda *args, **kwargs: ({}, {}, {}, {}))
+    monkeypatch.setattr(homepage, 'load_latest_funding_rates', lambda symbols, **kwargs: {})
+
+    homepage._load_homepage_series_maps(None, ['BTCUSDT'], upper_bound=1_000)
+
+    assert state == {'warmed': True, 'load_saw_warmed': True, 'warm_calls': 1}
+
+
 def test_get_homepage_series_data_uses_okx_hourly_taker_for_long_intervals(db_session, monkeypatch):
     import pytest
     pytest.skip('旧的跨交易所部分透传语义已废弃')
@@ -1133,6 +1168,10 @@ def test_get_homepage_series_data_uses_available_exchange_when_okx_is_missing(db
     assert [item['exchange'] for item in coin['exchange_open_interest']] == ['binance']
 
 
+@pytest.mark.skipif(
+    os.environ.get('RUN_GATE_DIAGNOSTICS') != '1',
+    reason='network timing diagnostic; set RUN_GATE_DIAGNOSTICS=1 to run explicitly',
+)
 def test_gate_support_duration(db_session, monkeypatch):
     """
     模拟 6 symbol × 4 exchange 场景，打点定位 support 阶段 ~1.2s 的来源。

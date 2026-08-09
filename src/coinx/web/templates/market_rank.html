@@ -338,7 +338,7 @@
           });
           const result = await response.json();
 
-          if (result.status !== 'success') {
+          if (result.status !== 'success' && result.code !== 'COLLECTION_SCHEDULER_ONLY') {
             throw new Error(result.message || '行情榜刷新失败');
           }
 

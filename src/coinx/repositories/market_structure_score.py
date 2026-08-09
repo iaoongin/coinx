@@ -18,7 +18,9 @@ from coinx.config import (
     FETCH_COINS_TOP_VOLUME_COUNT,
 )
 from coinx.database import get_session
-from coinx.repositories.market_tickers import get_market_scope_symbols
+from coinx.repositories.market_tickers import get_market_scope_symbols, get_market_ticker_symbols
+from coinx.repositories.funding_rate import load_latest_funding_rates
+from coinx.read_backend import is_clickhouse_read
 from coinx.repositories.market_structure_series import load_market_structure_exchange_maps
 from coinx.utils import logger
 
@@ -91,6 +93,25 @@ def get_market_structure_score_symbols(
     top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
 ):
     tracked_symbols = get_active_coins()
+    if session is None and is_clickhouse_read():
+        ranked = []
+        ranked.extend(get_market_ticker_symbols(
+            rank_type='price_change', direction='up', limit=top_gainers_limit,
+        ))
+        ranked.extend(get_market_ticker_symbols(
+            rank_type='price_change', direction='down', limit=top_losers_limit,
+        ))
+        ranked.extend(get_market_ticker_symbols(
+            rank_type='quote_volume', direction='up', limit=top_volume_limit,
+        ))
+        seen = set()
+        result = []
+        for symbol in list(tracked_symbols or []) + ranked:
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                result.append(symbol)
+        return result
+
     own_session = session is None
     db = session or get_session()
 
@@ -328,12 +349,34 @@ def _weighted_metric_value(exchange_metrics, field_name, weight_field='weight'):
     return sum(weighted_values) / total_weight
 
 
-def _load_exchange_funding_rate_maps(exchanges, target_symbols):
+def _load_exchange_funding_rate_maps(exchanges, target_symbols, as_of_ms=None):
     funding_maps = {}
     symbol_set = set(target_symbols or [])
     normalized_exchanges = [exchange for exchange in exchanges if exchange]
 
     def _load_single_exchange(exchange):
+        # Replay/gray-read requests must use the persisted market snapshot so
+        # MySQL and ClickHouse do not race against the live exchange API.
+        if as_of_ms is not None:
+            # A replay must be deterministic across two processes.  Every
+            # exchange therefore reads its persisted funding snapshot at the
+            # requested anchor; falling back to a live exchange API would
+            # make the MySQL and ClickHouse payloads depend on request timing.
+            stored = load_latest_funding_rates(
+                target_symbols,
+                as_of_ms=as_of_ms,
+                exchange=exchange,
+            ) or {}
+            return exchange, {
+                symbol: _safe_float(
+                    payload.get('predicted_rate')
+                    if payload.get('predicted_rate') is not None
+                    else payload.get('funding_rate')
+                )
+                for symbol, payload in stored.items()
+                if symbol in symbol_set
+            }
+
         loader = EXCHANGE_FUNDING_LOADERS.get((exchange or '').strip().lower())
         if loader is None:
             return exchange, {}
@@ -392,6 +435,14 @@ def _load_exchange_funding_rate_maps(exchanges, target_symbols):
 
 
 def _load_exchange_map_for_score(exchange, symbols, upper_bound=None):
+    if is_clickhouse_read():
+        return load_market_structure_exchange_maps(
+            None,
+            exchange,
+            symbols,
+            upper_bound=upper_bound,
+        )
+
     session = get_session()
     try:
         return load_market_structure_exchange_maps(session, exchange, symbols, upper_bound=upper_bound)
@@ -818,9 +869,9 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
     own_session = session is None
     db = session
     if db is None:
-        from coinx.database import get_session as get_db_session
-
-        db = get_db_session()
+        if not is_clickhouse_read():
+            from coinx.database import get_session as get_db_session
+            db = get_db_session()
 
     try:
         current_time_ms = now_ms if now_ms is not None else __import__('time').time() * 1000
@@ -857,7 +908,9 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
         )
 
         funding_start = time.perf_counter()
-        exchange_funding_maps = _load_exchange_funding_rate_maps(exchange_maps.keys(), target_symbols)
+        exchange_funding_maps = _load_exchange_funding_rate_maps(
+            exchange_maps.keys(), target_symbols, as_of_ms=anchor_time
+        )
         funding_duration = time.perf_counter() - funding_start
         logger.info(
             '评分资金费率批量加载完成: exchanges=%d 耗时=%.2fs',
@@ -1050,5 +1103,5 @@ def get_market_structure_score_snapshot(symbols=None, session=None, now_ms=None,
             'summary': summary,
         }
     finally:
-        if own_session:
+        if own_session and db is not None:
             db.close()

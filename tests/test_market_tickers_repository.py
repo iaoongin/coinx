@@ -167,6 +167,30 @@ def test_market_scope_symbols_preserves_source_order_and_deduplicates(db_session
     assert symbols == ['TRACKEDUSDT', 'GAINERUSDT', 'LOSERUSDT', 'VOLUMEUSDT']
 
 
+def test_clickhouse_market_scope_symbols_uses_all_rankings(monkeypatch):
+    import coinx.repositories.market_tickers as repository
+
+    monkeypatch.setattr(repository, 'is_clickhouse_read', lambda: True)
+
+    def fake_symbols(rank_type, direction, limit, **_kwargs):
+        if rank_type == 'quote_volume':
+            return ['VOLUMEUSDT'][:limit]
+        if direction == 'up':
+            return ['GAINERUSDT'][:limit]
+        return ['LOSERUSDT'][:limit]
+
+    monkeypatch.setattr(repository, 'get_market_ticker_symbols', fake_symbols)
+
+    result = repository.get_market_scope_symbols(
+        tracked_symbols=['TRACKEDUSDT', 'GAINERUSDT'],
+        top_gainers_limit=10,
+        top_losers_limit=10,
+        top_volume_limit=10,
+    )
+
+    assert result == ['TRACKEDUSDT', 'GAINERUSDT', 'LOSERUSDT', 'VOLUMEUSDT']
+
+
 def test_live_market_scope_symbols_preserves_source_order_and_deduplicates():
     tickers = [
         {'symbol': 'TRACKEDUSDT', 'priceChangePercent': 10, 'quoteVolume': 10},

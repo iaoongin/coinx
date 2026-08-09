@@ -594,7 +594,7 @@
             const response = await fetch('/api/update?force=true&wait=true', { signal: controller.signal });
             const updateResult = await response.json();
 
-            if (updateResult.status !== 'success') {
+            if (updateResult.status !== 'success' && updateResult.code !== 'COLLECTION_SCHEDULER_ONLY') {
               throw new Error(updateResult.message || '首页序列刷新失败');
             }
 

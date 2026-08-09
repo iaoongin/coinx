@@ -2,6 +2,23 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker, DeclarativeBase
 from coinx import config
 
+MARKET_TABLE_NAMES = frozenset({
+    'market_klines',
+    'market_open_interest_hist',
+    'market_taker_buy_sell_vol',
+    'market_funding_rate',
+    'market_tickers',
+    'market_snapshots',
+})
+
+
+def tables_for_initialization(metadata):
+    """Return transactional tables, excluding CK-owned market tables."""
+    tables = list(metadata.sorted_tables)
+    if getattr(config, 'MARKET_WRITE_BACKEND', 'mysql') != 'clickhouse':
+        return tables
+    return [table for table in tables if table.name not in MARKET_TABLE_NAMES]
+
 # 创建数据库引擎
 engine = create_engine(
     config.DATABASE_URI, 
@@ -29,7 +46,10 @@ def init_db():
     
     from coinx import models
     
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(
+        bind=engine,
+        tables=tables_for_initialization(Base.metadata),
+    )
 
 def get_session():
     """获取一个新的会话"""

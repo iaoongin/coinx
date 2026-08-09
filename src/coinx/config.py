@@ -42,6 +42,9 @@ WEB_JWT_COOKIE_DOMAIN = get_env('WEB_JWT_COOKIE_DOMAIN')
 
 # 定时任务总开关；关闭后不启动 APScheduler 或执行启动期首页数据补采，但仍保留任务定义供管理页展示和手动执行。
 SCHEDULER_ENABLED = get_env('SCHEDULER_ENABLED', True, bool)
+# When enabled, collection endpoints are read-only and only APScheduler jobs
+# may fetch external market data or write collection results.
+COLLECTION_SCHEDULER_ONLY = get_env('COLLECTION_SCHEDULER_ONLY', True, bool)
 
 UPDATE_INTERVAL = get_env('UPDATE_INTERVAL', 300, int)
 TIME_INTERVALS = get_env(
@@ -82,6 +85,67 @@ DB_USER = get_env('DB_USER', 'root')
 DB_PASSWORD = get_env('DB_PASSWORD', '')
 DB_NAME = get_env('DB_NAME', 'coinx')
 DB_CHARSET = get_env('DB_CHARSET', 'utf8mb4')
+
+# ClickHouse read-shadow configuration. This is deliberately separate from the
+# SQLAlchemy/MySQL connection. Shadow reads are disabled unless explicitly
+# enabled and never affect the MySQL response path.
+CLICKHOUSE_URL = get_env('CLICKHOUSE_URL')
+CLICKHOUSE_DATABASE = get_env('CLICKHOUSE_DATABASE', 'coinx')
+CLICKHOUSE_USER = get_env('CLICKHOUSE_USER', 'default')
+CLICKHOUSE_PASSWORD = get_env('CLICKHOUSE_PASSWORD', '')
+CLICKHOUSE_READ_SHADOW = get_env('CLICKHOUSE_READ_SHADOW', False, bool)
+CLICKHOUSE_READ_TIMEOUT_SECONDS = get_env('CLICKHOUSE_READ_TIMEOUT_SECONDS', 120, int)
+
+
+_VALID_MARKET_BACKENDS = ('mysql', 'clickhouse')
+
+
+def _normalise_market_backend(value, variable_name):
+    value = str(value).strip().lower()
+    if value not in _VALID_MARKET_BACKENDS:
+        choices = ', '.join(repr(item) for item in _VALID_MARKET_BACKENDS)
+        raise ValueError(f"{variable_name} must be one of {choices}")
+    return value
+
+
+def resolve_market_backends(
+    market_backend=None,
+    read_backend=None,
+    market_write_backend=None,
+):
+    """Resolve the unified market backend and optional compatibility overrides.
+
+    MARKET_BACKEND is the normal production switch. The two legacy names
+    remain useful for running separate MySQL/ClickHouse instances during a
+    migration, so an explicitly supplied legacy value takes precedence over
+    the unified value for that direction only.
+    """
+    unified = _normalise_market_backend(
+        'mysql' if market_backend is None else market_backend,
+        'MARKET_BACKEND',
+    )
+    read = _normalise_market_backend(
+        unified if read_backend is None else read_backend,
+        'READ_BACKEND',
+    )
+    write = _normalise_market_backend(
+        unified if market_write_backend is None else market_write_backend,
+        'MARKET_WRITE_BACKEND',
+    )
+    return unified, read, write
+
+
+# DB_TYPE remains the control-plane database selection. Market data can use a
+# single backend switch while the legacy read/write variables remain explicit
+# per-direction overrides for dual-instance verification and rollback.
+MARKET_BACKEND, READ_BACKEND, MARKET_WRITE_BACKEND = resolve_market_backends(
+    os.getenv('MARKET_BACKEND'),
+    os.getenv('READ_BACKEND'),
+    os.getenv('MARKET_WRITE_BACKEND'),
+)
+CLICKHOUSE_WRITE_TIMEOUT_SECONDS = get_env('CLICKHOUSE_WRITE_TIMEOUT_SECONDS', 120, int)
+CLICKHOUSE_WRITE_RETRIES = get_env('CLICKHOUSE_WRITE_RETRIES', 3, int)
+CLICKHOUSE_WRITE_BATCH_SIZE = get_env('CLICKHOUSE_WRITE_BATCH_SIZE', 500, int)
 
 if DB_TYPE == 'starrocks':
     SR_HOST = get_env('SR_HOST', DB_HOST)

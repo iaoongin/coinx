@@ -339,3 +339,32 @@ def test_load_exchange_funding_rate_maps_supports_gate(monkeypatch):
     assert result == {
         'gate': {'BTCUSDT': 0.0006},
     }
+
+
+def test_replay_uses_persisted_funding_for_every_exchange(monkeypatch):
+    persisted_calls = []
+
+    def persisted(symbols, as_of_ms=None, exchange='binance'):
+        persisted_calls.append((tuple(symbols), as_of_ms, exchange))
+        return {
+            'BTCUSDT': {
+                'predicted_rate': None,
+                'funding_rate': '0.0007',
+            }
+        }
+
+    monkeypatch.setattr(
+        'coinx.repositories.market_structure_score.load_latest_funding_rates',
+        persisted,
+    )
+    monkeypatch.setattr(
+        'coinx.repositories.market_structure_score.EXCHANGE_FUNDING_LOADERS',
+        {'bybit': lambda: (_ for _ in ()).throw(AssertionError('live loader used during replay'))},
+    )
+
+    result = _load_exchange_funding_rate_maps(
+        ['bybit'], ['BTCUSDT'], as_of_ms=1711526400000,
+    )
+
+    assert result == {'bybit': {'BTCUSDT': 0.0007}}
+    assert persisted_calls == [(('BTCUSDT',), 1711526400000, 'bybit')]

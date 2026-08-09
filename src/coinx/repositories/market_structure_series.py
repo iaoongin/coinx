@@ -13,6 +13,7 @@ from coinx.models import (
     MarketOpenInterestHist,
     MarketTakerBuySellVol,
 )
+from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.utils import logger
 
 
@@ -96,6 +97,91 @@ def _build_taker_buy_sell_vol_point(row):
 
 def _get_enabled_exchanges():
     return _normalize_exchange_list(ENABLED_EXCHANGES)
+
+
+def _load_market_structure_exchange_maps_clickhouse(
+    exchange,
+    symbols,
+    upper_bound=None,
+    kline_lookback_ms=None,
+    include_quote_volume_24h=True,
+):
+    """Load the same point maps as the ORM path directly from ClickHouse."""
+    from types import SimpleNamespace
+
+    repo = get_clickhouse_repository()
+    symbols = list(symbols or [])
+    if not symbols:
+        return ({}, {}, {}, {})
+
+    try:
+        adapter = get_exchange_adapter(exchange)
+        taker_periods = sorted(
+            {
+                adapter.taker_period_for_interval(interval)
+                for interval in TIME_INTERVALS
+                if adapter.taker_period_for_interval(interval)
+            }
+        )
+    except Exception:
+        taker_periods = ['5m']
+
+    upper = int(upper_bound) if upper_bound is not None else None
+    oi_lower = max(0, upper - _MARKET_STRUCTURE_CONTEXT_LOOKBACK_MS) if upper is not None else None
+    kline_lower = max(0, upper - int(kline_lookback_ms or _MARKET_STRUCTURE_KLINE_LOOKBACK_MS)) if upper is not None else None
+    taker_lower = oi_lower
+    quote_lower = max(0, upper - _MARKET_STRUCTURE_VOLUME_24H_LOOKBACK_MS) if upper is not None else None
+
+    oi_rows = repo.market_rows(
+        'market_open_interest_hist',
+        'symbol, event_time, sum_open_interest, sum_open_interest_value',
+        symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
+        lower_bound=oi_lower, upper_bound=upper, order_by='symbol, event_time',
+    )
+    kline_rows = repo.market_rows(
+        'market_klines',
+        'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
+        symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
+        lower_bound=kline_lower, upper_bound=upper, order_by='symbol, open_time',
+    )
+    taker_rows_by_period = {}
+    for period in taker_periods:
+        taker_rows_by_period[period] = repo.market_rows(
+            'market_taker_buy_sell_vol',
+            'symbol, event_time, buy_sell_ratio, buy_vol, sell_vol',
+            symbols=symbols, exchange=exchange, period=period, time_column='event_time',
+            lower_bound=taker_lower, upper_bound=upper, order_by='symbol, event_time',
+        )
+
+    oi_map = {symbol: {} for symbol in symbols}
+    for row in oi_rows:
+        point = _build_open_interest_point(SimpleNamespace(**row))
+        oi_map.setdefault(point.symbol, {})[point.event_time] = point
+
+    kline_map = {symbol: {} for symbol in symbols}
+    for row in kline_rows:
+        point = _build_kline_point(SimpleNamespace(**row))
+        kline_map.setdefault(point.symbol, {})[point.open_time] = point
+
+    taker_maps = {}
+    for period, rows in taker_rows_by_period.items():
+        period_map = {symbol: {} for symbol in symbols}
+        for row in rows:
+            point = _build_taker_buy_sell_vol_point(SimpleNamespace(**row))
+            period_map.setdefault(point.symbol, {})[point.event_time] = point
+        taker_maps[period] = period_map
+
+    quote_volume_24h_map = {symbol: 0.0 for symbol in symbols}
+    if include_quote_volume_24h:
+        for row in repo.market_rows(
+            'market_klines', 'symbol, open_time, quote_volume', symbols=symbols,
+            exchange=exchange, period='5m', time_column='open_time',
+            lower_bound=quote_lower, upper_bound=upper, order_by='symbol, open_time',
+        ):
+            if row.get('quote_volume') is not None:
+                quote_volume_24h_map[row['symbol']] = quote_volume_24h_map.get(row['symbol'], 0.0) + float(row['quote_volume'])
+
+    return oi_map, kline_map, taker_maps, quote_volume_24h_map
 
 
 def _get_recent_lower_bound(
@@ -323,6 +409,50 @@ def load_market_structure_aggregated_kline_maps(
     lookback_points=72,
 ):
     """Return strict UTC-aligned 5m aggregations without transferring raw history."""
+    if session is None and is_clickhouse_read():
+        repo = get_clickhouse_repository()
+        result = {name: {symbol: {} for symbol in symbols} for name in (intervals or {})}
+        if not symbols or not intervals:
+            return result
+        upper = int(upper_bound) if upper_bound is not None else None
+        for name, interval_ms in intervals.items():
+            interval_ms = int(interval_ms)
+            lower = None
+            if upper is not None:
+                lower = max(0, upper - (int(lookback_points) + 1) * interval_ms)
+            rows = repo.market_rows(
+                'market_klines',
+                'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
+                symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
+                lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
+            )
+            by_symbol = {symbol: {} for symbol in symbols}
+            for row in rows:
+                point = _build_kline_point(type('Row', (), row)())
+                by_symbol.setdefault(point.symbol, {})[point.open_time] = point
+            expected_points = interval_ms // FIVE_MINUTES_MS
+            for symbol, points in by_symbol.items():
+                buckets = {}
+                for timestamp in points:
+                    buckets.setdefault(timestamp - (timestamp % interval_ms), []).append(timestamp)
+                for bucket, timestamps in buckets.items():
+                    expected = [bucket + index * FIVE_MINUTES_MS for index in range(expected_points)]
+                    if any(timestamp not in points for timestamp in expected):
+                        continue
+                    selected = [points[timestamp] for timestamp in expected]
+                    if any(point.high_price is None or point.low_price is None or point.close_price is None for point in selected):
+                        continue
+                    result[name][symbol][bucket] = MarketStructureKlinePoint(
+                        symbol=symbol,
+                        open_time=bucket,
+                        high_price=max(point.high_price for point in selected),
+                        low_price=min(point.low_price for point in selected),
+                        close_price=selected[-1].close_price,
+                        quote_volume=sum(point.quote_volume or 0.0 for point in selected),
+                        taker_buy_quote_volume=None,
+                    )
+        return result
+
     intervals = intervals or {}
     records_by_interval = {name: {symbol: {} for symbol in symbols} for name in intervals}
     if not symbols or not intervals:
@@ -501,6 +631,15 @@ def load_market_structure_exchange_maps(
     kline_lookback_ms=None,
     include_quote_volume_24h=True,
 ):
+    if session is None and is_clickhouse_read():
+        return _load_market_structure_exchange_maps_clickhouse(
+            exchange=exchange,
+            symbols=symbols,
+            upper_bound=upper_bound,
+            kline_lookback_ms=kline_lookback_ms,
+            include_quote_volume_24h=include_quote_volume_24h,
+        )
+
     exchange = exchange.lower()
     try:
         adapter = get_exchange_adapter(exchange)

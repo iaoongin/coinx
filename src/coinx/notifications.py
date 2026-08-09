@@ -27,6 +27,7 @@ from coinx.models import (
 )
 from coinx.repositories.funding_rate import load_latest_funding_rates
 from coinx.repositories.trade_opportunities import get_trade_opportunity_snapshot
+from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.utils import logger
 
 
@@ -930,6 +931,10 @@ def _load_price_volume_metrics(db, scope_limit):
     The 26-hour range bounds each 5-minute series to roughly 312 rows before
     the window function keeps the latest 289 observations.
     """
+    dialect = getattr(getattr(db, 'get_bind', lambda: None)(), 'dialect', None)
+    if is_clickhouse_read() and getattr(dialect, 'name', '') != 'sqlite':
+        return get_clickhouse_repository().price_volume_metrics(scope_limit=scope_limit)
+
     query_hint = (
         f'/*+ MAX_EXECUTION_TIME({EVALUATION_QUERY_TIMEOUT_MS}) */ '
         if db.get_bind().dialect.name == 'mysql' else ''
@@ -954,6 +959,7 @@ def _load_price_volume_metrics(db, scope_limit):
           WHERE k.exchange = 'binance'
             AND k.period = '5m'
             AND k.open_time >= s.snapshot_time - :lookback_ms
+            AND k.open_time <= s.snapshot_time
         ), metrics AS (
           SELECT
             symbol,
@@ -1015,7 +1021,9 @@ def evaluate_funding_rate_rules(session=None, rule_id=None):
                 'metrics': _evaluation_metrics(started_at, stages, symbols=0),
             }
         stage_started = time.perf_counter()
-        rates = load_latest_funding_rates(session=db)
+        dialect = getattr(getattr(db, 'get_bind', lambda: None)(), 'dialect', None)
+        market_session = db if getattr(dialect, 'name', '') == 'sqlite' or not is_clickhouse_read() else None
+        rates = load_latest_funding_rates(session=market_session)
         stages['rate_load_ms'] += (time.perf_counter() - stage_started) * 1000
         sent = checked = matched_count = 0
         for rule in rules:

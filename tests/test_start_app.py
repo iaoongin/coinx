@@ -44,3 +44,31 @@ def test_listener_lookup_only_returns_recognized_coinx_process(monkeypatch):
     monkeypatch.setattr(module.psutil, 'Process', lambda pid: processes[pid])
 
     assert manager._find_app_listener_processes() == [101]
+
+
+def test_named_instances_use_isolated_pid_and_log_paths(monkeypatch):
+    module = _load_start_app_module()
+    monkeypatch.delenv("INSTANCE_NAME", raising=False)
+
+    mysql = module.FlaskAppManager("mysql")
+    clickhouse = module.FlaskAppManager("clickhouse")
+
+    assert mysql.instance_name == "mysql"
+    assert clickhouse.instance_name == "clickhouse"
+    assert mysql.pid_file.name == "app-mysql.pid"
+    assert clickhouse.pid_file.name == "app-clickhouse.pid"
+    assert mysql.log_file.name == "app-mysql.log"
+    assert clickhouse.log_file.name == "app-clickhouse.log"
+    assert mysql.pid_file != clickhouse.pid_file
+    assert mysql._find_app_processes() == []
+
+
+def test_instance_name_rejects_path_traversal():
+    module = _load_start_app_module()
+
+    try:
+        module.FlaskAppManager("../outside")
+    except ValueError as exc:
+        assert "INSTANCE_NAME" in str(exc)
+    else:
+        raise AssertionError("unsafe instance name was accepted")

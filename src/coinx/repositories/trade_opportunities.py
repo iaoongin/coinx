@@ -489,6 +489,10 @@ def _build_trade_opportunity_snapshot(symbols, exchanges, anchor):
         }
         for future in as_completed(futures):
             maps[futures[future]] = future.result()
+        # Worker completion order is nondeterministic. Preserve the configured
+        # exchange order in the response so replay comparisons and clients do
+        # not observe array elements moving between requests.
+        maps = {exchange: maps[exchange] for exchange in exchanges if exchange in maps}
         aggregate_futures = {
             executor.submit(
                 load_market_structure_aggregated_kline_maps,
@@ -504,7 +508,7 @@ def _build_trade_opportunity_snapshot(symbols, exchanges, anchor):
         aggregated_kline_maps = {}
         for future in as_completed(aggregate_futures):
             aggregated_kline_maps[aggregate_futures[future]] = future.result()
-    funding_maps = _load_exchange_funding_rate_maps(maps.keys(), symbols)
+    funding_maps = _load_exchange_funding_rate_maps(maps.keys(), symbols, as_of_ms=anchor)
     data = []
     for symbol in symbols:
         metrics = []

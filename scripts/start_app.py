@@ -4,6 +4,7 @@
 Flask应用启停脚本
 """
 import os
+import re
 import sys
 import time
 import psutil
@@ -21,11 +22,30 @@ from coinx.utils import logger
 
 
 class FlaskAppManager:
-    def __init__(self):
+    def __init__(self, instance_name=None):
+        configured_name = instance_name or os.environ.get("INSTANCE_NAME") or "default"
+        self.instance_name = self._normalize_instance_name(configured_name)
         self.app_path = project_root / "src" / "coinx" / "main.py"  # 改为使用main.py启动应用
-        self.pid_file = project_root / "data" / "app.pid"
-        self.log_file = project_root / "logs" / "app_service.log"
-        self.error_log_file = project_root / "logs" / "app_service_error.log"
+        if self.instance_name == "default":
+            # Keep historical paths for existing single-instance commands.
+            self.pid_file = project_root / "data" / "app.pid"
+            self.log_file = project_root / "logs" / "app_service.log"
+            self.error_log_file = project_root / "logs" / "app_service_error.log"
+        else:
+            self.pid_file = project_root / "data" / f"app-{self.instance_name}.pid"
+            self.log_file = project_root / "logs" / f"app-{self.instance_name}.log"
+            self.error_log_file = project_root / "logs" / f"app-{self.instance_name}.error.log"
+
+    @staticmethod
+    def _normalize_instance_name(value):
+        value = str(value or "default").strip().lower()
+        if not value:
+            return "default"
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", value):
+            raise ValueError(
+                "INSTANCE_NAME must contain only lowercase letters, digits, '.', '_' or '-'"
+            )
+        return value
 
     def _is_python_process(self, proc):
         try:
@@ -72,6 +92,12 @@ class FlaskAppManager:
         return False
 
     def _find_app_processes(self):
+        # For named instances, the PID file and listening port are the
+        # ownership boundary. Matching arbitrary CoinX processes could stop
+        # the other read backend because process environments are not
+        # reliably available on every platform.
+        if self.instance_name != "default":
+            return []
         current_pid = os.getpid()
         found = []
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
@@ -207,6 +233,11 @@ class FlaskAppManager:
             
             # 设置环境变量，添加src到PYTHONPATH
             env = os.environ.copy()
+            env["INSTANCE_NAME"] = self.instance_name
+            if self.instance_name == "default":
+                env.setdefault("APP_LOG_FILE", str(project_root / "logs" / "app.log"))
+            else:
+                env["APP_LOG_FILE"] = str(project_root / "logs" / f"app-{self.instance_name}.internal.log")
             src_path = str(project_root / "src")
             if "PYTHONPATH" in env:
                 env["PYTHONPATH"] = src_path + os.pathsep + env["PYTHONPATH"]
@@ -377,11 +408,35 @@ class FlaskAppManager:
 
 def main():
     if len(sys.argv) < 2:
-        logger.info("用法: python start_app.py [start|stop|restart|status]")
+        logger.info("用法: python start_app.py [--instance NAME] [start|stop|restart|status|run]")
         return
 
-    manager = FlaskAppManager()
-    action = sys.argv[1].lower()
+    args = list(sys.argv[1:])
+    instance_name = os.environ.get("INSTANCE_NAME")
+    if "--instance" in args:
+        index = args.index("--instance")
+        if index + 1 >= len(args):
+            logger.info("--instance 需要实例名")
+            return
+        instance_name = args[index + 1]
+        del args[index:index + 2]
+    else:
+        for index, value in enumerate(args):
+            if value.startswith("--instance="):
+                instance_name = value.split("=", 1)[1]
+                del args[index]
+                break
+
+    if not args:
+        logger.info("用法: python start_app.py [--instance NAME] [start|stop|restart|status|run]")
+        return
+
+    try:
+        manager = FlaskAppManager(instance_name)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return
+    action = args[0].lower()
 
     if action == "run":
         manager.start(daemon=False)

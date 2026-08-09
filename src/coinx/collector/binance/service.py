@@ -193,6 +193,9 @@ def update_all_data(symbols=None, force_update=False):
         except Exception as e:
             logger.error(f"保存所有币种数据失败: {e}")
             logger.exception(e)
+            from coinx.write_backend import is_clickhouse_write
+            if is_clickhouse_write():
+                raise
     else:
         logger.warning("没有币种数据需要保存")
     
@@ -258,6 +261,11 @@ def update_market_tickers(force_update=False):
     except Exception as e:
         logger.error(f"采集行情快照数据失败: {e}")
         logger.exception(e)
+        from coinx.write_backend import is_clickhouse_write
+        if is_clickhouse_write():
+            # A CK INSERT failure must reach the scheduler as a failed batch;
+            # returning an empty result would look like a successful no-op.
+            raise
         return []
 
 

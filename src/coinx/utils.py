@@ -3,6 +3,7 @@ import os
 import json
 import uuid
 import logging
+import tempfile
 from datetime import datetime
 from sqlalchemy import desc, func
 
@@ -20,7 +21,9 @@ def setup_logger():
     # 确保日志目录存在
     os.makedirs(LOGS_DIR, exist_ok=True)
     
-    log_file = os.path.join(LOGS_DIR, 'app.log')
+    log_file = os.getenv('APP_LOG_FILE') or os.path.join(LOGS_DIR, 'app.log')
+    log_file = os.path.abspath(log_file)
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     
     # 获取根日志记录器
     root_logger = logging.getLogger()
@@ -34,14 +37,28 @@ def setup_logger():
     
     formatter = logging.Formatter('%(asctime)s %(levelname)-8s [%(filename)15s:%(lineno)4d] - %(message)s')
     
-    # 文件处理器（轮转日志）
+    # 文件处理器（轮转日志）。开发机上旧进程可能锁住默认日志文件；
+    # 日志不可用不应阻断 API 进程启动，因此回退到用户临时目录。
     from logging.handlers import RotatingFileHandler
-    file_handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5,
-        encoding='utf-8'
-    )
+    try:
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+    except (PermissionError, OSError) as exc:
+        fallback_file = os.path.join(tempfile.gettempdir(), f'coinx-{os.getpid()}.log')
+        file_handler = RotatingFileHandler(
+            fallback_file,
+            maxBytes=10*1024*1024,
+            backupCount=5,
+            encoding='utf-8'
+        )
+        log_file = fallback_file
+        logging.getLogger(__name__).warning(
+            '日志文件不可写，已回退到临时文件 %s: %s', fallback_file, exc
+        )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     
@@ -72,6 +89,56 @@ def setup_logger():
 logger = setup_logger()
 
 def save_all_coins_data(data):
+    from coinx.write_backend import (
+        get_clickhouse_write_repository,
+        is_clickhouse_write,
+        market_write_lock,
+    )
+    if is_clickhouse_write():
+        if not data:
+            return 0
+        batch_id = str(uuid.uuid4())
+        snapshot_time = int(datetime.now().timestamp() * 1000)
+        version = datetime.now()
+        rows = []
+        for coin_data in data:
+            symbol = coin_data.get('symbol')
+            if not symbol:
+                continue
+            current = coin_data.get('current', {})
+            price = current.get('price')
+            open_interest = current.get('openInterest')
+            open_interest_value = current.get('openInterestValue')
+            if price is None and open_interest and open_interest_value:
+                try:
+                    price = float(open_interest_value) / float(open_interest)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+            rows.append({
+                'snapshot_time': snapshot_time,
+                'symbol': symbol,
+                'batch_id': batch_id,
+                'price': price,
+                'open_interest': open_interest,
+                'open_interest_value': open_interest_value,
+                'data_json': json.dumps(coin_data, ensure_ascii=False, separators=(',', ':')),
+                'created_at': version,
+            })
+        if not rows:
+            return 0
+        with market_write_lock('market_snapshots', batch_id):
+            saved = get_clickhouse_write_repository().insert_rows(
+                'market_snapshots',
+                [
+                    'snapshot_time', 'symbol', 'batch_id', 'price',
+                    'open_interest', 'open_interest_value', 'data_json', 'created_at',
+                ],
+                rows,
+                batch_id=f'snapshots_{batch_id}',
+            )
+        cleanup_old_data()
+        logger.info('所有币种数据已保存到 ClickHouse，批次: %s，共 %d 条记录', batch_id, saved)
+        return saved
     """保存所有币种数据到数据库"""
     try:
         if not data:
@@ -130,6 +197,28 @@ def save_all_coins_data(data):
         logger.exception(e)
 
 def cleanup_old_data(keep_batches=20):
+    from coinx.write_backend import get_clickhouse_write_repository, is_clickhouse_write
+    if is_clickhouse_write():
+        try:
+            from coinx.read_backend import get_clickhouse_repository
+
+            table = get_clickhouse_repository()._table('market_snapshots').replace(' FINAL', '')
+            rows = get_clickhouse_repository().client.query_rows(
+                f'SELECT snapshot_time FROM {table} FINAL '
+                f'GROUP BY snapshot_time ORDER BY snapshot_time DESC LIMIT {max(1, int(keep_batches))}'
+            )
+            if len(rows) >= keep_batches:
+                min_time = int(rows[-1]['snapshot_time'])
+                get_clickhouse_write_repository().client.execute(
+                    f'ALTER TABLE {table} DELETE WHERE snapshot_time < {min_time}'
+                )
+            return 0
+        except Exception:
+            logger.exception('ClickHouse market snapshot cleanup failed')
+            # Cleanup is part of the CK snapshot write contract.  Surface the
+            # failure so the scheduler records this batch as failed instead
+            # of silently reporting a successful write with unbounded data.
+            raise
     """清理旧数据，只保留最近的N个批次"""
     try:
         # 查询最近的N个批次的时间戳
@@ -167,6 +256,30 @@ def cleanup_old_data(keep_batches=20):
         logger.warning(f"清理旧数据失败: {e}")
 
 def load_all_coins_data():
+    from coinx.write_backend import is_clickhouse_write
+    if is_clickhouse_write():
+        try:
+            from coinx.read_backend import get_clickhouse_repository
+
+            table = get_clickhouse_repository()._table('market_snapshots')
+            rows = get_clickhouse_repository().client.query_rows(
+                f'SELECT symbol, snapshot_time, data_json FROM {table} FINAL '
+                'ORDER BY symbol ASC, snapshot_time DESC'
+            )
+            result = []
+            seen = set()
+            for row in rows:
+                symbol = row.get('symbol')
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                payload = row.get('data_json')
+                if payload:
+                    result.append(json.loads(payload) if isinstance(payload, str) else payload)
+            return result
+        except Exception:
+            logger.exception('从 ClickHouse 加载所有币种数据失败')
+            return []
     """从数据库加载每个币种的最新数据"""
     try:
         # 使用子查询找到每个symbol最新的snapshot_time
@@ -214,6 +327,19 @@ def calculate_change_ratio(current, past):
     return round(ratio, 2)
 
 def get_cache_update_time():
+    from coinx.write_backend import is_clickhouse_write
+    if is_clickhouse_write():
+        try:
+            from coinx.read_backend import get_clickhouse_repository
+
+            table = get_clickhouse_repository()._table('market_snapshots')
+            value = get_clickhouse_repository().client.query_scalar(
+                f'SELECT max(snapshot_time) FROM {table} FINAL'
+            )
+            return int(value) if value is not None else None
+        except Exception:
+            logger.exception('从 ClickHouse 获取快照更新时间失败')
+            return None
     """获取缓存更新时间"""
     try:
         # 尝试从数据库获取最新更新时间

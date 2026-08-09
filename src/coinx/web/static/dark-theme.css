@@ -301,6 +301,65 @@ body::after {
   border-bottom-color: var(--gold-primary);
 }
 
+.as-of-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.as-of-label,
+.as-of-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.as-of-status.is-active {
+  color: var(--gold-primary);
+  font-family: var(--font-mono);
+}
+
+.as-of-input {
+  width: 166px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: 11px var(--font-mono);
+}
+
+.as-of-input:focus {
+  outline: none;
+  border-color: var(--gold-primary);
+}
+
+.as-of-button {
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.as-of-button:hover,
+.as-of-button-primary {
+  color: var(--gold-primary);
+  border-color: rgba(212, 175, 55, .55);
+}
+
 /* ==================== 标题 ==================== */
 h1 {
   font-size: 24px;
@@ -967,6 +1026,18 @@ textarea:focus {
     gap: 8px;
     padding: 0 12px;
     overflow: visible;
+    flex-wrap: wrap;
+  }
+
+  .as-of-control {
+    order: 3;
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .as-of-input {
+    flex: 0 0 166px;
   }
 
   .nav {

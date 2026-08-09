@@ -2,6 +2,7 @@ from coinx.repositories.funding_rate import load_latest_funding_rates
 from coinx.repositories.homepage_series import get_homepage_series_snapshot
 from coinx.repositories.market_structure_score import get_market_structure_score_snapshot
 from coinx.database import get_session
+from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.models import MarketFundingRate, MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.utils import logger
 
@@ -17,12 +18,14 @@ def _first_symbol(snapshot, symbol):
     return None
 
 
-def _load_optional(loader, symbols, label):
-    try:
+def _call_with_as_of(loader, symbols, now_ms):
+    """Call a repository loader with the replay anchor when supported."""
+    if now_ms is None:
         return loader(symbols)
-    except Exception as exc:
-        logger.warning('加载合约详情%s失败: symbols=%s error=%s', label, symbols, exc)
-        return None
+    try:
+        return loader(symbols, as_of_ms=now_ms)
+    except TypeError:
+        return loader(symbols)
 
 
 def _difference(current, previous):
@@ -79,15 +82,19 @@ def get_contract_detail(
     symbol,
     homepage_loader=get_homepage_series_snapshot,
     funding_loader=load_latest_funding_rates,
+    now_ms=None,
 ):
     """Build a contract detail view from stored snapshots only."""
     normalized_symbol = symbol.upper()
-    homepage_snapshot = homepage_loader([normalized_symbol])
+    try:
+        homepage_snapshot = homepage_loader([normalized_symbol], now_ms=now_ms)
+    except TypeError:
+        homepage_snapshot = homepage_loader([normalized_symbol])
     homepage = _first_symbol(homepage_snapshot, normalized_symbol)
     if homepage is None:
         return None
 
-    funding_map = _load_optional(funding_loader, [normalized_symbol], '资金费率') or {}
+    funding_map = _call_with_as_of(funding_loader, [normalized_symbol], now_ms) or {}
     funding = funding_map.get(normalized_symbol) or {}
 
     funding_rate = funding.get('funding_rate', homepage.get('funding_rate'))
@@ -124,9 +131,12 @@ def get_contract_detail(
     }
 
 
-def get_contract_structure_score(symbol, score_loader=get_market_structure_score_snapshot):
+def get_contract_structure_score(symbol, score_loader=get_market_structure_score_snapshot, now_ms=None):
     normalized_symbol = symbol.upper()
-    snapshot = score_loader([normalized_symbol])
+    try:
+        snapshot = score_loader([normalized_symbol], now_ms=now_ms)
+    except TypeError:
+        snapshot = score_loader([normalized_symbol])
     return {
         'symbol': normalized_symbol,
         'as_of': (snapshot or {}).get('cache_update_time'),
@@ -138,21 +148,40 @@ def _float(value):
     return float(value) if value is not None else None
 
 
-def load_contract_chart_series(symbol, range_key='24h', session=None, max_points=300):
+def load_contract_chart_series(symbol, range_key='24h', session=None, max_points=300, as_of_ms=None):
     """Load stored 5m series and aggregate exchanges on one timeline."""
+    if session is None and is_clickhouse_read():
+        hours = RANGE_HOURS[range_key]
+        return get_clickhouse_repository().contract_chart_series(
+            symbol=symbol,
+            hours=hours,
+            period='5m',
+            as_of_ms=as_of_ms,
+            max_points=max_points,
+        )
+
     hours = RANGE_HOURS[range_key]
     own_session = session is None
     db = session or get_session()
     try:
-        latest_times = [
-            db.query(model_time).filter(model_symbol == symbol, model_period == '5m').order_by(model_time.desc()).limit(1).scalar()
-            for model_time, model_symbol, model_period in (
-                (MarketKline.open_time, MarketKline.symbol, MarketKline.period),
-                (MarketOpenInterestHist.event_time, MarketOpenInterestHist.symbol, MarketOpenInterestHist.period),
-                (MarketTakerBuySellVol.event_time, MarketTakerBuySellVol.symbol, MarketTakerBuySellVol.period),
+        latest_times = []
+        for model_time, model_symbol, model_period in (
+            (MarketKline.open_time, MarketKline.symbol, MarketKline.period),
+            (MarketOpenInterestHist.event_time, MarketOpenInterestHist.symbol, MarketOpenInterestHist.period),
+            (MarketTakerBuySellVol.event_time, MarketTakerBuySellVol.symbol, MarketTakerBuySellVol.period),
+        ):
+            query = db.query(model_time).filter(
+                model_symbol == symbol,
+                model_period == '5m',
             )
+            if as_of_ms is not None:
+                query = query.filter(model_time <= int(as_of_ms))
+            latest_times.append(query.order_by(model_time.desc()).limit(1).scalar())
+        available_latest_times = [
+            int(value) for value in latest_times
+            if value is not None and (as_of_ms is None or int(value) <= int(as_of_ms))
         ]
-        anchor = max((value for value in latest_times if value is not None), default=None)
+        anchor = max(available_latest_times, default=None)
         if anchor is None:
             return {'range': range_key, 'anchor_time': None, 'market': [], 'flow': [], 'funding_rate': []}
         cutoff = anchor - hours * 60 * 60 * 1000

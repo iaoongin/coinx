@@ -125,6 +125,7 @@ MySQL 数据保存在 Docker 命名卷 `mysql_data` 中。普通停止、重建�
 
 | 变量名 | 说明 | 默认值 |
 | --- | --- | --- |
+| `COLLECTION_SCHEDULER_ONLY` | When `true`, page requests and manual collection endpoints are read-only; only scheduled jobs may fetch external data and write collection results. | `true` |
 | `COINX_ENV` | 选择环境配置文件，例如 `dev` 会加载 `application-dev.yml` | `application.yml` 中的 `profiles.active`，默认是 `dev` |
 | `BINANCE_BASE_URL` | Binance API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/fapi.binance.com` |
 | `OKX_BASE_URL` | OKX API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/www.okx.com` |
@@ -283,6 +284,14 @@ coinx/
 ```
 
 ## Data Files
+
+### ClickHouse 行情写入迁移
+
+生产统一使用 MARKET_BACKEND=clickhouse 控制行情读写；DB_TYPE 仍保持
+mysql，用于控制面、任务记录和告警状态。READ_BACKEND 与
+MARKET_WRITE_BACKEND 仅作为双实例灰度、故障回滚时的单方向兼容覆盖。
+
+六张行情表的 ClickHouse 读写切换、`_v2` 原子换表、断点导入和紧急回滚步骤见 [`docs/clickhouse-market-write-migration.md`](docs/clickhouse-market-write-migration.md)。`DB_TYPE` 保持 `mysql`，控制面和告警状态不会迁移到 ClickHouse。
 
 `data/` 目录下常见文件：
 

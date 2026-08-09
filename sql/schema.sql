@@ -226,6 +226,45 @@ CREATE TABLE IF NOT EXISTS alert_evaluation_metrics (
     KEY idx_alert_evaluation_metrics_run (run_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警评估耗时指标';
 
+-- RSS订阅源配置与文章记录，属于MySQL控制面数据，不迁移到ClickHouse。
+CREATE TABLE IF NOT EXISTS rss_subscriptions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    name VARCHAR(160) NOT NULL COMMENT '订阅源名称',
+    url VARCHAR(500) NOT NULL COMMENT 'RSS订阅地址',
+    site_url VARCHAR(1000) COMMENT '站点地址',
+    feed_title VARCHAR(255) COMMENT '订阅源标题',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT '是否启用订阅源',
+    monitor_enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT '是否启用文章监控',
+    notification_channel_ids JSON COMMENT '关联的通知渠道ID列表',
+    last_checked_at BIGINT COMMENT '最近检查时间戳（毫秒）',
+    last_success_at BIGINT COMMENT '最近成功抓取时间戳（毫秒）',
+    last_error VARCHAR(500) COMMENT '最近一次错误信息',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_rss_subscriptions_url (url),
+    KEY idx_rss_subscriptions_enabled (enabled),
+    KEY idx_rss_subscriptions_monitor_enabled (monitor_enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RSS订阅源配置';
+
+CREATE TABLE IF NOT EXISTS rss_articles (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    subscription_id BIGINT NOT NULL COMMENT '订阅源ID',
+    guid VARCHAR(512) NOT NULL COMMENT '文章全局唯一标识',
+    title VARCHAR(1000) NOT NULL COMMENT '文章标题',
+    link VARCHAR(2000) NOT NULL COMMENT '文章链接',
+    author VARCHAR(255) COMMENT '作者',
+    summary TEXT COMMENT '文章摘要',
+    content TEXT COMMENT '文章正文',
+    published_at BIGINT COMMENT '发布时间戳（毫秒）',
+    notified_at BIGINT COMMENT '通知发送时间戳（毫秒）',
+    fetched_at BIGINT NOT NULL COMMENT '抓取时间戳（毫秒）',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY uk_rss_article_subscription_guid (subscription_id, guid),
+    KEY idx_rss_articles_subscription_id (subscription_id),
+    KEY idx_rss_articles_subscription_published (subscription_id, published_at),
+    KEY idx_rss_articles_published (published_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RSS文章记录';
+
 CREATE TABLE IF NOT EXISTS scheduled_job_runs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
     job_id VARCHAR(120) NOT NULL COMMENT 'APScheduler 任务ID',

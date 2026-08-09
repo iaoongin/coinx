@@ -1,7 +1,7 @@
 import os
 import sys
 
-from flask import Flask, request
+from flask import Flask, jsonify, request
 from flask_jwt_extended import JWTManager
 
 # 添加项目根目录到路径
@@ -13,6 +13,8 @@ if project_root not in sys.path:
 from coinx.config import WEB_AUTH_DISABLED, WEB_DEBUG, WEB_HOST, WEB_PORT
 from coinx.database import db_session
 from coinx.runtime import start_runtime_services
+from coinx.read_backend import get_read_backend, is_clickhouse_read, read_backend_health
+from coinx.write_backend import is_clickhouse_write
 from coinx.utils import logger
 from coinx.web.auth import configure_app, is_authenticated, log_startup_credentials, unauthorized_response
 
@@ -67,11 +69,32 @@ def create_app():
             return None
         # 登录页、退出接口和静态资源不需要登录，其余请求统一拦截
         endpoint = request.endpoint or ''
-        if endpoint in {'auth.login', 'auth.logout', 'auth.refresh', 'static'}:
+        if endpoint in {'auth.login', 'auth.logout', 'auth.refresh', 'static', 'read_backend_health_endpoint'}:
             return None
         if is_authenticated():
             return None
         return unauthorized_response()
+
+    @app.before_request
+    def enforce_clickhouse_read_only():
+        # A CK read-only instance is still useful for dual-instance API
+        # verification.  In the production migration mode, however,
+        # MARKET_WRITE_BACKEND=clickhouse means market writes are intentional,
+        # while control-plane and alert writes continue to use MySQL.
+        if (
+            not is_clickhouse_read()
+            or is_clickhouse_write()
+            or request.method in {'GET', 'HEAD', 'OPTIONS'}
+        ):
+            return None
+        endpoint = request.endpoint or ''
+        if endpoint.startswith('auth.'):
+            return None
+        return jsonify({
+            'status': 'error',
+            'message': 'ClickHouse read instance is read-only; send writes to the MySQL instance',
+            'read_backend': get_read_backend(),
+        }), 503
 
     @app.before_request
     def log_request_info():
@@ -89,8 +112,14 @@ def create_app():
             except Exception:
                 logger.debug('请求数据: %s', request.data)
 
+    @app.route('/api/health/read-backend', methods=['GET'])
+    def read_backend_health_endpoint():
+        payload = read_backend_health()
+        return jsonify(payload), (200 if payload.get('healthy') else 503)
+
     @app.after_request
     def log_response_info(response):
+        response.headers['X-Read-Backend'] = get_read_backend()
         logger.debug('响应状态: %s', response.status)
         return response
 

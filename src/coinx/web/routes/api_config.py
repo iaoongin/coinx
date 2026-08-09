@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from coinx.config import COLLECTION_SCHEDULER_ONLY
 from coinx.utils import logger
 from coinx.coin_manager import (
     load_coins_config_dict, 
@@ -171,6 +172,14 @@ def set_coin_track():
 def update_coins_config_api():
     """从币安更新币种配置"""
     logger.info("从币安更新币种配置")
+    if COLLECTION_SCHEDULER_ONLY:
+        return jsonify(
+            {
+                'status': 'error',
+                'code': 'COLLECTION_SCHEDULER_ONLY',
+                'message': 'coin configuration refresh is disabled: collection is scheduler-only',
+            }
+        ), 409
     try:
         # 调用币种管理模块的更新函数
         success = update_coins_list_from_binance()

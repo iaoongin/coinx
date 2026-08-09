@@ -1,3 +1,6 @@
+import logging
+from datetime import datetime
+from types import SimpleNamespace
 from typing import List, Optional
 
 from sqlalchemy import func, desc, asc
@@ -10,12 +13,45 @@ from coinx.config import (
 )
 from coinx.database import get_session
 from coinx.models import MarketTickers
+from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
+
+
+logger = logging.getLogger(__name__)
 
 
 def save_market_tickers(records: List[dict], collect_time: int = None, session=None) -> int:
     """批量保存行情快照数据"""
     if not records:
         return 0
+
+    from coinx.write_backend import (
+        get_clickhouse_write_repository,
+        is_clickhouse_write,
+        market_write_lock,
+    )
+    if is_clickhouse_write():
+        timestamp = collect_time if collect_time else int(__import__('time').time() * 1000)
+        version = datetime.now()
+        rows = []
+        for source in records:
+            row = dict(source)
+            row['close_time'] = timestamp
+            row['created_at'] = row.get('created_at') or version
+            row['updated_at'] = version
+            rows.append(row)
+        columns = [
+            'close_time', 'symbol', 'price_change', 'price_change_percent',
+            'weighted_avg_price', 'last_price', 'last_qty', 'open_price',
+            'high_price', 'low_price', 'volume', 'quote_volume', 'open_time',
+            'first_id', 'last_id', 'count', 'created_at', 'updated_at',
+        ]
+        with market_write_lock('market_tickers', 'global'):
+            return get_clickhouse_write_repository().insert_rows(
+                'market_tickers',
+                columns,
+                rows,
+                batch_id=f'tickers_{timestamp}',
+            )
 
     own_session = session is None
     db = session or get_session()
@@ -48,15 +84,29 @@ def get_market_tickers(
     direction: str = 'down',
     limit: int = 100,
     close_time: Optional[int] = None,
+    as_of_ms: Optional[int] = None,
     session=None,
 ) -> List:
+    if session is None and is_clickhouse_read():
+        rows = get_clickhouse_repository().latest_tickers(
+            rank_type=rank_type,
+            direction=direction,
+            limit=limit,
+            close_time=close_time,
+            as_of_ms=as_of_ms,
+        )
+        return [SimpleNamespace(**row) for row in rows]
+
     """获取行情快照数据（按指定维度排序）"""
     own_session = session is None
     db = session or get_session()
 
     try:
         if close_time is None:
-            close_time = db.query(func.max(MarketTickers.close_time)).scalar()
+            latest_query = db.query(func.max(MarketTickers.close_time))
+            if as_of_ms is not None:
+                latest_query = latest_query.filter(MarketTickers.close_time <= int(as_of_ms))
+            close_time = latest_query.scalar()
 
         if close_time is None:
             return []
@@ -83,19 +133,34 @@ def get_market_tickers(
 
         if rank_type == 'price_change':
             if direction == 'down':
-                query = query.order_by(asc(MarketTickers.price_change_percent))
+                query = query.order_by(asc(MarketTickers.price_change_percent), asc(MarketTickers.symbol))
             else:
-                query = query.order_by(desc(MarketTickers.price_change_percent))
+                query = query.order_by(desc(MarketTickers.price_change_percent), asc(MarketTickers.symbol))
         elif rank_type == 'volume':
-            query = query.order_by(desc(MarketTickers.volume))
+            query = query.order_by(desc(MarketTickers.volume), asc(MarketTickers.symbol))
         elif rank_type == 'quote_volume':
-            query = query.order_by(desc(MarketTickers.quote_volume))
+            query = query.order_by(desc(MarketTickers.quote_volume), asc(MarketTickers.symbol))
         else:
-            query = query.order_by(asc(MarketTickers.price_change_percent))
+            query = query.order_by(asc(MarketTickers.price_change_percent), asc(MarketTickers.symbol))
 
         query = query.limit(limit)
+        rows = query.all()
 
-        return query.all()
+        try:
+            from coinx.repositories.market_shadow import shadow_latest_tickers
+
+            shadow_latest_tickers(
+                rows,
+                rank_type=rank_type,
+                direction=direction,
+                limit=limit,
+                close_time=close_time,
+            )
+        except Exception:
+            # Shadow diagnostics must never break the MySQL response path.
+            logger.exception('提交 ClickHouse 行情 shadow 对比失败')
+
+        return rows
     finally:
         if own_session:
             db.close()
@@ -106,15 +171,28 @@ def get_market_ticker_symbols(
     direction: str = 'down',
     limit: int = 100,
     close_time: Optional[int] = None,
+    as_of_ms: Optional[int] = None,
     session=None,
 ) -> List[str]:
+    if session is None and is_clickhouse_read():
+        rows = get_clickhouse_repository().latest_tickers(
+            rank_type=rank_type,
+            direction=direction,
+            limit=limit,
+            close_time=close_time,
+            as_of_ms=as_of_ms,
+        )
+        return [str(row.get('symbol')) for row in rows if row.get('symbol')]
     """获取行情快照中的币种列表，只读取 symbol 列。"""
     own_session = session is None
     db = session or get_session()
 
     try:
         if close_time is None:
-            close_time = db.query(func.max(MarketTickers.close_time)).scalar()
+            latest_query = db.query(func.max(MarketTickers.close_time))
+            if as_of_ms is not None:
+                latest_query = latest_query.filter(MarketTickers.close_time <= int(as_of_ms))
+            close_time = latest_query.scalar()
 
         if close_time is None:
             return []
@@ -123,15 +201,15 @@ def get_market_ticker_symbols(
 
         if rank_type == 'price_change':
             if direction == 'down':
-                query = query.order_by(asc(MarketTickers.price_change_percent))
+                query = query.order_by(asc(MarketTickers.price_change_percent), asc(MarketTickers.symbol))
             else:
-                query = query.order_by(desc(MarketTickers.price_change_percent))
+                query = query.order_by(desc(MarketTickers.price_change_percent), asc(MarketTickers.symbol))
         elif rank_type == 'volume':
-            query = query.order_by(desc(MarketTickers.volume))
+            query = query.order_by(desc(MarketTickers.volume), asc(MarketTickers.symbol))
         elif rank_type == 'quote_volume':
-            query = query.order_by(desc(MarketTickers.quote_volume))
+            query = query.order_by(desc(MarketTickers.quote_volume), asc(MarketTickers.symbol))
         else:
-            query = query.order_by(asc(MarketTickers.price_change_percent))
+            query = query.order_by(asc(MarketTickers.price_change_percent), asc(MarketTickers.symbol))
 
         rows = query.limit(limit).all()
         return [row[0] for row in rows if row and row[0]]
@@ -158,6 +236,18 @@ def get_market_scope_symbols(
     top_volume_limit: int = FETCH_COINS_TOP_VOLUME_COUNT,
     session=None,
 ) -> List[str]:
+    if session is None and is_clickhouse_read():
+        gainers = get_market_ticker_symbols(
+            rank_type='price_change', direction='up', limit=top_gainers_limit,
+        )
+        losers = get_market_ticker_symbols(
+            rank_type='price_change', direction='down', limit=top_losers_limit,
+        )
+        volumes = get_market_ticker_symbols(
+            rank_type='quote_volume', direction='up', limit=top_volume_limit,
+        )
+        return _stable_unique_symbols(tracked_symbols, gainers, losers, volumes)
+
     """Build the tracked and ranked market scope from the latest ticker snapshot."""
     own_session = session is None
     db = session or get_session()
@@ -213,19 +303,42 @@ def get_market_scope_symbols_from_tickers(
     return _stable_unique_symbols(tracked_symbols, gainers, losers, volumes)
 
 
-def get_latest_close_time(session=None) -> Optional[int]:
+def get_latest_close_time(as_of_ms: Optional[int] = None, session=None) -> Optional[int]:
+    if session is None and is_clickhouse_read():
+        repository = get_clickhouse_repository()
+        sql = f"SELECT max(close_time) FROM {repository._table('market_tickers')}"
+        if as_of_ms is not None:
+            sql += f" WHERE close_time <= {int(as_of_ms)}"
+        value = repository.client.query_scalar(sql)
+        return int(value) if value is not None else None
+
     """获取最新的快照时间"""
     own_session = session is None
     db = session or get_session()
 
     try:
-        return db.query(func.max(MarketTickers.close_time)).scalar()
+        query = db.query(func.max(MarketTickers.close_time))
+        if as_of_ms is not None:
+            query = query.filter(MarketTickers.close_time <= int(as_of_ms))
+        return query.scalar()
     finally:
         if own_session:
             db.close()
 
 
 def delete_old_records(days: int = 7, session=None) -> int:
+    from coinx.write_backend import get_clickhouse_write_repository, is_clickhouse_write
+    if is_clickhouse_write():
+        from coinx.read_backend import get_clickhouse_repository
+
+        cutoff_time = int(__import__('time').time() * 1000) - (days * 24 * 60 * 60 * 1000)
+        table = get_clickhouse_repository()._table('market_tickers').replace(' FINAL', '')
+        from coinx.write_backend import market_write_lock
+        with market_write_lock('market_tickers', 'cleanup'):
+            get_clickhouse_write_repository().client.execute(
+                f'ALTER TABLE {table} DELETE WHERE close_time < {int(cutoff_time)}'
+            )
+        return 0
     """删除指定天数之前的旧数据"""
     import time
     own_session = session is None

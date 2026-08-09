@@ -470,13 +470,17 @@
         </div>
       </section>
 
-      <div v-if="!schedulerEnabled" class="message-box warning" style="margin-top:10px;">
+      <div v-if="collectionSchedulerOnly" class="message-box warning" style="margin-top:10px;">
+        当前仅允许通过调度任务采集数据：直接采集接口已禁用，请在此任务控制台中触发已注册的调度任务。
+      </div>
+
+      <div v-else-if="!schedulerEnabled" class="message-box warning" style="margin-top:10px;">
         定时任务已由环境变量 SCHEDULER_ENABLED=false 禁用：任务定义仍可查看，定时调度与启动补采不会执行；可立即手动执行，暂停和恢复不可用。
       </div>
 
       <div class="toolbar">
         <div class="toolbar-left">
-          <input v-model.trim="keyword" class="search-input" placeholder="搜索 job id / 名称 / trigger">
+          <input v-model.trim="keyword" class="search-input" placeholder="搜索任务 ID / 名称 / 触发规则">
           <select v-model="statusFilter" class="select-input">
             <option value="all">全部状态</option>
             <option value="running">运行中</option>
@@ -617,6 +621,7 @@
         const keyword = ref('');
         const statusFilter = ref('all');
         const schedulerEnabled = ref(true);
+        const collectionSchedulerOnly = ref(false);
         const schedulerRunning = ref(false);
         const refreshing = ref(false);
         const autoRefresh = ref(true);
@@ -762,9 +767,10 @@
           try {
             const response = await fetch('/api/task-jobs');
             const result = await response.json();
-            if (result.status !== 'success') throw new Error(result.message || 'failed to load jobs');
+            if (result.status !== 'success') throw new Error(result.message || '加载任务失败');
             jobs.value = result.data?.jobs || [];
             schedulerEnabled.value = result.data?.scheduler_enabled !== false;
+            collectionSchedulerOnly.value = result.data?.collection_scheduler_only === true;
             schedulerRunning.value = !!result.data?.scheduler_running;
           } catch (error) {
             console.error(error);
@@ -785,9 +791,11 @@
               body: JSON.stringify({ action }),
             });
             const result = await response.json();
-            if (result.status !== 'success') throw new Error(result.message || `failed to ${action} job`);
+            const actionLabels = { run: '执行', pause: '暂停', resume: '恢复' };
+            const actionLabel = actionLabels[action] || action;
+            if (result.status !== 'success') throw new Error(result.message || `任务${actionLabel}失败`);
             jobs.value = result.data?.jobs || jobs.value;
-            showFlash(result.message || `${action} success`, 'success');
+            showFlash(result.message || `任务${actionLabel}成功`, 'success');
           } catch (error) {
             console.error(error);
             showFlash(`任务操作失败: ${error.message}`, 'error');
@@ -801,7 +809,7 @@
           try {
             const response = await fetch(`/api/task-jobs/${jobId}/runs?limit=5&offset=${offset}`);
             const result = await response.json();
-            if (result.status !== 'success') throw new Error(result.message || 'failed to load task job runs');
+            if (result.status !== 'success') throw new Error(result.message || '加载任务执行记录失败');
             jobHistory.value = { ...jobHistory.value, [jobId]: result.data?.runs || [] };
             jobHistoryMeta.value = {
               ...jobHistoryMeta.value,
@@ -865,6 +873,7 @@
           keyword,
           statusFilter,
           schedulerEnabled,
+          collectionSchedulerOnly,
           schedulerRunning,
           refreshing,
           autoRefresh,
