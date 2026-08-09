@@ -264,7 +264,8 @@ def load_all_coins_data():
             table = get_clickhouse_repository()._table('market_snapshots')
             rows = get_clickhouse_repository().client.query_rows(
                 f'SELECT symbol, snapshot_time, data_json FROM {table} FINAL '
-                'ORDER BY symbol ASC, snapshot_time DESC'
+                'ORDER BY symbol ASC, snapshot_time DESC, batch_id DESC '
+                'LIMIT 1 BY symbol'
             )
             result = []
             seen = set()

@@ -81,7 +81,11 @@ def _build_kline_point(row):
         low_price=float(row.low_price) if hasattr(row, 'low_price') and row.low_price is not None else None,
         close_price=float(row.close_price) if row.close_price is not None else None,
         quote_volume=float(row.quote_volume) if row.quote_volume is not None else None,
-        taker_buy_quote_volume=float(row.taker_buy_quote_volume) if row.taker_buy_quote_volume is not None else None,
+        taker_buy_quote_volume=(
+            float(row.taker_buy_quote_volume)
+            if getattr(row, 'taker_buy_quote_volume', None) is not None
+            else None
+        ),
     )
 
 
@@ -173,13 +177,15 @@ def _load_market_structure_exchange_maps_clickhouse(
 
     quote_volume_24h_map = {symbol: 0.0 for symbol in symbols}
     if include_quote_volume_24h:
-        for row in repo.market_rows(
-            'market_klines', 'symbol, open_time, quote_volume', symbols=symbols,
-            exchange=exchange, period='5m', time_column='open_time',
-            lower_bound=quote_lower, upper_bound=upper, order_by='symbol, open_time',
-        ):
-            if row.get('quote_volume') is not None:
-                quote_volume_24h_map[row['symbol']] = quote_volume_24h_map.get(row['symbol'], 0.0) + float(row['quote_volume'])
+        quote_volume_24h_map.update(
+            repo.kline_quote_volume_by_symbol(
+                symbols=symbols,
+                exchange=exchange,
+                period='5m',
+                lower_bound=quote_lower,
+                upper_bound=upper,
+            )
+        )
 
     return oi_map, kline_map, taker_maps, quote_volume_24h_map
 
@@ -420,37 +426,19 @@ def load_market_structure_aggregated_kline_maps(
             lower = None
             if upper is not None:
                 lower = max(0, upper - (int(lookback_points) + 1) * interval_ms)
-            rows = repo.market_rows(
-                'market_klines',
-                'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
-                symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
-                lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
+            rows = repo.aggregate_kline_rows(
+                symbols=symbols,
+                exchange=exchange,
+                period='5m',
+                interval_ms=interval_ms,
+                lower_bound=lower,
+                upper_bound=upper,
             )
-            by_symbol = {symbol: {} for symbol in symbols}
             for row in rows:
                 point = _build_kline_point(type('Row', (), row)())
-                by_symbol.setdefault(point.symbol, {})[point.open_time] = point
-            expected_points = interval_ms // FIVE_MINUTES_MS
-            for symbol, points in by_symbol.items():
-                buckets = {}
-                for timestamp in points:
-                    buckets.setdefault(timestamp - (timestamp % interval_ms), []).append(timestamp)
-                for bucket, timestamps in buckets.items():
-                    expected = [bucket + index * FIVE_MINUTES_MS for index in range(expected_points)]
-                    if any(timestamp not in points for timestamp in expected):
-                        continue
-                    selected = [points[timestamp] for timestamp in expected]
-                    if any(point.high_price is None or point.low_price is None or point.close_price is None for point in selected):
-                        continue
-                    result[name][symbol][bucket] = MarketStructureKlinePoint(
-                        symbol=symbol,
-                        open_time=bucket,
-                        high_price=max(point.high_price for point in selected),
-                        low_price=min(point.low_price for point in selected),
-                        close_price=selected[-1].close_price,
-                        quote_volume=sum(point.quote_volume or 0.0 for point in selected),
-                        taker_buy_quote_volume=None,
-                    )
+                if point.high_price is None or point.low_price is None or point.close_price is None:
+                    continue
+                result[name].setdefault(point.symbol, {})[point.open_time] = point
         return result
 
     intervals = intervals or {}

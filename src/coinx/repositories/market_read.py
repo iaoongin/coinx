@@ -155,6 +155,88 @@ class ClickHouseMarketReadRepository:
         sql += f" ORDER BY {order_by or time_column or 'symbol'}"
         return [_normalize_row(row) for row in self.client.query_rows(sql)]
 
+    def aggregate_kline_rows(
+        self,
+        symbols: Sequence[str],
+        exchange: str,
+        interval_ms: int,
+        lower_bound: Optional[int] = None,
+        upper_bound: Optional[int] = None,
+        period: str = "5m",
+    ) -> List[Dict[str, Any]]:
+        """Aggregate complete K-line buckets inside ClickHouse."""
+        values = [str(value) for value in symbols if value]
+        if not values:
+            return []
+        interval_ms = int(interval_ms)
+        base_period_ms = 5 * 60 * 1000
+        if interval_ms <= 0 or interval_ms % base_period_ms:
+            raise ValueError("interval_ms must be a positive multiple of 5 minutes")
+        expected_points = interval_ms // base_period_ms
+        filters = [
+            f"symbol IN ({_in_list(values)})",
+            f"exchange = {_quote(exchange)}",
+            f"period = {_quote(period)}",
+        ]
+        if lower_bound is not None:
+            filters.append(f"open_time >= {int(lower_bound)}")
+        if upper_bound is not None:
+            filters.append(f"open_time <= {int(upper_bound)}")
+        bucket_expression = f"toUInt64(intDiv(open_time, {interval_ms}) * {interval_ms})"
+        rows = self.client.query_rows(
+            "SELECT symbol, "
+            f"{bucket_expression} AS bucket_time, "
+            "max(high_price) AS high_price, "
+            "min(low_price) AS low_price, "
+            "argMax(close_price, open_time) AS close_price, "
+            "sum(ifNull(quote_volume, 0)) AS quote_volume "
+            f"FROM {self._table('market_klines')} "
+            f"WHERE {' AND '.join(filters)} "
+            "GROUP BY symbol, bucket_time "
+            f"HAVING count() = {expected_points} "
+            f"AND max(open_time) - min(open_time) = {(expected_points - 1) * base_period_ms} "
+            "ORDER BY symbol, bucket_time"
+        )
+        normalized = []
+        for row in rows:
+            item = dict(row)
+            item['open_time'] = int(item.pop('bucket_time'))
+            normalized.append(item)
+        return normalized
+
+    def kline_quote_volume_by_symbol(
+        self,
+        symbols: Sequence[str],
+        exchange: str,
+        lower_bound: Optional[int] = None,
+        upper_bound: Optional[int] = None,
+        period: str = "5m",
+    ) -> Dict[str, float]:
+        """Return quote-volume totals without transferring raw K-lines."""
+        values = [str(value) for value in symbols if value]
+        if not values:
+            return {}
+        filters = [
+            f"symbol IN ({_in_list(values)})",
+            f"exchange = {_quote(exchange)}",
+            f"period = {_quote(period)}",
+        ]
+        if lower_bound is not None:
+            filters.append(f"open_time >= {int(lower_bound)}")
+        if upper_bound is not None:
+            filters.append(f"open_time <= {int(upper_bound)}")
+        rows = self.client.query_rows(
+            "SELECT symbol, sum(ifNull(quote_volume, 0)) AS quote_volume_24h "
+            f"FROM {self._table('market_klines')} "
+            f"WHERE {' AND '.join(filters)} "
+            "GROUP BY symbol"
+        )
+        return {
+            str(row['symbol']): float(row['quote_volume_24h'] or 0)
+            for row in rows
+            if row.get('symbol')
+        }
+
     def latest_series_times(
         self,
         table: str,
