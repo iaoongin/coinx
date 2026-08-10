@@ -32,6 +32,9 @@ _LATEST_FUNDING_CACHE: Dict[Any, Any] = {}
 _FUNDING_HISTORY_CACHE: Dict[Any, Any] = {}
 _LATEST_TICKER_CACHE: Dict[Any, Any] = {}
 _CACHE_MAX_ENTRIES = 128
+# Keep large ClickHouse aggregations spillable. This is a per-query threshold,
+# not a request to raise the process/container memory limit.
+_EXTERNAL_GROUP_BY_BYTES = 256 * 1024 * 1024
 
 
 def _cache_key_lock(cache_name: str, key: Any) -> Lock:
@@ -116,10 +119,11 @@ class ClickHouseMarketReadRepository:
                 oldest_key = min(cache, key=lambda item: cache[item][0])
                 cache.pop(oldest_key, None)
 
-    def _table(self, table: str) -> str:
+    def _table(self, table: str, final: bool = True) -> str:
         # ReplacingMergeTree rows are eventually merged; FINAL keeps API and
         # collector reads logically deduplicated immediately after a retry.
-        return f"{self.database}.{_identifier(table)} FINAL"
+        suffix = " FINAL" if final else ""
+        return f"{self.database}.{_identifier(table)}{suffix}"
 
     def market_rows(
         self,
@@ -182,6 +186,21 @@ class ClickHouseMarketReadRepository:
             filters.append(f"open_time >= {int(lower_bound)}")
         if upper_bound is not None:
             filters.append(f"open_time <= {int(upper_bound)}")
+        # FINAL is expensive for a wide time range because ClickHouse has to
+        # merge all matching parts before the outer GROUP BY. The versioned
+        # business key is stable, so collapse it with argMax first and then
+        # aggregate the deduplicated rows. The outer max/min are intentional:
+        # they describe the high/low over the whole bucket, not the newest row.
+        deduplicated = (
+            "SELECT symbol, open_time, "
+            "argMax(high_price, updated_at) AS high_price, "
+            "argMax(low_price, updated_at) AS low_price, "
+            "argMax(close_price, updated_at) AS close_price, "
+            "argMax(quote_volume, updated_at) AS quote_volume "
+            f"FROM {self._table('market_klines', final=False)} "
+            f"PREWHERE {' AND '.join(filters)} "
+            "GROUP BY symbol, open_time"
+        )
         bucket_expression = f"toUInt64(intDiv(open_time, {interval_ms}) * {interval_ms})"
         rows = self.client.query_rows(
             "SELECT symbol, "
@@ -190,12 +209,12 @@ class ClickHouseMarketReadRepository:
             "min(low_price) AS low_price, "
             "argMax(close_price, open_time) AS close_price, "
             "sum(ifNull(quote_volume, 0)) AS quote_volume "
-            f"FROM {self._table('market_klines')} "
-            f"WHERE {' AND '.join(filters)} "
+            f"FROM ({deduplicated}) AS k "
             "GROUP BY symbol, bucket_time "
             f"HAVING count() = {expected_points} "
             f"AND max(open_time) - min(open_time) = {(expected_points - 1) * base_period_ms} "
-            "ORDER BY symbol, bucket_time"
+            "ORDER BY symbol, bucket_time "
+            f"SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
         )
         normalized = []
         for row in rows:
@@ -225,11 +244,18 @@ class ClickHouseMarketReadRepository:
             filters.append(f"open_time >= {int(lower_bound)}")
         if upper_bound is not None:
             filters.append(f"open_time <= {int(upper_bound)}")
+        deduplicated = (
+            "SELECT symbol, open_time, "
+            "argMax(quote_volume, updated_at) AS quote_volume "
+            f"FROM {self._table('market_klines', final=False)} "
+            f"PREWHERE {' AND '.join(filters)} "
+            "GROUP BY symbol, open_time"
+        )
         rows = self.client.query_rows(
             "SELECT symbol, sum(ifNull(quote_volume, 0)) AS quote_volume_24h "
-            f"FROM {self._table('market_klines')} "
-            f"WHERE {' AND '.join(filters)} "
-            "GROUP BY symbol"
+            f"FROM ({deduplicated}) AS k "
+            "GROUP BY symbol "
+            f"SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
         )
         return {
             str(row['symbol']): float(row['quote_volume_24h'] or 0)
@@ -551,7 +577,7 @@ class ClickHouseMarketReadRepository:
         if close_time is None:
             upper = f" WHERE close_time <= {int(as_of_ms)}" if as_of_ms is not None else ""
             close_time = self.client.query_scalar(
-                f"SELECT max(close_time) FROM {self._table('market_tickers')}{upper}"
+                f"SELECT max(close_time) FROM {self._table('market_tickers', final=False)}{upper}"
             )
         if close_time is None:
             return []
@@ -563,11 +589,26 @@ class ClickHouseMarketReadRepository:
         order_column = order_map.get(rank_type, "price_change_percent")
         order_direction = "ASC" if rank_type == "price_change" and direction == "down" else "DESC"
         rows = self.client.query_rows(
-            "SELECT symbol, price_change, price_change_percent, weighted_avg_price, last_price, "
-            "last_qty, open_price, high_price, low_price, volume, quote_volume, open_time, "
-            "close_time, first_id, last_id, count "
-            f"FROM {self._table('market_tickers')} WHERE close_time = {int(close_time)} "
+            "SELECT symbol, "
+            "argMax(price_change, updated_at) AS price_change, "
+            "argMax(price_change_percent, updated_at) AS price_change_percent, "
+            "argMax(weighted_avg_price, updated_at) AS weighted_avg_price, "
+            "argMax(last_price, updated_at) AS last_price, "
+            "argMax(last_qty, updated_at) AS last_qty, "
+            "argMax(open_price, updated_at) AS open_price, "
+            "argMax(high_price, updated_at) AS high_price, "
+            "argMax(low_price, updated_at) AS low_price, "
+            "argMax(volume, updated_at) AS volume, "
+            "argMax(quote_volume, updated_at) AS quote_volume, "
+            "argMax(open_time, updated_at) AS open_time, "
+            "argMax(close_time, updated_at) AS close_time, "
+            "argMax(first_id, updated_at) AS first_id, "
+            "argMax(last_id, updated_at) AS last_id, "
+            "argMax(count, updated_at) AS count "
+            f"FROM {self._table('market_tickers', final=False)} WHERE close_time = {int(close_time)} "
+            "GROUP BY symbol "
             f"ORDER BY {order_column} {order_direction}, symbol ASC LIMIT {max(1, int(limit))}"
+            f" SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
         )
         return [_normalize_row(row) for row in rows]
 
@@ -584,30 +625,37 @@ class ClickHouseMarketReadRepository:
             f"""
             WITH latest_snapshot AS (
                 SELECT max(close_time) AS snapshot_time
-                FROM {self._table('market_tickers')}
+                FROM {self._table('market_tickers', final=False)}
                 WHERE 1 = 1 {upper_filter}
             ), top_symbols AS (
-                SELECT symbol, snapshot_time
-                FROM (
-                    SELECT symbol, close_time, quote_volume
-                    FROM {self._table('market_tickers')}
-                ) AS mt
+                SELECT mt.symbol, latest_snapshot.snapshot_time,
+                    argMax(mt.quote_volume, mt.updated_at) AS quote_volume
+                FROM {self._table('market_tickers', final=False)} AS mt
                 CROSS JOIN latest_snapshot
                 WHERE mt.close_time = latest_snapshot.snapshot_time
-                ORDER BY mt.quote_volume DESC
+                GROUP BY mt.symbol, latest_snapshot.snapshot_time
+                ORDER BY quote_volume DESC
                 LIMIT {scope_limit}
+            ), deduplicated_klines AS (
+                SELECT
+                    k.symbol,
+                    k.open_time,
+                    argMax(k.open_price, k.updated_at) AS open_price,
+                    argMax(k.close_price, k.updated_at) AS close_price,
+                    argMax(k.quote_volume, k.updated_at) AS quote_volume
+                FROM {self._table('market_klines', final=False)} AS k
+                PREWHERE k.exchange = 'binance' AND k.period = '5m'
+                WHERE k.symbol IN (SELECT symbol FROM top_symbols)
+                  AND k.open_time >= (SELECT min(snapshot_time) FROM top_symbols) - {int(lookback_ms)}
+                  AND k.open_time <= (SELECT max(snapshot_time) FROM top_symbols)
+                GROUP BY k.symbol, k.open_time
             ), ranked_klines AS (
                 SELECT
                     k.symbol, k.open_time, k.open_price, k.close_price, k.quote_volume,
                     row_number() OVER (PARTITION BY k.symbol ORDER BY k.open_time DESC) AS rn
-                FROM (
-                    SELECT symbol, open_time, open_price, close_price, quote_volume
-                    FROM {self._table('market_klines')}
-                ) AS k
+                FROM deduplicated_klines AS k
                 INNER JOIN top_symbols s ON s.symbol = k.symbol
-                WHERE k.exchange = 'binance'
-                  AND k.period = '5m'
-                  AND k.open_time >= s.snapshot_time - {int(lookback_ms)}
+                WHERE k.open_time >= s.snapshot_time - {int(lookback_ms)}
                   AND k.open_time <= s.snapshot_time
             ), metrics AS (
                 SELECT
@@ -636,6 +684,8 @@ class ClickHouseMarketReadRepository:
             FROM top_symbols AS s
             LEFT JOIN metrics AS m ON m.symbol = s.symbol
             ORDER BY s.symbol
+            SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES},
+                     max_bytes_before_external_sort = {_EXTERNAL_GROUP_BY_BYTES}
             """
         )
         return {

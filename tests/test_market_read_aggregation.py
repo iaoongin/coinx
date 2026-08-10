@@ -48,7 +48,11 @@ def test_clickhouse_aggregation_returns_buckets_and_validates_complete_points():
     assert "GROUP BY symbol, bucket_time" in sql
     assert "HAVING count() = 12" in sql
     assert "max(open_time) - min(open_time) = 3300000" in sql
-    assert "FROM coinx.market_klines FINAL" in sql
+    assert "argMax(high_price, updated_at) AS high_price" in sql
+    assert "argMax(low_price, updated_at) AS low_price" in sql
+    assert "FROM coinx.market_klines" in sql
+    assert "FINAL" not in sql
+    assert "max_bytes_before_external_group_by" in sql
 
 
 def test_clickhouse_quote_volume_is_aggregated_server_side():
@@ -66,6 +70,26 @@ def test_clickhouse_quote_volume_is_aggregated_server_side():
     sql = client.sql[0]
     assert "sum(ifNull(quote_volume, 0)) AS quote_volume_24h" in sql
     assert "GROUP BY symbol" in sql
+    assert "argMax(quote_volume, updated_at) AS quote_volume" in sql
+    assert "FINAL" not in sql
+
+
+def test_clickhouse_price_volume_metrics_limits_and_deduplicates_kline_scan():
+    client = FakeClickHouseClient()
+    repository = ClickHouseMarketReadRepository(client, "coinx")
+
+    # The fake only needs to capture SQL here; the result shape is not relevant
+    # to this query-plan regression test.
+    client.query_rows = lambda sql: client.sql.append(sql) or []
+    assert repository.price_volume_metrics(scope_limit=10, as_of_ms=1_700_000_000_000) == {}
+
+    sql = client.sql[0]
+    assert "deduplicated_klines AS" in sql
+    assert "argMax(k.open_price, k.updated_at) AS open_price" in sql
+    assert "argMax(k.close_price, k.updated_at) AS close_price" in sql
+    assert "FROM coinx.market_klines" in sql
+    assert "FINAL" not in sql
+    assert "max_bytes_before_external_group_by" in sql
 
 
 def test_market_structure_clickhouse_path_uses_server_side_aggregation(monkeypatch):

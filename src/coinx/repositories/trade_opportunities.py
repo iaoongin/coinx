@@ -493,21 +493,20 @@ def _build_trade_opportunity_snapshot(symbols, exchanges, anchor):
         # exchange order in the response so replay comparisons and clients do
         # not observe array elements moving between requests.
         maps = {exchange: maps[exchange] for exchange in exchanges if exchange in maps}
-        aggregate_futures = {
-            executor.submit(
-                load_market_structure_aggregated_kline_maps,
+        # Higher-timeframe aggregation is the widest ClickHouse query in this
+        # snapshot. Running one query per exchange at a time keeps the sum of
+        # AggregatingTransform memory bounded; the source maps above are still
+        # loaded concurrently because their windows are small and bounded.
+        aggregated_kline_maps = {}
+        for exchange in maps:
+            aggregated_kline_maps[exchange] = load_market_structure_aggregated_kline_maps(
                 None,
                 exchange,
                 symbols,
                 anchor,
                 intervals={'1h': ONE_HOUR_MS, '4h': FOUR_HOURS_MS},
                 lookback_points=HIGHER_TIMEFRAME_KLINE_POINTS,
-            ): exchange
-            for exchange in maps
-        }
-        aggregated_kline_maps = {}
-        for future in as_completed(aggregate_futures):
-            aggregated_kline_maps[aggregate_futures[future]] = future.result()
+            )
     funding_maps = _load_exchange_funding_rate_maps(maps.keys(), symbols, as_of_ms=anchor)
     data = []
     for symbol in symbols:

@@ -306,7 +306,10 @@ def get_market_scope_symbols_from_tickers(
 def get_latest_close_time(as_of_ms: Optional[int] = None, session=None) -> Optional[int]:
     if session is None and is_clickhouse_read():
         repository = get_clickhouse_repository()
-        sql = f"SELECT max(close_time) FROM {repository._table('market_tickers')}"
+        # close_time is the snapshot key; duplicates do not affect max().
+        # Avoid FINAL here because it merges every ticker part just to find a
+        # scalar watermark.
+        sql = f"SELECT max(close_time) FROM {repository._table('market_tickers', final=False)}"
         if as_of_ms is not None:
             sql += f" WHERE close_time <= {int(as_of_ms)}"
         value = repository.client.query_scalar(sql)
