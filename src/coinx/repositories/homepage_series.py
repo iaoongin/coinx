@@ -1022,8 +1022,44 @@ def _load_exchange_homepage_maps(session, exchange, symbols, upper_bound=None):
     return oi_map, kline_map, net_inflow_map, unified_latest
 
 
+def _calculate_clickhouse_net_inflow(rows, kline_by_time, anchor_time):
+    """Calculate net inflow windows against one already-aligned anchor."""
+    result = {'net_inflow': {}, 'net_inflow_value': {}, 'health': {}}
+    if anchor_time is None:
+        return result
+
+    intervals = [
+        ('5m', 1), ('15m', 3), ('30m', 6), ('1h', 12), ('4h', 48),
+        ('12h', 144), ('24h', 288), ('48h', 576), ('72h', 864), ('168h', 2016),
+    ]
+    for interval, expected in intervals:
+        base = int(anchor_time) - _interval_to_ms(interval) + FIVE_MINUTES_MS
+        selected = [
+            row for row in rows
+            if base <= int(row['event_time']) <= int(anchor_time)
+            and kline_by_time.get(int(row['event_time'])) is not None
+        ]
+        if not selected:
+            # Keep the same zero-health semantics as the MySQL grouped query.
+            result['health'][interval] = 0.0
+            continue
+
+        net = 0.0
+        net_value = 0.0
+        for row in selected:
+            delta = float(row.get('buy_vol') or 0) - float(row.get('sell_vol') or 0)
+            net += delta
+            price_point = kline_by_time.get(int(row['event_time']))
+            if price_point is not None and price_point.close_price is not None:
+                net_value += delta * float(price_point.close_price)
+        result['net_inflow'][interval] = net
+        result['net_inflow_value'][interval] = net_value
+        result['health'][interval] = round(len(selected) * 100.0 / expected, 1)
+    return result
+
+
 def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None):
-    """Load homepage point maps and net-flow windows directly from ClickHouse."""
+    """Load a full aligned window from ClickHouse for one exchange."""
     from types import SimpleNamespace
 
     repo = get_clickhouse_repository()
@@ -1033,8 +1069,24 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
         return empty
 
     upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
-    # Include the exact 168h target point used by the MySQL repository.
-    lower = max(0, upper - _interval_to_ms('168h'))
+    oi_latest = repo.latest_series_times(
+        'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+    )
+    kline_latest = repo.latest_series_times(
+        'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+    )
+    common_latest = {
+        symbol: min(oi_latest[symbol], kline_latest[symbol])
+        for symbol in symbols
+        if symbol in oi_latest and symbol in kline_latest
+    }
+    if not common_latest:
+        return empty
+
+    # The lower bound is based on the slowest actual common timestamp, not the
+    # wall-clock/as_of upper bound. This preserves the exact 168h point when an
+    # exchange is a few minutes behind the global homepage anchor.
+    lower = max(0, min(common_latest.values()) - _interval_to_ms('168h'))
     oi_rows = repo.market_rows(
         'market_open_interest_hist',
         'symbol, event_time, sum_open_interest, sum_open_interest_value',
@@ -1055,80 +1107,31 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
     )
 
     oi_by_symbol = {symbol: {} for symbol in symbols}
-    latest_by_symbol = {}
     for row in oi_rows:
         point = _build_open_interest_point(SimpleNamespace(**row))
         oi_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
-        latest_by_symbol[point.symbol] = max(latest_by_symbol.get(point.symbol, 0), point.event_time)
 
     all_klines = {symbol: {} for symbol in symbols}
     for row in kline_rows:
         point = _build_kline_point(SimpleNamespace(**row))
         all_klines.setdefault(point.symbol, {})[point.open_time] = point
 
-    target_times = {}
-    for symbol in symbols:
-        latest = latest_by_symbol.get(symbol)
-        target_times[symbol] = set()
-        if latest is not None:
-            target_times[symbol].add(latest)
-            target_times[symbol].update(latest - _interval_to_ms(interval) for interval in TIME_INTERVALS)
-
-    selected_oi = {
-        symbol: {timestamp: point for timestamp, point in points.items() if timestamp in target_times.get(symbol, set())}
-        for symbol, points in oi_by_symbol.items()
-    }
-    selected_kline = {
-        symbol: {timestamp: point for timestamp, point in points.items() if timestamp in target_times.get(symbol, set())}
-        for symbol, points in all_klines.items()
-    }
-
-    net_result = _empty_net_inflow_map(symbols)
-    intervals = [
-        ('5m', 1), ('15m', 3), ('30m', 6), ('1h', 12), ('4h', 48),
-        ('12h', 144), ('24h', 288), ('48h', 576), ('72h', 864), ('168h', 2016),
-    ]
     taker_by_symbol = {symbol: [] for symbol in symbols}
     for row in taker_rows:
         taker_by_symbol.setdefault(row['symbol'], []).append(row)
-    latest_taker_by_symbol = {
-        symbol: max(int(row['event_time']) for row in rows)
-        for symbol, rows in taker_by_symbol.items()
-        if rows
-    }
-    unified_taker_base = next(iter(latest_taker_by_symbol.values()), None)
-    for symbol, rows in taker_by_symbol.items():
-        if not rows or unified_taker_base is None:
-            continue
-        for interval, expected in intervals:
-            base = unified_taker_base - _interval_to_ms(interval) + FIVE_MINUTES_MS
-            selected = [
-                row for row in rows
-                if base <= int(row['event_time']) <= upper
-                and all_klines.get(symbol, {}).get(int(row['event_time'])) is not None
-            ]
-            if not selected:
-                # MySQL's grouped query still reports a zero health value for
-                # an existing symbol when the window has no joined rows.
-                net_result[symbol]['health'][interval] = 0.0
-                continue
-            net = 0.0
-            net_value = 0.0
-            for row in selected:
-                delta = float(row.get('buy_vol') or 0) - float(row.get('sell_vol') or 0)
-                net += delta
-                price_point = all_klines.get(symbol, {}).get(int(row['event_time']))
-                if price_point is not None and price_point.close_price is not None:
-                    net_value += delta * float(price_point.close_price)
-            net_result[symbol]['net_inflow'][interval] = net
-            net_result[symbol]['net_inflow_value'][interval] = net_value
-            net_result[symbol]['health'][interval] = round(len(selected) * 100.0 / expected, 1)
 
-    unified_latest = {}
+    net_result = _empty_net_inflow_map(symbols)
     for symbol in symbols:
-        if symbol in latest_by_symbol and all_klines.get(symbol):
-            unified_latest[symbol] = min(latest_by_symbol[symbol], max(all_klines[symbol]))
-    return selected_oi, selected_kline, net_result, unified_latest
+        net_result[symbol] = _calculate_clickhouse_net_inflow(
+            taker_by_symbol.get(symbol, []),
+            all_klines.get(symbol, {}),
+            common_latest.get(symbol),
+        )
+        # The raw rows are retained only inside the repository aggregation
+        # result so windows can be recalculated after exchanges share an anchor.
+        net_result[symbol]['_raw_taker_rows'] = taker_by_symbol.get(symbol, [])
+
+    return oi_by_symbol, all_klines, net_result, common_latest
 
 
 def _aggregate_homepage_series_maps(
@@ -1142,6 +1145,7 @@ def _aggregate_homepage_series_maps(
     import time as _time
 
     exchanges = _get_enabled_exchanges()
+    align_to_slowest_exchange = exchange_maps_override is not None
     supported_exchanges = set(_normalize_exchange_list(get_supported_exchange_ids()))
     exchange_maps = {}
     exchange_adapters = {}
@@ -1495,7 +1499,20 @@ def _aggregate_homepage_series_maps(
                 anchor_time = None
                 break
 
-            new_anchor_time = max(symbol_exchange_snapshots[exchange]['current_time'] for exchange in included_exchanges)
+            # ClickHouse loads a full raw window and can therefore move the
+            # shared anchor back to the slowest included exchange. The legacy
+            # MySQL path only loads each exchange's own target points and keeps
+            # its established latest-anchor behavior.
+            if align_to_slowest_exchange:
+                new_anchor_time = min(
+                    symbol_exchange_snapshots[exchange]['current_time']
+                    for exchange in included_exchanges
+                )
+            else:
+                new_anchor_time = max(
+                    symbol_exchange_snapshots[exchange]['current_time']
+                    for exchange in included_exchanges
+                )
             stable = new_anchor_time == anchor_time
             anchor_time = new_anchor_time
 
@@ -1534,12 +1551,8 @@ def _aggregate_homepage_series_maps(
         coverage_map[symbol]['missing_exchanges'] = _normalize_exchange_list(missing_exchanges)
         coverage_map[symbol]['status'] = 'complete' if not coverage_map[symbol]['missing_exchanges'] else 'partial'
 
-        unified_times = [
-            unified_latest.get(symbol)
-            for exchange, (_, _, _, unified_latest) in exchange_maps.items()
-            if exchange in included_exchanges and unified_latest.get(symbol)
-        ]
-        coverage_map[symbol]['latest_time'] = min(unified_times) if unified_times else None
+        # The final anchor is the timestamp used for every aggregate field.
+        coverage_map[symbol]['latest_time'] = anchor_time
         for exchange in coverage_map[symbol]['missing_exchanges']:
             rejection = exchange_rejection_info.get(exchange)
             if rejection:
@@ -1563,11 +1576,46 @@ def _aggregate_homepage_series_maps(
         logger.info(_fmt('聚合打点：', symbol=symbol, stage='anchor_loop', ms=f'{_anchor_elapsed:.0f}'))
 
         price_exchange = primary_exchange if primary_exchange in included_exchanges else included_exchanges[0]
-        selected_kline_map[symbol] = exchange_maps[price_exchange][1].get(symbol, {})
+        target_times = {anchor_time}
+        target_times.update(anchor_time - _interval_to_ms(interval) for interval in TIME_INTERVALS)
+        selected_kline_map[symbol] = {
+            timestamp: point
+            for timestamp, point in exchange_maps[price_exchange][1].get(symbol, {}).items()
+            if timestamp in target_times
+        }
 
-        oi_times = sorted(
-            set().union(*(snapshot['oi_by_time'].keys() for snapshot in symbol_exchange_snapshots.values()))
-        )
+        # Recalculate ClickHouse taker windows against the final shared anchor.
+        # The raw rows are internal repository data and never leave this method.
+        for exchange in included_exchanges:
+            net_inflow_data = symbol_net_inflow_by_exchange.get(exchange, {})
+            raw_taker_rows = net_inflow_data.get('_raw_taker_rows')
+            if raw_taker_rows is None or _has_unreliable_taker_source(exchange):
+                continue
+            snapshot = symbol_exchange_snapshots[exchange]
+            aligned_net = _calculate_clickhouse_net_inflow(
+                raw_taker_rows,
+                snapshot.get('kline_by_time') or {},
+                anchor_time,
+            )
+            symbol_net_inflow_by_exchange[exchange] = aligned_net
+            taker_reasons = []
+            if not aligned_net['net_inflow']:
+                taker_reasons.append({'reason': 'missing_taker_history', 'details': {'health_pct': 0}})
+            else:
+                for interval in TIME_INTERVALS:
+                    health = aligned_net['health'].get(interval)
+                    if health is not None and health < HOMEPAGE_WINDOW_HEALTH_THRESHOLD:
+                        taker_reasons.append({
+                            'reason': 'taker_health_low',
+                            'details': {'interval': interval, 'health_pct': health},
+                        })
+            snapshot['taker_rejection'] = {
+                'stage': 'taker_validation',
+                'anchor_time': anchor_time,
+                'reasons': taker_reasons,
+            }
+
+        oi_times = sorted(target_times)
         for event_time in oi_times:
             exchange_points = {}
             for exchange in included_exchanges:
