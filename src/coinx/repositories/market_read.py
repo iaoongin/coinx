@@ -605,8 +605,9 @@ class ClickHouseMarketReadRepository:
             "argMax(first_id, updated_at) AS first_id, "
             "argMax(last_id, updated_at) AS last_id, "
             "argMax(count, updated_at) AS count "
-            f"FROM {self._table('market_tickers', final=False)} WHERE close_time = {int(close_time)} "
-            "GROUP BY symbol "
+            f"FROM {self._table('market_tickers', final=False)} AS mt "
+            f"WHERE mt.close_time = {int(close_time)} "
+            "GROUP BY mt.symbol "
             f"ORDER BY {order_column} {order_direction}, symbol ASC LIMIT {max(1, int(limit))}"
             f" SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
         )

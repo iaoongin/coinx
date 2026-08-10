@@ -74,6 +74,32 @@ def test_clickhouse_quote_volume_is_aggregated_server_side():
     assert "FINAL" not in sql
 
 
+def test_latest_ticker_snapshot_filter_is_not_shadowed_by_argmax_alias():
+    class TickerClient(FakeClickHouseClient):
+        def query_scalar(self, sql):
+            self.sql.append(sql)
+            return 1_700_000_000_000
+
+        def query_rows(self, sql):
+            self.sql.append(sql)
+            return []
+
+    client = TickerClient()
+    repository = ClickHouseMarketReadRepository(client, "coinx")
+
+    repository._load_latest_tickers_uncached(
+        rank_type="quote_volume",
+        direction="up",
+        limit=10,
+        close_time=None,
+        as_of_ms=None,
+    )
+
+    sql = client.sql[1]
+    assert "WHERE mt.close_time = 1700000000000" in sql
+    assert "GROUP BY mt.symbol" in sql
+
+
 def test_clickhouse_price_volume_metrics_limits_and_deduplicates_kline_scan():
     client = FakeClickHouseClient()
     repository = ClickHouseMarketReadRepository(client, "coinx")
