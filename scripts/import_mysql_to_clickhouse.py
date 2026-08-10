@@ -4,24 +4,26 @@
 Run after creating the ClickHouse schema and stopping application writes:
 
     python scripts/import_mysql_to_clickhouse.py `
-        --clickhouse-url http://10.0.0.128:8123 `
-        --clickhouse-database coinx `
+        --clickhouse-url $env:CLICKHOUSE_URL `
+        --clickhouse-database $env:CLICKHOUSE_DATABASE `
         --clickhouse-user $env:CLICKHOUSE_USER `
         --clickhouse-password $env:CLICKHOUSE_PASSWORD `
-        --mysql-host 10.0.0.128:13306 `
-        --mysql-user $env:MYSQL_USER `
-        --mysql-password $env:MYSQL_PASSWORD
+        --mysql-host "${env:DB_HOST}:$env:DB_PORT" `
+        --mysql-database $env:DB_NAME `
+        --mysql-user $env:DB_USER `
+        --mysql-password $env:DB_PASSWORD
 
         python scripts/import_mysql_to_clickhouse.py `
-                --clickhouse-url http://10.0.0.128:8123 `
-                --clickhouse-database coinx `
-                --clickhouse-user root `
-                --clickhouse-password root `
-                --mysql-host 10.0.0.128:13306 ` 
-                --mysql-user root `
-                --mysql-password 'coin123321'
+                --clickhouse-url $env:CLICKHOUSE_URL `
+                --clickhouse-database $env:CLICKHOUSE_DATABASE `
+                --clickhouse-user $env:CLICKHOUSE_USER `
+                --clickhouse-password $env:CLICKHOUSE_PASSWORD `
+                --mysql-host "${env:DB_HOST}:$env:DB_PORT" `
+                --mysql-database $env:DB_NAME `
+                --mysql-user $env:DB_USER `
+                --mysql-password $env:DB_PASSWORD
 
-        curl.exe --user "${env:CLICKHOUSE_USER}:$env:CLICKHOUSE_PASSWORD" --data-binary "DROP DATABASE IF EXISTS mysql_source" http://10.0.0.128:8123/
+        curl.exe --user "${env:CLICKHOUSE_USER}:$env:CLICKHOUSE_PASSWORD" --data-binary "DROP DATABASE IF EXISTS mysql_source" "${env:CLICKHOUSE_URL}/"
 
 The script records each source table's max(id) before importing. It advances its
 checkpoint only after a batch INSERT succeeds, so rerunning resumes automatically.

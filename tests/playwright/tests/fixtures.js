@@ -555,7 +555,11 @@ const test = base.extend({
   page: async ({ page }, use) => {
     await page.goto('/login');
     await page.locator('#username').fill('admin');
-    await page.locator('#password').fill('admin123');
+    const webPassword = process.env.COINX_TEST_WEB_PASSWORD || process.env.WEB_PASSWORD;
+    if (!webPassword) {
+      throw new Error('COINX_TEST_WEB_PASSWORD or WEB_PASSWORD must be set for Playwright tests');
+    }
+    await page.locator('#password').fill(webPassword);
     await page.getByRole('button', { name: '登录' }).click();
     await expect(page).toHaveURL(/\/$/);
 

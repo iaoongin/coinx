@@ -2,6 +2,11 @@ const { defineConfig, devices } = require('@playwright/test');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
+const testWebPassword = process.env.COINX_TEST_WEB_PASSWORD || process.env.WEB_PASSWORD;
+
+if (!testWebPassword) {
+  throw new Error('COINX_TEST_WEB_PASSWORD or WEB_PASSWORD must be set for Playwright tests');
+}
 
 module.exports = defineConfig({
   testDir: './tests',
@@ -31,7 +36,7 @@ module.exports = defineConfig({
       ...process.env,
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
-      WEB_PASSWORD: 'admin123',
+      WEB_PASSWORD: testWebPassword,
       WEB_PORT: '5502',
       PYTHONPATH: 'src',
     },

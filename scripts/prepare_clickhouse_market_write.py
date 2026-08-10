@@ -5,8 +5,10 @@ The script creates staging tables, copies the current data, and atomically
 renames the old tables aside.  Run it while collection is stopped:
 
     python scripts/prepare_clickhouse_market_write.py \
-        --clickhouse-url http://10.0.0.128:8123 \
-        --clickhouse-database coinx --clickhouse-user root --clickhouse-password root
+        --clickhouse-url "$CLICKHOUSE_URL" \
+        --clickhouse-database "$CLICKHOUSE_DATABASE" \
+        --clickhouse-user "$CLICKHOUSE_USER" \
+        --clickhouse-password "$CLICKHOUSE_PASSWORD"
 """
 
 from __future__ import annotations

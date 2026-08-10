@@ -22,10 +22,10 @@ services:
     ports:
       - "${DB_PORT:-3306}:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-coinx_root_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       MYSQL_DATABASE: ${DB_NAME:-coinx}
       MYSQL_USER: ${DB_USER:-coinx}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-coinx_password}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci

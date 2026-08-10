@@ -1,4 +1,5 @@
 -- MySQL 到 ClickHouse 的全量行情数据导入。
+-- 本文件是模板，执行前请将 ${MYSQL_SOURCE_*} 占位符从环境变量渲染为实际值；不要直接提交密码。
 -- 使用前：
 --   1. 已执行 schema_clickhouse.sql。
 --   2. 将下方 MySQL 连接参数替换为实际值；地址以 ClickHouse 服务端视角填写。
@@ -7,10 +8,10 @@
 
 CREATE DATABASE IF NOT EXISTS mysql_source
 ENGINE = MySQL(
-    'mysql:3306',       -- MySQL 地址和端口；Docker 同网络时通常为 mysql:3306
-    'coinx',            -- MySQL 数据库名
-    'coinx',            -- MySQL 用户名
-    'coinx_password'    -- MySQL 密码
+    '${MYSQL_SOURCE_HOST}',       -- 执行前替换为 MYSQL_SOURCE_HOST 环境变量
+    '${MYSQL_SOURCE_DATABASE}',   -- 执行前替换为 MYSQL_SOURCE_DATABASE 环境变量
+    '${MYSQL_SOURCE_USER}',       -- 执行前替换为 MYSQL_SOURCE_USER 环境变量
+    '${MYSQL_SOURCE_PASSWORD}'    -- 执行前替换为 MYSQL_SOURCE_PASSWORD 环境变量
 );
 
 -- 将 MySQL 的 DATETIME 按北京时间解释并写入 DateTime64(3, 'Asia/Shanghai')。

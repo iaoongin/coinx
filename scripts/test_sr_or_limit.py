@@ -1,11 +1,38 @@
 #!/usr/bin/env python3
 """快速连通性测试"""
+import os
 import sys
 sys.path.insert(0, 'src')
-from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+from sqlalchemy import URL, create_engine, text
 
-engine = create_engine('mysql+pymysql://root:coin123321@43.156.115.5:9030/coinx',
-                       connect_args={'connect_timeout': 10})
+load_dotenv()
+
+
+def required_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise SystemExit(f'{name} must be set')
+    return value
+
+
+SR_HOST = required_env('SR_HOST')
+SR_PORT = int(os.getenv('SR_PORT', '9030'))
+SR_USER = required_env('SR_USER')
+SR_PASSWORD = required_env('SR_PASSWORD')
+SR_DB = required_env('SR_DB')
+
+engine = create_engine(
+    URL.create(
+        'mysql+pymysql',
+        username=SR_USER,
+        password=SR_PASSWORD,
+        host=SR_HOST,
+        port=SR_PORT,
+        database=SR_DB,
+    ),
+    connect_args={'connect_timeout': 10},
+)
 
 try:
     with engine.connect() as conn:
