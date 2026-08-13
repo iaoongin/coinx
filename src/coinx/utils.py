@@ -202,9 +202,9 @@ def cleanup_old_data(keep_batches=20):
         try:
             from coinx.read_backend import get_clickhouse_repository
 
-            table = get_clickhouse_repository()._table('market_snapshots').replace(' FINAL', '')
+            table = get_clickhouse_repository()._table('market_snapshots', final=False)
             rows = get_clickhouse_repository().client.query_rows(
-                f'SELECT snapshot_time FROM {table} FINAL '
+                f'SELECT snapshot_time FROM {table} '
                 f'GROUP BY snapshot_time ORDER BY snapshot_time DESC LIMIT {max(1, int(keep_batches))}'
             )
             if len(rows) >= keep_batches:
@@ -261,9 +261,15 @@ def load_all_coins_data():
         try:
             from coinx.read_backend import get_clickhouse_repository
 
-            table = get_clickhouse_repository()._table('market_snapshots')
+            table = get_clickhouse_repository()._table('market_snapshots', final=False)
             rows = get_clickhouse_repository().client.query_rows(
-                f'SELECT symbol, snapshot_time, data_json FROM {table} FINAL '
+                'WITH deduplicated AS ('
+                'SELECT symbol, snapshot_time, batch_id, '
+                'argMax(data_json, created_at) AS data_json '
+                f'FROM {table} '
+                'GROUP BY symbol, snapshot_time, batch_id) '
+                'SELECT symbol, snapshot_time, data_json '
+                'FROM deduplicated '
                 'ORDER BY symbol ASC, snapshot_time DESC, batch_id DESC '
                 'LIMIT 1 BY symbol'
             )
@@ -333,9 +339,9 @@ def get_cache_update_time():
         try:
             from coinx.read_backend import get_clickhouse_repository
 
-            table = get_clickhouse_repository()._table('market_snapshots')
+            table = get_clickhouse_repository()._table('market_snapshots', final=False)
             value = get_clickhouse_repository().client.query_scalar(
-                f'SELECT max(snapshot_time) FROM {table} FINAL'
+                f'SELECT max(snapshot_time) FROM {table}'
             )
             return int(value) if value is not None else None
         except Exception:

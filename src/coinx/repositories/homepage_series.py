@@ -9,7 +9,13 @@ from sqlalchemy import and_, func, or_, text
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
-from coinx.config import ENABLED_EXCHANGES, PRIMARY_PRICE_EXCHANGE, TIME_INTERVALS, HOMEPAGE_WINDOW_HEALTH_THRESHOLD
+from coinx.config import (
+    ENABLED_EXCHANGES,
+    PRIMARY_PRICE_EXCHANGE,
+    TIME_INTERVALS,
+    HOMEPAGE_WINDOW_HEALTH_THRESHOLD,
+    CLICKHOUSE_HOMEPAGE_MAX_WORKERS,
+)
 from coinx.database import get_session
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.utils import logger
@@ -494,24 +500,95 @@ def _has_complete_homepage_coverage(oi_by_time, kline_by_time):
     return _has_required_change_coverage(oi_by_time, kline_by_time, current_time)
 
 
+def _row_value(row, field, default=None):
+    if isinstance(row, dict):
+        return row.get(field, default)
+    return getattr(row, field, default)
+
+
+def _prepare_clickhouse_homepage_row(row, table, symbols):
+    if isinstance(row, dict):
+        normalized = dict(row)
+    elif hasattr(row, '_mapping'):
+        normalized = dict(row._mapping)
+    else:
+        normalized = dict(vars(row))
+
+    if normalized.get('symbol'):
+        return normalized
+
+    # A single-symbol query has an unambiguous filter value. This keeps older
+    # ClickHouse/proxy response formats usable while still rejecting ambiguous
+    # rows in the multi-symbol homepage query.
+    if len(symbols) == 1:
+        normalized['symbol'] = symbols[0]
+        logger.warning(
+            'ClickHouse homepage row missing symbol; inferred from filter: table=%s fields=%s',
+            table,
+            sorted(normalized),
+        )
+        return normalized
+
+    logger.warning(
+        'ClickHouse homepage row missing symbol; skipped: table=%s fields=%s',
+        table,
+        sorted(normalized),
+    )
+    return None
+
+
 def _build_open_interest_point(row):
+    symbol = _row_value(row, 'symbol')
+    if not symbol:
+        return None
     return HomepageOpenInterestPoint(
-        symbol=row.symbol,
-        event_time=int(row.event_time),
-        sum_open_interest=float(row.sum_open_interest) if row.sum_open_interest is not None else None,
-        sum_open_interest_value=float(row.sum_open_interest_value) if row.sum_open_interest_value is not None else None,
+        symbol=symbol,
+        event_time=int(_row_value(row, 'event_time')),
+        sum_open_interest=(
+            float(_row_value(row, 'sum_open_interest'))
+            if _row_value(row, 'sum_open_interest') is not None
+            else None
+        ),
+        sum_open_interest_value=(
+            float(_row_value(row, 'sum_open_interest_value'))
+            if _row_value(row, 'sum_open_interest_value') is not None
+            else None
+        ),
     )
 
 
 def _build_kline_point(row):
+    symbol = _row_value(row, 'symbol')
+    if not symbol:
+        return None
     return HomepageKlinePoint(
-        symbol=row.symbol,
-        open_time=int(row.open_time),
-        high_price=float(row.high_price) if hasattr(row, 'high_price') and row.high_price is not None else None,
-        low_price=float(row.low_price) if hasattr(row, 'low_price') and row.low_price is not None else None,
-        close_price=float(row.close_price) if row.close_price is not None else None,
-        quote_volume=float(row.quote_volume) if row.quote_volume is not None else None,
-        taker_buy_quote_volume=float(row.taker_buy_quote_volume) if row.taker_buy_quote_volume is not None else None,
+        symbol=symbol,
+        open_time=int(_row_value(row, 'open_time')),
+        high_price=(
+            float(_row_value(row, 'high_price'))
+            if _row_value(row, 'high_price') is not None
+            else None
+        ),
+        low_price=(
+            float(_row_value(row, 'low_price'))
+            if _row_value(row, 'low_price') is not None
+            else None
+        ),
+        close_price=(
+            float(_row_value(row, 'close_price'))
+            if _row_value(row, 'close_price') is not None
+            else None
+        ),
+        quote_volume=(
+            float(_row_value(row, 'quote_volume'))
+            if _row_value(row, 'quote_volume') is not None
+            else None
+        ),
+        taker_buy_quote_volume=(
+            float(_row_value(row, 'taker_buy_quote_volume'))
+            if _row_value(row, 'taker_buy_quote_volume') is not None
+            else None
+        ),
     )
 
 
@@ -883,6 +960,8 @@ def _load_open_interest_model_map(session, model, symbols, upper_bound=None, exc
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
         point = _build_open_interest_point(row)
+        if point is None:
+            continue
         records_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
 
     total_ms = (_time.time() - func_start) * 1000
@@ -960,6 +1039,8 @@ def _load_kline_model_map(session, model, symbols, symbol_latest=None, upper_bou
     records_by_symbol = {symbol: {} for symbol in symbols}
     for row in query.all():
         point = _build_kline_point(row)
+        if point is None:
+            continue
         records_by_symbol.setdefault(point.symbol, {})[point.open_time] = point
 
     total_ms = (_time.time() - func_start) * 1000
@@ -1060,8 +1141,6 @@ def _calculate_clickhouse_net_inflow(rows, kline_by_time, anchor_time):
 
 def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None):
     """Load a full aligned window from ClickHouse for one exchange."""
-    from types import SimpleNamespace
-
     repo = get_clickhouse_repository()
     symbols = list(symbols or [])
     empty = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, _empty_net_inflow_map(symbols), {})
@@ -1092,33 +1171,44 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
         'symbol, event_time, sum_open_interest, sum_open_interest_value',
         symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
         lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
+        deduplicate=True,
     )
     kline_rows = repo.market_rows(
         'market_klines',
         'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
         symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
         lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
+        deduplicate=True,
     )
     taker_rows = [] if _has_unreliable_taker_source(exchange) else repo.market_rows(
         'market_taker_buy_sell_vol',
         'symbol, event_time, buy_vol, sell_vol',
         symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
         lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
+        deduplicate=True,
     )
 
     oi_by_symbol = {symbol: {} for symbol in symbols}
     for row in oi_rows:
-        point = _build_open_interest_point(SimpleNamespace(**row))
+        row = _prepare_clickhouse_homepage_row(row, 'market_open_interest_hist', symbols)
+        point = _build_open_interest_point(row) if row is not None else None
+        if point is None:
+            continue
         oi_by_symbol.setdefault(point.symbol, {})[point.event_time] = point
 
     all_klines = {symbol: {} for symbol in symbols}
     for row in kline_rows:
-        point = _build_kline_point(SimpleNamespace(**row))
+        row = _prepare_clickhouse_homepage_row(row, 'market_klines', symbols)
+        point = _build_kline_point(row) if row is not None else None
+        if point is None:
+            continue
         all_klines.setdefault(point.symbol, {})[point.open_time] = point
 
     taker_by_symbol = {symbol: [] for symbol in symbols}
     for row in taker_rows:
-        taker_by_symbol.setdefault(row['symbol'], []).append(row)
+        row = _prepare_clickhouse_homepage_row(row, 'market_taker_buy_sell_vol', symbols)
+        if row is not None:
+            taker_by_symbol.setdefault(row['symbol'], []).append(row)
 
     net_result = _empty_net_inflow_map(symbols)
     for symbol in symbols:
@@ -1196,7 +1286,12 @@ def _aggregate_homepage_series_maps(
     start_time = _time.perf_counter()
 
     logger.info('Homepage parallel exchange load start: exchanges=%s exchange_list=%s', len(supported_list), supported_list)
-    with ThreadPoolExecutor(max_workers=min(4, len(supported_list))) as executor:
+    max_workers = (
+        max(1, int(CLICKHOUSE_HOMEPAGE_MAX_WORKERS))
+        if is_clickhouse_read()
+        else 4
+    )
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(supported_list))) as executor:
         futures = {executor.submit(load_exchange, exchange): exchange for exchange in supported_list}
 
         for future in as_completed(futures):

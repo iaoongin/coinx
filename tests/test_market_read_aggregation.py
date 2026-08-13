@@ -44,12 +44,11 @@ def test_clickhouse_aggregation_returns_buckets_and_validates_complete_points():
         "quote_volume": "1200",
     }]
     sql = client.sql[0]
-    assert "argMax(close_price, open_time)" in sql
+    assert "argMax(tupleElement(latest_row, 3), open_time)" in sql
     assert "GROUP BY symbol, bucket_time" in sql
     assert "HAVING count() = 12" in sql
     assert "max(open_time) - min(open_time) = 3300000" in sql
-    assert "argMax(high_price, updated_at) AS high_price" in sql
-    assert "argMax(low_price, updated_at) AS low_price" in sql
+    assert "argMax(tuple(high_price, low_price, close_price, quote_volume), updated_at) AS latest_row" in sql
     assert "FROM coinx.market_klines" in sql
     assert "FINAL" not in sql
     assert "max_bytes_before_external_group_by" in sql
@@ -68,10 +67,76 @@ def test_clickhouse_quote_volume_is_aggregated_server_side():
 
     assert result == {"BTCUSDT": 1200.0}
     sql = client.sql[0]
-    assert "sum(ifNull(quote_volume, 0)) AS quote_volume_24h" in sql
+    assert "sum(ifNull(tupleElement(latest_row, 1), 0)) AS quote_volume_24h" in sql
     assert "GROUP BY symbol" in sql
-    assert "argMax(quote_volume, updated_at) AS quote_volume" in sql
+    assert "argMax(tuple(quote_volume), updated_at) AS latest_row" in sql
     assert "FINAL" not in sql
+
+
+def test_clickhouse_market_rows_deduplicates_without_final():
+    client = FakeClickHouseClient()
+    repository = ClickHouseMarketReadRepository(client, "coinx")
+
+    repository.market_rows(
+        "market_klines",
+        "symbol, open_time, high_price, close_price, quote_volume",
+        symbols=["BTCUSDT"],
+        exchange="binance",
+        period="5m",
+        time_column="open_time",
+        lower_bound=1_700_000_000_000,
+        upper_bound=1_700_000_300_000,
+        order_by="symbol, open_time",
+        deduplicate=True,
+    )
+
+    sql = client.sql[0]
+    assert "FINAL" not in sql
+    assert "argMax(tuple(high_price, close_price, quote_volume), updated_at) AS _latest_row" in sql
+    assert "GROUP BY exchange, symbol, period, open_time" in sql
+    assert "PREWHERE symbol IN ('BTCUSDT')" in sql
+    assert "max_threads = 2" in sql
+    assert "max_bytes_before_external_group_by" in sql
+
+
+def test_clickhouse_market_rows_keeps_final_for_detail_reads():
+    client = FakeClickHouseClient()
+    repository = ClickHouseMarketReadRepository(client, "coinx")
+
+    repository.market_rows(
+        "market_klines",
+        "symbol, open_time, close_price",
+        symbols=["BTCUSDT"],
+        exchange="binance",
+        period="5m",
+        time_column="open_time",
+        lower_bound=1_700_000_000_000,
+        upper_bound=1_700_000_300_000,
+    )
+
+    assert "FROM coinx.market_klines FINAL" in client.sql[0]
+
+
+def test_clickhouse_market_rows_can_deduplicate_key_only_reads():
+    client = FakeClickHouseClient()
+    repository = ClickHouseMarketReadRepository(client, "coinx")
+
+    repository.market_rows(
+        "market_taker_buy_sell_vol",
+        "symbol, event_time",
+        symbols=["BTCUSDT"],
+        exchange="binance",
+        period="5m",
+        time_column="event_time",
+        lower_bound=1_700_000_000_000,
+        upper_bound=1_700_000_300_000,
+        deduplicate=True,
+    )
+
+    sql = client.sql[0]
+    assert "FINAL" not in sql
+    assert "SELECT exchange, symbol, period, event_time FROM coinx.market_taker_buy_sell_vol" in sql
+    assert "GROUP BY exchange, symbol, period, event_time" in sql
 
 
 def test_latest_ticker_snapshot_filter_is_not_shadowed_by_argmax_alias():
@@ -111,8 +176,7 @@ def test_clickhouse_price_volume_metrics_limits_and_deduplicates_kline_scan():
 
     sql = client.sql[0]
     assert "deduplicated_klines AS" in sql
-    assert "argMax(k.open_price, k.updated_at) AS open_price" in sql
-    assert "argMax(k.close_price, k.updated_at) AS close_price" in sql
+    assert "argMax(tuple(k.open_price, k.close_price, k.quote_volume), k.updated_at) AS latest_row" in sql
     assert "FROM coinx.market_klines" in sql
     assert "FINAL" not in sql
     assert "max_bytes_before_external_group_by" in sql

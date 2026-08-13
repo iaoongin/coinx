@@ -193,6 +193,7 @@ def _normalize_open_interest_records_clickhouse(exchange, records):
             lower_bound=min(event_times),
             upper_bound=max(event_times),
             order_by='symbol, open_time',
+            deduplicate=True,
         )
         prices.update({
             (symbol, period, int(row['open_time'])): float(row['close_price'])
@@ -492,6 +493,7 @@ def get_existing_series_timestamps(exchange, series_type, symbols, timestamps, p
             lower_bound=min(timestamps),
             upper_bound=max(timestamps),
             order_by=f'symbol, {time_column}',
+            deduplicate=True,
         )
         existing = {symbol: set() for symbol in symbols}
         wanted = {int(timestamp) for timestamp in timestamps}

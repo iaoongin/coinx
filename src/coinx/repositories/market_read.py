@@ -14,6 +14,7 @@ from threading import Lock, RLock
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from coinx.read_clients import ClickHouseReadClient, MySQLReadClient
+from coinx.config import CLICKHOUSE_QUERY_MAX_THREADS
 
 
 TABLES = {
@@ -35,6 +36,7 @@ _CACHE_MAX_ENTRIES = 128
 # Keep large ClickHouse aggregations spillable. This is a per-query threshold,
 # not a request to raise the process/container memory limit.
 _EXTERNAL_GROUP_BY_BYTES = 256 * 1024 * 1024
+_QUERY_MAX_THREADS = max(1, int(CLICKHOUSE_QUERY_MAX_THREADS))
 
 
 def _cache_key_lock(cache_name: str, key: Any) -> Lock:
@@ -120,8 +122,8 @@ class ClickHouseMarketReadRepository:
                 cache.pop(oldest_key, None)
 
     def _table(self, table: str, final: bool = True) -> str:
-        # ReplacingMergeTree rows are eventually merged; FINAL keeps API and
-        # collector reads logically deduplicated immediately after a retry.
+        # Keep FINAL as the safe default for direct detail reads. Wide reads
+        # that have an explicit tuple-based deduplication path opt out below.
         suffix = " FINAL" if final else ""
         return f"{self.database}.{_identifier(table)}{suffix}"
 
@@ -136,6 +138,8 @@ class ClickHouseMarketReadRepository:
         lower_bound: Optional[int] = None,
         upper_bound: Optional[int] = None,
         order_by: Optional[str] = None,
+        final: bool = True,
+        deduplicate: bool = False,
     ) -> List[Dict[str, Any]]:
         """Read a fixed market-table projection for business repositories."""
         table = _identifier(table)
@@ -153,10 +157,55 @@ class ClickHouseMarketReadRepository:
                 filters.append(f"{time_column} >= {int(lower_bound)}")
             if upper_bound is not None:
                 filters.append(f"{time_column} <= {int(upper_bound)}")
-        sql = f"SELECT {columns} FROM {self._table(table)}"
+        projection = [part.strip() for part in columns.split(",") if part.strip()]
+        if not projection or any(not _IDENTIFIER.fullmatch(part) for part in projection):
+            raise ValueError("columns must be a comma-separated list of identifiers")
+
+        # For wide reads, collapse the complete row selected by the same
+        # version. A tuple keeps Nullable columns together and prevents
+        # independent argMax calls from producing a row that never existed.
+        if deduplicate and time_column is not None and table != "market_tickers":
+            group_columns = ["exchange", "symbol", "period", time_column]
+            value_columns = [column for column in projection if column not in group_columns]
+            tuple_alias = "_latest_row"
+            deduplicated_projection = list(group_columns)
+            if value_columns:
+                deduplicated_projection.append(
+                    f"argMax(tuple({', '.join(value_columns)}), updated_at) AS {tuple_alias}"
+                )
+            source = (
+                "(SELECT "
+                + ", ".join(deduplicated_projection)
+                + f" FROM {self._table(table, final=False)}"
+                + f" PREWHERE {(' AND '.join(filters)) if filters else '1'}"
+                + " GROUP BY "
+                + ", ".join(group_columns)
+                + ") AS deduplicated"
+            )
+            outer_projection = []
+            for column in projection:
+                if column in group_columns:
+                    outer_projection.append(column)
+                else:
+                    outer_projection.append(
+                        f"tupleElement({tuple_alias}, {value_columns.index(column) + 1}) AS {column}"
+                    )
+            sql = f"SELECT {', '.join(outer_projection)} FROM {source}"
+        else:
+            sql = f"SELECT {', '.join(projection)} FROM {self._table(table, final=final)}"
         if filters:
-            sql += " WHERE " + " AND ".join(filters)
+            # Filters are already applied in the PREWHERE of the deduplication
+            # subquery. Keep the FINAL path as a normal WHERE query so the
+            # primary key and partition pruning remain available.
+            if not (deduplicate and time_column is not None and table != "market_tickers"):
+                sql += " WHERE " + " AND ".join(filters)
         sql += f" ORDER BY {order_by or time_column or 'symbol'}"
+        if deduplicate and time_column is not None and table != "market_tickers":
+            sql += (
+                f" SETTINGS max_threads = {_QUERY_MAX_THREADS},"
+                f" max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES},"
+                f" max_bytes_before_external_sort = {_EXTERNAL_GROUP_BY_BYTES}"
+            )
         return [_normalize_row(row) for row in self.client.query_rows(sql)]
 
     def aggregate_kline_rows(
@@ -193,10 +242,7 @@ class ClickHouseMarketReadRepository:
         # they describe the high/low over the whole bucket, not the newest row.
         deduplicated = (
             "SELECT symbol, open_time, "
-            "argMax(high_price, updated_at) AS high_price, "
-            "argMax(low_price, updated_at) AS low_price, "
-            "argMax(close_price, updated_at) AS close_price, "
-            "argMax(quote_volume, updated_at) AS quote_volume "
+            "argMax(tuple(high_price, low_price, close_price, quote_volume), updated_at) AS latest_row "
             f"FROM {self._table('market_klines', final=False)} "
             f"PREWHERE {' AND '.join(filters)} "
             "GROUP BY symbol, open_time"
@@ -205,10 +251,10 @@ class ClickHouseMarketReadRepository:
         rows = self.client.query_rows(
             "SELECT symbol, "
             f"{bucket_expression} AS bucket_time, "
-            "max(high_price) AS high_price, "
-            "min(low_price) AS low_price, "
-            "argMax(close_price, open_time) AS close_price, "
-            "sum(ifNull(quote_volume, 0)) AS quote_volume "
+            "max(tupleElement(latest_row, 1)) AS high_price, "
+            "min(tupleElement(latest_row, 2)) AS low_price, "
+            "argMax(tupleElement(latest_row, 3), open_time) AS close_price, "
+            "sum(ifNull(tupleElement(latest_row, 4), 0)) AS quote_volume "
             f"FROM ({deduplicated}) AS k "
             "GROUP BY symbol, bucket_time "
             f"HAVING count() = {expected_points} "
@@ -246,13 +292,13 @@ class ClickHouseMarketReadRepository:
             filters.append(f"open_time <= {int(upper_bound)}")
         deduplicated = (
             "SELECT symbol, open_time, "
-            "argMax(quote_volume, updated_at) AS quote_volume "
+            "argMax(tuple(quote_volume), updated_at) AS latest_row "
             f"FROM {self._table('market_klines', final=False)} "
             f"PREWHERE {' AND '.join(filters)} "
             "GROUP BY symbol, open_time"
         )
         rows = self.client.query_rows(
-            "SELECT symbol, sum(ifNull(quote_volume, 0)) AS quote_volume_24h "
+            "SELECT symbol, sum(ifNull(tupleElement(latest_row, 1), 0)) AS quote_volume_24h "
             f"FROM ({deduplicated}) AS k "
             "GROUP BY symbol "
             f"SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
@@ -281,8 +327,9 @@ class ClickHouseMarketReadRepository:
         if upper_bound is not None:
             filters.append(f"{time_column} <= {int(upper_bound)}")
         rows = self.client.query_rows(
-            f"SELECT symbol, max({time_column}) AS latest_time FROM {self._table(table)} "
+            f"SELECT symbol, max({time_column}) AS latest_time FROM {self._table(table, final=False)} "
             f"WHERE {' AND '.join(filters)} GROUP BY symbol"
+            f" SETTINGS max_threads = {_QUERY_MAX_THREADS}"
         )
         return {
             str(row['symbol']): int(row['latest_time'])
@@ -291,14 +338,16 @@ class ClickHouseMarketReadRepository:
         }
 
     def table_count(self, table: str) -> int:
-        value = self.client.query_scalar(f"SELECT count() FROM {self._table(table)}")
+        # This is a migration diagnostic and must retain logical row-count
+        # semantics, so it is one of the few intentional FINAL reads.
+        value = self.client.query_scalar(f"SELECT count() FROM {self._table(table, final=True)}")
         return int(value or 0)
 
     def time_bounds(self, table: str) -> Dict[str, Optional[int]]:
         time_column = TABLES[table][0]
         row = self.client.query_rows(
             f"SELECT minOrNull({time_column}) AS min_time, maxOrNull({time_column}) AS max_time "
-            f"FROM {self._table(table)}"
+            f"FROM {self._table(table, final=False)}"
         )
         if not row:
             return {"min_time": None, "max_time": None}
@@ -353,7 +402,7 @@ class ClickHouseMarketReadRepository:
         # Read a recent bounded window first, then perform an exact historical
         # fallback only for symbols that have no row in that window.
         upper = int(as_of_ms) if as_of_ms is not None else self.client.query_scalar(
-            f"SELECT max(event_time) FROM {self._table('market_funding_rate')} "
+            f"SELECT max(event_time) FROM {self._table('market_funding_rate', final=False)} "
             f"WHERE period = {_quote(period)} AND exchange = {_quote(exchange)}"
         )
         if upper is None:
@@ -371,7 +420,7 @@ class ClickHouseMarketReadRepository:
 
         if requested is None:
             expected_rows = self.client.query_rows(
-                f"SELECT DISTINCT symbol FROM {self._table('market_funding_rate')} "
+                f"SELECT DISTINCT symbol FROM {self._table('market_funding_rate', final=False)} "
                 f"WHERE period = {_quote(period)} AND exchange = {_quote(exchange)} "
                 f"AND event_time <= {upper}"
             )
@@ -408,7 +457,7 @@ class ClickHouseMarketReadRepository:
             filters.append(f"event_time <= {int(upper_bound)}")
         return self.client.query_rows(
             "SELECT symbol, event_time, funding_rate, predicted_rate, next_funding_time, mark_price "
-            f"FROM {self._table('market_funding_rate')} "
+            f"FROM {self._table('market_funding_rate', final=False)} "
             f"WHERE {' AND '.join(filters)} "
             "ORDER BY symbol, event_time DESC, updated_at DESC "
             "LIMIT 1 BY symbol"
@@ -524,12 +573,16 @@ class ClickHouseMarketReadRepository:
             return {}
         cutoff = int(as_of_ms if as_of_ms is not None else time.time() * 1000) - int(hours) * 3600000
         symbol_filter = _in_list(symbols)
-        rows = self.client.query_rows(
-            "SELECT symbol, event_time, funding_rate "
-            f"FROM {self._table('market_funding_rate')} WHERE symbol IN ({symbol_filter}) "
-            f"AND period = {_quote('5m')} AND exchange = {_quote(exchange)} AND event_time >= {cutoff} "
-            + (f"AND event_time <= {int(as_of_ms)} " if as_of_ms is not None else "")
-            + "ORDER BY symbol ASC, event_time ASC"
+        rows = self.market_rows(
+            'market_funding_rate',
+            'symbol, event_time, funding_rate',
+            symbols=symbols,
+            exchange=exchange,
+            period='5m',
+            time_column='event_time',
+            lower_bound=cutoff,
+            upper_bound=as_of_ms,
+            order_by='symbol, event_time',
         )
         result: Dict[str, List[Any]] = {}
         for row in rows:
@@ -590,24 +643,29 @@ class ClickHouseMarketReadRepository:
         order_direction = "ASC" if rank_type == "price_change" and direction == "down" else "DESC"
         rows = self.client.query_rows(
             "SELECT symbol, "
-            "argMax(price_change, updated_at) AS price_change, "
-            "argMax(price_change_percent, updated_at) AS price_change_percent, "
-            "argMax(weighted_avg_price, updated_at) AS weighted_avg_price, "
-            "argMax(last_price, updated_at) AS last_price, "
-            "argMax(last_qty, updated_at) AS last_qty, "
-            "argMax(open_price, updated_at) AS open_price, "
-            "argMax(high_price, updated_at) AS high_price, "
-            "argMax(low_price, updated_at) AS low_price, "
-            "argMax(volume, updated_at) AS volume, "
-            "argMax(quote_volume, updated_at) AS quote_volume, "
-            "argMax(open_time, updated_at) AS open_time, "
-            "argMax(close_time, updated_at) AS close_time, "
-            "argMax(first_id, updated_at) AS first_id, "
-            "argMax(last_id, updated_at) AS last_id, "
-            "argMax(count, updated_at) AS count "
+            "tupleElement(latest_row, 1) AS price_change, "
+            "tupleElement(latest_row, 2) AS price_change_percent, "
+            "tupleElement(latest_row, 3) AS weighted_avg_price, "
+            "tupleElement(latest_row, 4) AS last_price, "
+            "tupleElement(latest_row, 5) AS last_qty, "
+            "tupleElement(latest_row, 6) AS open_price, "
+            "tupleElement(latest_row, 7) AS high_price, "
+            "tupleElement(latest_row, 8) AS low_price, "
+            "tupleElement(latest_row, 9) AS volume, "
+            "tupleElement(latest_row, 10) AS quote_volume, "
+            "tupleElement(latest_row, 11) AS open_time, "
+            "tupleElement(latest_row, 12) AS close_time, "
+            "tupleElement(latest_row, 13) AS first_id, "
+            "tupleElement(latest_row, 14) AS last_id, "
+            "tupleElement(latest_row, 15) AS count "
+            "FROM (SELECT mt.symbol, "
+            "argMax(tuple(mt.price_change, mt.price_change_percent, mt.weighted_avg_price, "
+            "mt.last_price, mt.last_qty, mt.open_price, mt.high_price, mt.low_price, "
+            "mt.volume, mt.quote_volume, mt.open_time, mt.close_time, mt.first_id, "
+            "mt.last_id, mt.count), mt.updated_at) AS latest_row "
             f"FROM {self._table('market_tickers', final=False)} AS mt "
             f"WHERE mt.close_time = {int(close_time)} "
-            "GROUP BY mt.symbol "
+            "GROUP BY mt.symbol) AS latest_tickers "
             f"ORDER BY {order_column} {order_direction}, symbol ASC LIMIT {max(1, int(limit))}"
             f" SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
         )
@@ -641,9 +699,7 @@ class ClickHouseMarketReadRepository:
                 SELECT
                     k.symbol,
                     k.open_time,
-                    argMax(k.open_price, k.updated_at) AS open_price,
-                    argMax(k.close_price, k.updated_at) AS close_price,
-                    argMax(k.quote_volume, k.updated_at) AS quote_volume
+                    argMax(tuple(k.open_price, k.close_price, k.quote_volume), k.updated_at) AS latest_row
                 FROM {self._table('market_klines', final=False)} AS k
                 PREWHERE k.exchange = 'binance' AND k.period = '5m'
                 WHERE k.symbol IN (SELECT symbol FROM top_symbols)
@@ -652,7 +708,10 @@ class ClickHouseMarketReadRepository:
                 GROUP BY k.symbol, k.open_time
             ), ranked_klines AS (
                 SELECT
-                    k.symbol, k.open_time, k.open_price, k.close_price, k.quote_volume,
+                    k.symbol, k.open_time,
+                    tupleElement(k.latest_row, 1) AS open_price,
+                    tupleElement(k.latest_row, 2) AS close_price,
+                    tupleElement(k.latest_row, 3) AS quote_volume,
                     row_number() OVER (PARTITION BY k.symbol ORDER BY k.open_time DESC) AS rn
                 FROM deduplicated_klines AS k
                 INNER JOIN top_symbols s ON s.symbol = k.symbol
@@ -720,7 +779,7 @@ class ClickHouseMarketReadRepository:
             filters.append(f"exchange = {_quote(exchange)}")
         latest_filters = " AND ".join(filters)
         latest = self.client.query_scalar(
-            f"SELECT max({time_column}) FROM {self._table(table)} WHERE {latest_filters}"
+            f"SELECT max({time_column}) FROM {self._table(table, final=False)} WHERE {latest_filters}"
         )
         if latest is None:
             return []
@@ -732,11 +791,17 @@ class ClickHouseMarketReadRepository:
             "market_taker_buy_sell_vol": "exchange, symbol, period, event_time, buy_sell_ratio, buy_vol, sell_vol",
             "market_funding_rate": "exchange, symbol, period, event_time, funding_rate, predicted_rate, next_funding_time, mark_price",
         }[table]
-        rows = self.client.query_rows(
-            f"SELECT {columns} FROM {self._table(table)} WHERE {latest_filters} "
-            f"AND {time_column} BETWEEN {cutoff} AND {upper} ORDER BY {time_column} ASC"
+        return self.market_rows(
+            table,
+            columns,
+            symbols=[symbol],
+            exchange=exchange,
+            period=period,
+            time_column=time_column,
+            lower_bound=cutoff,
+            upper_bound=upper,
+            order_by=time_column,
         )
-        return [_normalize_row(row) for row in rows]
 
     def contract_chart_series(
         self,
@@ -757,7 +822,7 @@ class ClickHouseMarketReadRepository:
             ("market_taker_buy_sell_vol", "event_time"),
         ):
             latest = self.client.query_scalar(
-                f"SELECT max({time_column}) FROM {self._table(table)} "
+                f"SELECT max({time_column}) FROM {self._table(table, final=False)} "
                 f"WHERE symbol = {symbol_sql} AND period = {period_sql}"
                 + upper_sql.format(time_column=time_column)
             )
@@ -768,25 +833,29 @@ class ClickHouseMarketReadRepository:
 
         anchor = max(latest_times)
         cutoff = anchor - int(hours) * 3600000
-        kline_rows = self.client.query_rows(
-            f"SELECT exchange, symbol, period, open_time, close_time, close_price, volume "
-            f"FROM {self._table('market_klines')} WHERE symbol = {symbol_sql} AND period = {period_sql} "
-            f"AND open_time BETWEEN {cutoff} AND {anchor} ORDER BY open_time ASC"
+        kline_rows = self.market_rows(
+            'market_klines',
+            'exchange, symbol, period, open_time, close_time, close_price, volume',
+            symbols=[symbol], period=period, time_column='open_time',
+            lower_bound=cutoff, upper_bound=anchor, order_by='open_time',
         )
-        oi_rows = self.client.query_rows(
-            f"SELECT exchange, symbol, period, event_time, sum_open_interest, sum_open_interest_value "
-            f"FROM {self._table('market_open_interest_hist')} WHERE symbol = {symbol_sql} AND period = {period_sql} "
-            f"AND event_time BETWEEN {cutoff} AND {anchor} ORDER BY event_time ASC"
+        oi_rows = self.market_rows(
+            'market_open_interest_hist',
+            'exchange, symbol, period, event_time, sum_open_interest, sum_open_interest_value',
+            symbols=[symbol], period=period, time_column='event_time',
+            lower_bound=cutoff, upper_bound=anchor, order_by='event_time',
         )
-        flow_rows = self.client.query_rows(
-            f"SELECT exchange, symbol, period, event_time, buy_vol, sell_vol "
-            f"FROM {self._table('market_taker_buy_sell_vol')} WHERE symbol = {symbol_sql} AND period = {period_sql} "
-            f"AND event_time BETWEEN {cutoff} AND {anchor} ORDER BY event_time ASC"
+        flow_rows = self.market_rows(
+            'market_taker_buy_sell_vol',
+            'exchange, symbol, period, event_time, buy_vol, sell_vol',
+            symbols=[symbol], period=period, time_column='event_time',
+            lower_bound=cutoff, upper_bound=anchor, order_by='event_time',
         )
-        funding_rows = self.client.query_rows(
-            f"SELECT symbol, event_time, funding_rate, predicted_rate "
-            f"FROM {self._table('market_funding_rate')} WHERE symbol = {symbol_sql} AND period = {period_sql} "
-            f"AND event_time BETWEEN {cutoff} AND {anchor} ORDER BY event_time ASC"
+        funding_rows = self.market_rows(
+            'market_funding_rate',
+            'symbol, event_time, funding_rate, predicted_rate',
+            symbols=[symbol], period=period, time_column='event_time',
+            lower_bound=cutoff, upper_bound=anchor, order_by='event_time',
         )
 
         prices: Dict[int, Dict[str, Any]] = {}

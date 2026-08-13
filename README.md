@@ -101,15 +101,15 @@ MySQL 数据保存在 Docker 命名卷 `mysql_data` 中。普通停止、重建�
 
 项目配置来源：
 
-- `application.yml`
-- `application-{env}.yml`
-- 环境变量覆盖
+- `.env`
+- `.env.<profile>`，例如 `.env.local` 或 `.env.prod`
+- 进程环境变量覆盖
 
 优先级从高到低：
 
-- 环境变量
-- `application-{env}.yml`
-- `application.yml`
+- 进程环境变量
+- `.env.<profile>`
+- `.env`
 
 常用配置项：
 
@@ -119,51 +119,25 @@ MySQL 数据保存在 Docker 命名卷 `mysql_data` 中。普通停止、重建�
 - `DB_PASSWORD`
 - `DB_NAME`
 
-本地开发可直接修改 [application-dev.yml](/z:/Resource/Code/project/coinx/application-dev.yml)。
+本地开发建议修改 `.env.local`；生产环境建议修改 `.env.prod`，并通过密钥管理系统注入密码。
 
 ### 环境变量说明
 
-| 变量名 | 说明 | 默认值 |
-| --- | --- | --- |
-| `COLLECTION_SCHEDULER_ONLY` | When `true`, page requests and manual collection endpoints are read-only; only scheduled jobs may fetch external data and write collection results. | `true` |
-| `COINX_ENV` | 选择环境配置文件，例如 `dev` 会加载 `application-dev.yml` | `application.yml` 中的 `profiles.active`，默认是 `dev` |
-| `BINANCE_BASE_URL` | Binance API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/fapi.binance.com` |
-| `OKX_BASE_URL` | OKX API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/www.okx.com` |
-| `OKX_RUBIK_MIN_INTERVAL_MS` | OKX rubik 统计接口最小请求间隔，`taker-volume`/`open-interest-volume` 默认按高敏接口处理 | `500` |
-| `BYBIT_BASE_URL` | Bybit API 基础地址，可替换为代理地址或自建转发地址 | `https://proxy.yffjglcms.com/api.bybit.com` |
-| `GATE_BASE_URL` | Gate API 基础地址，首期 futures 链路默认走 `fx-api` 的代理口径 | `https://proxy.yffjglcms.com/fx-api.gateio.ws` |
-| `GATE_SETTLE` | Gate 合约结算币种，首期默认只接 `usdt` 永续 | `usdt` |
-| `GATE_MIN_INTERVAL_MS` | Gate 公共接口最小请求间隔，避免连续 futures 请求触发代理/WAF 拦截 | `60` |
-| `GATE_403_RETRY_FALLBACK_SECONDS` | Gate 遇到 `403` 时的冷却秒数 | `8` |
-| `SCHEDULER_ENABLED` | 定时任务调度器总开关。设为 `false` 时任务仍会注册并在任务管理页展示，但 APScheduler 不启动、不会自动执行任务，并跳过启动时的首页数据补采；仍可立即手动执行，暂停和恢复不可用。修改后需重启服务。支持 `true/false`、`1/0`、`yes/no`、`on/off` | `true` |
-| `TASK_RUN_HISTORY_RETENTION_DAYS` | 定时任务每次执行的持久化记录保留天数；服务启动会将遗留的运行中记录标记为中断失败 | `90` |
-| `UPDATE_INTERVAL` | 定时刷新间隔，单位为秒，当前会同时用于市场数据与行情榜快照刷新 | `300` |
-| `TIME_INTERVALS` | 需要计算的时间周期列表，当前更建议放在 YAML 中配置，不建议直接用环境变量字符串覆盖 | `5m,15m,30m,1h,4h,12h,24h,48h,72h,168h` |
-| `USE_PROXY` | 是否启用 HTTP/HTTPS 代理，支持 `true/false/1/0/yes/no` | `false` |
-| `PROXY_HOST` | 代理主机地址 | `127.0.0.1` |
-| `PROXY_PORT` | 代理端口 | `7897` |
-| `USE_PROXY_POOL` | 是否启用代理池配置能力 | `false` |
-| `PROXY_POOL_URLS` | 通用代理池列表，格式 `id=url;id2=url2` | 空 |
-| `PROXY_POOL_STRATEGY` | 代理选择策略，当前支持 `round_robin` / `least_recently_used` | `round_robin` |
-| `PROXY_POOL_FAIL_COOLDOWN_SECONDS` | 代理请求失败后的冷却秒数 | `30` |
-| `DB_HOST` | MySQL 主机地址；Compose 内置 MySQL 使用 `mysql` | 代码默认 `localhost`，`.env.example` 为 `mysql` |
-| `DB_PORT` | MySQL 端口 | `3306` |
-| `DB_USER` | MySQL 用户名 | 代码默认 `root`，`.env.example` 为 `coinx` |
-| `DB_PASSWORD` | MySQL 密码 | 代码默认空，`.env.example` 为 `coinx_password` |
-| `DB_NAME` | 数据库名 | `coinx` |
-| `DB_CHARSET` | MySQL 字符集 | `utf8mb4` |
-| `MYSQL_ROOT_PASSWORD` | Docker Compose 内置 MySQL 的 root 密码，仅容器初始化使用 | `coinx_root_password` |
-| `WEB_HOST` | Web 服务监听地址 | `0.0.0.0` |
-| `WEB_PORT` | Web 服务端口 | `5000` |
-| `WEB_DEBUG` | 是否启用 Flask Debug，支持 `true/false/1/0/yes/no` | `false` |
-| `WEB_USERNAME` | 网页登录用户名 | `admin` |
-| `WEB_PASSWORD` | 网页登录密码，未配置时启动时会自动生成并打印到日志 | 随机生成 |
-| `WEB_SESSION_SECRET` | 会话签名密钥，未配置时自动生成 | 随机生成 |
+完整变量模板见 [`.env.example`](.env.example)。模板已经按用途分组，日常只需要关注对应 profile 文件：
+
+- 运行和安全：`COINX_ENV`、`WEB_*`、`INSTANCE_NAME`
+- 调度和首页：`SCHEDULER_*`、`COLLECTION_SCHEDULER_ONLY`、`UPDATE_INTERVAL`、`TIME_INTERVALS`、`HOMEPAGE_*`
+- 后端和数据库：`DB_*`、`MARKET_BACKEND`、`READ_BACKEND`、`MARKET_WRITE_BACKEND`
+- ClickHouse：`CLICKHOUSE_*`
+- 外部服务：交易所 `*_BASE_URL`、`PROXY_*`、`SR_*`
+- 采集和通知：`FETCH_COINS_*`、`REPAIR_*`、`FUNDING_RATE_*`、`NOTIFICATION_*`、`RSS_*`
+
+建议把稳定的公共配置放在 `.env`，把本机和生产差异分别放在 `.env.local`、`.env.prod`。密码、JWT 密钥和通知加密密钥不要提交到 Git。
 
 示例：
 
 ```bash
-set COINX_ENV=dev
+set COINX_ENV=local
 set DB_HOST=127.0.0.1
 set DB_PORT=3306
 set DB_USER=root
@@ -181,7 +155,40 @@ PROXY_POOL_URLS=HK=socks5h://user:pass@proxy.example.com:2261;JP=socks5h://user:
 PROXY_POOL_STRATEGY=round_robin
 ```
 
-如果代理地址使用 `socks5://` 或 `socks5h://`，部署环境还需要安装 `PySocks`；项目的 [requirements.txt](/Users/xhx-mbp/Code/project/coinx/requirements.txt) 已包含该依赖。
+如果代理地址使用 `socks5://` 或 `socks5h://`，部署环境还需要安装 `PySocks`；项目的 [requirements.txt](requirements.txt) 已包含该依赖。
+
+Profile 配置支持本地和生产环境。优先级为：进程环境变量 > `.env.<profile>` > `.env` > 代码默认值。默认 profile 是 `local`；`.env.local` 和 `.env.prod` 已被 Git 忽略。
+
+复制模板，并按环境填写数据库、密钥和 ClickHouse 配置：
+
+```bash
+cp .env.example .env
+cp .env.local.example .env.local
+cp .env.prod.example .env.prod
+```
+
+启动时选择 profile：
+
+```bash
+# Windows
+start.bat --env local run
+start.bat --env prod start
+
+# Linux/macOS
+./start.sh --env local run
+./start.sh --env prod start
+
+# Or use an environment variable
+COINX_ENV=prod python scripts/start_app.py run
+```
+
+Docker Compose 需要同时把 profile 文件用于变量插值和容器环境：
+
+```bash
+COINX_ENV_FILE=.env.prod docker compose --env-file .env.prod up -d
+```
+
+`--env prod` 选择应用 profile；`COINX_ENV_FILE=.env.prod` 选择 Compose 的 `env_file`。生产密码建议通过进程环境变量或密钥管理系统注入。
 
 ### 4. 启动项目
 
@@ -279,8 +286,9 @@ coinx/
 ├─ sql/schema.sql
 ├─ scripts/start_app.py
 ├─ start.bat
-├─ application.yml
-└─ application-dev.yml
+├─ .env.example
+├─ .env.local.example
+└─ .env.prod.example
 ```
 
 ## Data Files

@@ -11,11 +11,17 @@ REM   status  : check status
 
 set ACTION=%1
 if "%ACTION%"=="" set ACTION=run
+if /I "%~1"=="--env" set ACTION=%3
+if /I "%~1"=="--instance" set ACTION=%3
+for /f "tokens=1,2 delims==" %%A in ("%~1") do (
+    if /I "%%A"=="--env" set ACTION=%2
+    if /I "%%A"=="--instance" set ACTION=%2
+)
 
 if exist "venv\Scripts\python.exe" (
-    venv\Scripts\python.exe scripts\start_app.py %ACTION%
+    if "%~1"=="" (venv\Scripts\python.exe scripts\start_app.py run) else (venv\Scripts\python.exe scripts\start_app.py %*)
 ) else (
-    python scripts\start_app.py %ACTION%
+    if "%~1"=="" (python scripts\start_app.py run) else (python scripts\start_app.py %*)
 )
 if "%ACTION%"=="start" pause
 if "%ACTION%"=="stop" pause

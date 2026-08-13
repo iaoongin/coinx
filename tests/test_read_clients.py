@@ -54,6 +54,45 @@ def test_clickhouse_client_parses_json_each_row(monkeypatch):
     assert kwargs["params"]["query"].endswith("FORMAT JSONEachRow")
 
 
+def test_clickhouse_client_sends_query_memory_settings(monkeypatch):
+    import coinx.read_clients as read_clients
+
+    monkeypatch.setattr(
+        read_clients,
+        "_CLICKHOUSE_QUERY_SETTINGS",
+        {"max_threads": 2, "max_memory_usage": 1_073_741_824},
+    )
+
+    class Response:
+        ok = True
+        status_code = 200
+        text = '{"ok":1}\n'
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def post(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return Response()
+
+        def close(self):
+            pass
+
+    session = Session()
+    client = ClickHouseReadClient(
+        "http://clickhouse:8123",
+        "coinx",
+        "root",
+        "secret",
+        session=session,
+    )
+    assert client.query_rows("SELECT 1") == [{"ok": 1}]
+    params = session.calls[0][1]["params"]
+    assert params["max_threads"] == 2
+    assert params["max_memory_usage"] == 1_073_741_824
+
+
 def test_clickhouse_client_compatibly_retries_old_mergetree_without_final():
     class Response:
         def __init__(self, ok, text):

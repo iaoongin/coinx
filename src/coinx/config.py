@@ -1,8 +1,40 @@
 import os
-from dotenv import load_dotenv
+import re
+from pathlib import Path
+
+from dotenv import dotenv_values
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-load_dotenv(os.path.join(ROOT_DIR, '.env'))
+
+
+def _load_env_profiles(root_dir, environment=None):
+    """Load .env plus an optional profile without overriding shell variables."""
+    root = Path(root_dir)
+    base_path = root / '.env'
+    base_values = dotenv_values(base_path) if base_path.exists() else {}
+    selected = str(
+        environment
+        or os.environ.get('COINX_ENV')
+        or base_values.get('COINX_ENV')
+        or 'local'
+    ).strip().lower()
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', selected):
+        raise ValueError('COINX_ENV must contain only lowercase letters, digits, underscores or hyphens')
+
+    merged = {}
+    for path in (base_path, root / f'.env.{selected}'):
+        if path.exists():
+            merged.update(dotenv_values(path))
+
+    # Explicit process variables always win over profile files.
+    for key, value in merged.items():
+        if key not in os.environ and value is not None:
+            os.environ[key] = str(value)
+    os.environ.setdefault('COINX_ENV', selected)
+    return selected
+
+
+COINX_ENV = _load_env_profiles(ROOT_DIR)
 DATA_DIR = os.path.join(ROOT_DIR, 'data')
 LOGS_DIR = os.path.join(ROOT_DIR, 'logs')
 
@@ -95,6 +127,10 @@ CLICKHOUSE_USER = get_env('CLICKHOUSE_USER', 'default')
 CLICKHOUSE_PASSWORD = get_env('CLICKHOUSE_PASSWORD', '')
 CLICKHOUSE_READ_SHADOW = get_env('CLICKHOUSE_READ_SHADOW', False, bool)
 CLICKHOUSE_READ_TIMEOUT_SECONDS = get_env('CLICKHOUSE_READ_TIMEOUT_SECONDS', 120, int)
+CLICKHOUSE_QUERY_MAX_THREADS = get_env('CLICKHOUSE_QUERY_MAX_THREADS', 2, int)
+CLICKHOUSE_HOMEPAGE_MAX_WORKERS = get_env('CLICKHOUSE_HOMEPAGE_MAX_WORKERS', 2, int)
+CLICKHOUSE_MAX_CONCURRENT_QUERIES = get_env('CLICKHOUSE_MAX_CONCURRENT_QUERIES', 2, int)
+CLICKHOUSE_MAX_MEMORY_USAGE_BYTES = get_env('CLICKHOUSE_MAX_MEMORY_USAGE_BYTES', 0, int)
 
 
 _VALID_MARKET_BACKENDS = ('mysql', 'clickhouse')

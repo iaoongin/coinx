@@ -95,8 +95,9 @@ db.sqlite3-journal
 
 # 环境变量文件
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
 # Playwright
 tests/playwright/node_modules/

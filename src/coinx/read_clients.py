@@ -10,13 +10,25 @@ from __future__ import annotations
 import json
 import logging
 import re
+from threading import BoundedSemaphore
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pymysql
 import requests
 
+from coinx.config import (
+    CLICKHOUSE_MAX_CONCURRENT_QUERIES,
+    CLICKHOUSE_MAX_MEMORY_USAGE_BYTES,
+    CLICKHOUSE_QUERY_MAX_THREADS,
+)
 
 logger = logging.getLogger(__name__)
+_CLICKHOUSE_QUERY_SEMAPHORE = BoundedSemaphore(max(1, int(CLICKHOUSE_MAX_CONCURRENT_QUERIES)))
+_CLICKHOUSE_QUERY_SETTINGS = {
+    "max_threads": max(1, int(CLICKHOUSE_QUERY_MAX_THREADS)),
+}
+if int(CLICKHOUSE_MAX_MEMORY_USAGE_BYTES) > 0:
+    _CLICKHOUSE_QUERY_SETTINGS["max_memory_usage"] = int(CLICKHOUSE_MAX_MEMORY_USAGE_BYTES)
 
 
 class ReadOnlyQueryError(ValueError):
@@ -71,12 +83,17 @@ class ClickHouseReadClient:
 
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
         statement = assert_read_only(sql)
-        response = self.session.post(
-            self.url,
-            params={"query": f"{statement} FORMAT JSONEachRow", "database": self.database},
-            auth=self.auth,
-            timeout=self.timeout,
-        )
+        with _CLICKHOUSE_QUERY_SEMAPHORE:
+            response = self.session.post(
+                self.url,
+                params={
+                    "query": f"{statement} FORMAT JSONEachRow",
+                    "database": self.database,
+                    **_CLICKHOUSE_QUERY_SETTINGS,
+                },
+                auth=self.auth,
+                timeout=self.timeout,
+            )
         if not response.ok:
             detail = response.text.strip() or "ClickHouse returned no error details."
             # Older installations may still have the two tables that are
@@ -87,12 +104,17 @@ class ClickHouseReadClient:
             if "ILLEGAL_FINAL" in detail and re.search(r"\bFINAL\b", statement, re.IGNORECASE):
                 fallback_statement = re.sub(r"\s+FINAL\b", "", statement, flags=re.IGNORECASE)
                 logger.warning("ClickHouse table does not support FINAL; retrying read without FINAL")
-                response = self.session.post(
-                    self.url,
-                    params={"query": f"{fallback_statement} FORMAT JSONEachRow", "database": self.database},
-                    auth=self.auth,
-                    timeout=self.timeout,
-                )
+                with _CLICKHOUSE_QUERY_SEMAPHORE:
+                    response = self.session.post(
+                        self.url,
+                        params={
+                            "query": f"{fallback_statement} FORMAT JSONEachRow",
+                            "database": self.database,
+                            **_CLICKHOUSE_QUERY_SETTINGS,
+                        },
+                        auth=self.auth,
+                        timeout=self.timeout,
+                    )
                 if response.ok:
                     return [json.loads(line) for line in response.text.splitlines() if line.strip()]
                 detail = response.text.strip() or "ClickHouse returned no error details."

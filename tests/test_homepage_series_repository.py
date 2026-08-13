@@ -5,6 +5,9 @@ from coinx.repositories.homepage_series import (
     TIME_INTERVALS,
     HomepageKlinePoint,
     HomepageOpenInterestPoint,
+    _prepare_clickhouse_homepage_row,
+    _build_kline_point,
+    _build_open_interest_point,
     _summarize_homepage_rejection_reasons,
     _with_estimated_open_interest_value,
     get_homepage_series_snapshot,
@@ -22,6 +25,61 @@ from coinx.models import (
     MarketOpenInterestHist,
     MarketTakerBuySellVol,
 )
+
+
+def test_homepage_point_builders_accept_mapping_rows_and_ignore_rows_without_symbol():
+    oi_point = _build_open_interest_point({
+        'symbol': 'BTCUSDT',
+        'event_time': 1_700_000_000_000,
+        'sum_open_interest': '10',
+        'sum_open_interest_value': '1000',
+    })
+    kline_point = _build_kline_point({
+        'symbol': 'BTCUSDT',
+        'open_time': 1_700_000_000_000,
+        'high_price': '101',
+        'low_price': '99',
+        'close_price': '100',
+        'quote_volume': '10',
+        'taker_buy_quote_volume': '5',
+    })
+
+    assert oi_point.symbol == 'BTCUSDT'
+    assert kline_point.close_price == 100.0
+    assert _build_open_interest_point({'event_time': 1_700_000_000_000}) is None
+    assert _build_kline_point({'open_time': 1_700_000_000_000}) is None
+
+
+def test_clickhouse_homepage_row_symbol_can_be_inferred_only_for_single_symbol():
+    row = {'event_time': 1_700_000_000_000}
+
+    assert _prepare_clickhouse_homepage_row(row, 'market_open_interest_hist', ['BTCUSDT'])['symbol'] == 'BTCUSDT'
+    assert _prepare_clickhouse_homepage_row(row, 'market_open_interest_hist', ['BTCUSDT', 'ETHUSDT']) is None
+
+
+def test_clickhouse_homepage_loader_skips_ambiguous_rows_without_symbol(monkeypatch):
+    import coinx.repositories.homepage_series as homepage
+
+    class FakeClickHouseRepository:
+        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None):
+            return {symbol: 1_700_000_000_000 for symbol in symbols}
+
+        def market_rows(self, table, columns, **kwargs):
+            if table == 'market_open_interest_hist':
+                return [{'event_time': 1_700_000_000_000, 'sum_open_interest': 1}]
+            if table == 'market_klines':
+                return [{'open_time': 1_700_000_000_000, 'close_price': 100}]
+            return []
+
+    monkeypatch.setattr(homepage, 'get_clickhouse_repository', lambda: FakeClickHouseRepository())
+    monkeypatch.setattr(homepage, '_has_unreliable_taker_source', lambda exchange: True)
+
+    oi_map, kline_map, _net_map, _latest_map = _load_homepage_exchange_maps_clickhouse(
+        'binance', ['BTCUSDT', 'ETHUSDT'], upper_bound=1_700_000_000_000,
+    )
+
+    assert oi_map == {'BTCUSDT': {}, 'ETHUSDT': {}}
+    assert kline_map == {'BTCUSDT': {}, 'ETHUSDT': {}}
 
 
 def test_open_interest_uses_stored_quantity_when_value_is_also_available():

@@ -9,13 +9,23 @@ import sys
 import time
 import psutil
 from pathlib import Path
-from dotenv import load_dotenv
+
+
+def _select_environment_from_args():
+    for index, value in enumerate(sys.argv[1:]):
+        if value == "--env" and index + 2 <= len(sys.argv[1:]):
+            os.environ["COINX_ENV"] = sys.argv[index + 2]
+            return
+        if value.startswith("--env="):
+            os.environ["COINX_ENV"] = value.split("=", 1)[1]
+            return
+
+
+_select_environment_from_args()
 
 # 添加项目根目录的src到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
-
-load_dotenv(project_root / ".env")
 
 from coinx.config import WEB_HOST, WEB_PORT
 from coinx.utils import logger
@@ -413,6 +423,22 @@ def main():
 
     args = list(sys.argv[1:])
     instance_name = os.environ.get("INSTANCE_NAME")
+    environment_name = os.environ.get("COINX_ENV")
+    if "--env" in args:
+        index = args.index("--env")
+        if index + 1 >= len(args):
+            logger.info("--env requires a profile name")
+            return
+        environment_name = args[index + 1]
+        del args[index:index + 2]
+    else:
+        for index, value in enumerate(args):
+            if value.startswith("--env="):
+                environment_name = value.split("=", 1)[1]
+                del args[index]
+                break
+    if environment_name:
+        os.environ["COINX_ENV"] = environment_name
     if "--instance" in args:
         index = args.index("--instance")
         if index + 1 >= len(args):

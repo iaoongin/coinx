@@ -141,12 +141,14 @@ def _load_market_structure_exchange_maps_clickhouse(
         'symbol, event_time, sum_open_interest, sum_open_interest_value',
         symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
         lower_bound=oi_lower, upper_bound=upper, order_by='symbol, event_time',
+        deduplicate=True,
     )
     kline_rows = repo.market_rows(
         'market_klines',
         'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
         symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
         lower_bound=kline_lower, upper_bound=upper, order_by='symbol, open_time',
+        deduplicate=True,
     )
     taker_rows_by_period = {}
     for period in taker_periods:
@@ -155,6 +157,7 @@ def _load_market_structure_exchange_maps_clickhouse(
             'symbol, event_time, buy_sell_ratio, buy_vol, sell_vol',
             symbols=symbols, exchange=exchange, period=period, time_column='event_time',
             lower_bound=taker_lower, upper_bound=upper, order_by='symbol, event_time',
+            deduplicate=True,
         )
 
     oi_map = {symbol: {} for symbol in symbols}

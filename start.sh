@@ -35,4 +35,8 @@ EOF
   exit 1
 fi
 
-"$PYTHON_BIN" "$SCRIPT_DIR/scripts/start_app.py" "$ACTION"
+if [[ $# -eq 0 ]]; then
+  "$PYTHON_BIN" "$SCRIPT_DIR/scripts/start_app.py" run
+else
+  "$PYTHON_BIN" "$SCRIPT_DIR/scripts/start_app.py" "$@"
+fi
