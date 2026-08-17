@@ -7,6 +7,7 @@ import time
 import threading
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -180,6 +181,35 @@ def format_price(value):
     return f'{value:,.8f}'.rstrip('0').rstrip('.')
 
 
+def format_trade_price(value):
+    """Preserve the source precision for prices in trade notifications."""
+    if value is None:
+        return '-'
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return '-'
+    formatted = format(decimal_value, ',f')
+    return formatted.rstrip('0').rstrip('.') if '.' in formatted else formatted
+
+
+def format_trade_symbol(symbol):
+    normalized = str(symbol or '')
+    return normalized[:-4] if normalized.endswith('USDT') else normalized
+
+
+def format_trade_direction(entry_state):
+    return {'可做多': '🟢', '可做空': '🔴'}.get(entry_state, '')
+
+
+def format_trade_index(index):
+    keycap_digits = {
+        1: '1️⃣', 2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣',
+        6: '6️⃣', 7: '7️⃣', 8: '8️⃣', 9: '9️⃣', 10: '🔟',
+    }
+    return keycap_digits.get(index, f'🔢 {index:02d}')
+
+
 def format_trade_score(value):
     try:
         return f'{float(value):.1f}'
@@ -194,9 +224,23 @@ def format_trade_r(value):
         return '-'
 
 
+def format_trade_target_distance(plan, index):
+    value = plan.get(f'tp{index}_percent')
+    if value is not None:
+        try:
+            return f'{abs(float(value)):.2f}%'
+        except (TypeError, ValueError):
+            pass
+    entry_price = _float_or_none(plan.get('entry_price'))
+    target_price = _float_or_none(plan.get(f'tp{index}'))
+    if entry_price is None or target_price is None or entry_price == 0:
+        return '-'
+    return f'{abs(target_price - entry_price) / abs(entry_price) * 100:.2f}%'
+
+
 def format_trade_targets(plan):
     return [
-        f'目标{index} {format_price(plan.get(f"tp{index}"))} ({format_trade_r(plan.get(f"tp{index}_r"))})'
+        f'目标{index} {format_trade_price(plan.get(f"tp{index}"))}（距离 {format_trade_target_distance(plan, index)} · {format_trade_r(plan.get(f"tp{index}_r"))}）'
         for index in range(1, 4)
     ]
 
@@ -209,11 +253,14 @@ def format_stop_distance(value):
 
 
 def format_trade_opportunity_trigger(symbol, row, plan):
+    direction = row.get('entry_state') or '-'
+    direction_emoji = format_trade_direction(direction)
+    symbol_label = format_trade_symbol(symbol)
     lines = [
-        f'{symbol} · {row.get("entry_state") or "-"}',
-        f'现价 {format_price(row.get("current_price"))}',
-        f'入场 {format_price(plan.get("entry_price"))}',
-        f'止损 {format_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
+        f'{direction_emoji} {symbol_label} · {direction}'.strip(),
+        f'现价 {format_trade_price(row.get("current_price"))}',
+        f'入场 {format_trade_price(plan.get("entry_price"))}',
+        f'止损 {format_trade_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
         *format_trade_targets(plan),
         '信号评分：'
         f'入场 {format_trade_score(row.get("entry_score"))} · '
@@ -228,9 +275,11 @@ def format_trade_opportunity_trigger(symbol, row, plan):
 
 
 def format_trade_opportunity_recovery(symbol, entry_state, previous, previous_plan):
+    direction_emoji = format_trade_direction(entry_state)
+    symbol_label = format_trade_symbol(symbol)
     return '\n'.join((
-        f'{symbol} · 当前 {entry_state or "不满足"}',
-        f'之前入场 {format_price(previous_plan.get("entry_price"))}',
+        f'{direction_emoji} {symbol_label} · 当前 {entry_state or "不满足"}'.strip(),
+        f'之前入场 {format_trade_price(previous_plan.get("entry_price"))}',
         f'之前止损距离 {format_stop_distance(previous.get("stop_loss_percent"))}',
     ))
 
@@ -284,11 +333,14 @@ def trade_entry_improvement(previous_values, entry_state, plan, threshold, unit)
 def format_trade_opportunity_update(symbol, row, plan, update):
     previous_plan = (update['previous_values'].get('trade_plan') or {})
     unit_label = 'R' if update['unit'] == 'r' else 'ATR'
+    direction = row.get('entry_state') or '-'
+    direction_emoji = format_trade_direction(direction)
+    symbol_label = format_trade_symbol(symbol)
     return '\n'.join((
-        f'{symbol} · {row.get("entry_state") or "-"} · 更优入场',
-        f'上次入场 {format_price(previous_plan.get("entry_price"))} → 新入场 {format_price(plan.get("entry_price"))}',
-        f'改善 {format_price(update["improvement"])}（阈值 {update["threshold"]:g}{unit_label}）',
-        f'止损 {format_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
+        f'{direction_emoji} {symbol_label} · {direction} · 更优入场'.strip(),
+        f'上次入场 {format_trade_price(previous_plan.get("entry_price"))} → 新入场 {format_trade_price(plan.get("entry_price"))}',
+        f'改善 {format_trade_price(update["improvement"])}（阈值 {update["threshold"]:g}{unit_label}）',
+        f'止损 {format_trade_price(plan.get("stop_loss"))}（距离 {format_stop_distance(plan.get("stop_loss_percent"))}）',
         *format_trade_targets(plan),
     ))
 
@@ -789,7 +841,7 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     )
     is_trade_opportunity = rule.event_type == EVENT_TRADE_OPPORTUNITY
     triggered = [
-        f'{index:02d}\n{event["triggered"]}' if is_trade_opportunity else f'{index}. {event["triggered"]}'
+        f'{format_trade_index(index)}\n{event["triggered"]}' if is_trade_opportunity else f'{index}. {event["triggered"]}'
         for index, event in enumerate(triggered_events, start=1)
     ]
     recovered = [event['recovered'] for event in recovered_events]
@@ -812,22 +864,22 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
 
     if is_trade_opportunity:
         if triggered and not recovered:
-            directions = {event.get('direction') for event in triggered_events}
-            indicator = '🟢' if directions == {'可做多'} else ('🔴' if directions == {'可做空'} else '🟢🔴')
-            title = f'{indicator} {event_titles[0]} · {len(triggered)} 个'
+            title = f'📣 {event_titles[0]} · {len(triggered)} 个'
         elif recovered and not triggered:
-            title = f'⚪ {event_titles[1]} · {len(recovered)} 个'
+            title = f'❌ {event_titles[1]} · {len(recovered)} 个'
+        elif updated and not triggered and not recovered:
+            title = f'🔄 {event_titles[2]}更新'
         sections = []
         if triggered:
             sections.append('\n\n'.join(triggered))
         if updated:
             sections.append('\n\n'.join(
-                f'{index:02d}\n{event["updated"]}'
+                f'{format_trade_index(index)}\n{event["updated"]}'
                 for index, event in enumerate(updated_events, start=1)
             ))
         if recovered:
             sections.append('\n\n'.join(
-                f'{index:02d}\n{event["recovered"]}'
+                f'{format_trade_index(index)}\n{event["recovered"]}'
                 for index, event in enumerate(recovered_events, start=1)
             ))
         sections.append(condition)

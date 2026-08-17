@@ -130,6 +130,9 @@ def _trade_opportunity(symbol, entry_state='可做多', stop_percent=-2, plan_st
             'tp1': 104,
             'tp2': 108,
             'tp3': 112,
+            'tp1_percent': 4,
+            'tp2_percent': 8,
+            'tp3_percent': 12,
             'tp1_r': 2,
             'tp2_r': 4,
             'tp3_r': 6,
@@ -154,20 +157,58 @@ def test_trade_opportunity_message_uses_safe_placeholders_for_missing_optional_v
             'stop_loss': None,
             'stop_loss_percent': None,
             'tp1': None,
+            'tp1_percent': None,
             'tp1_r': None,
             'tp2': None,
+            'tp2_percent': None,
             'tp2_r': None,
             'tp3': None,
+            'tp3_percent': None,
             'tp3_r': None,
         },
     )
 
     assert '现价 -' in body
     assert '止损 -（距离 -）' in body
-    assert '目标1 - (-)\n目标2 - (-)\n目标3 - (-)' in body
+    assert '目标1 -（距离 - · -）\n目标2 -（距离 - · -）\n目标3 -（距离 - · -）' in body
     assert '信号评分：入场 - · 趋势 - · 时机 - · 风险 -' in body
     assert '风险提示' not in body
     assert 'None' not in body
+
+
+def test_trade_opportunity_message_preserves_price_precision_and_shows_target_distance():
+    body = notifications.format_trade_opportunity_trigger(
+        'ZESTUSDT',
+        {
+            'entry_state': '可做空',
+            'current_price': 0.139610241234,
+            'entry_score': -73.3,
+            'trend_score': -43.3,
+            'timing_score': -30,
+            'risk_score': 0,
+            'risk_reasons': [],
+        },
+        {
+            'entry_price': 0.139690000123,
+            'stop_loss': 0.14775179,
+            'stop_loss_percent': -5.77,
+            'tp1': 0.11918,
+            'tp1_percent': -14.69,
+            'tp1_r': 2.5441,
+            'tp2': 0.11550464,
+            'tp2_percent': -17.32,
+            'tp2_r': 3,
+            'tp3': 0.10744286,
+            'tp3_percent': -23.10,
+            'tp3_r': 4,
+        },
+    )
+
+    assert '🔴 ZEST · 可做空' in body
+    assert '现价 0.139610241234' in body
+    assert '入场 0.139690000123' in body
+    assert '目标1 0.11918（距离 14.69% · 2.5441R）' in body
+    assert '目标2 0.11550464（距离 17.32% · 3R）' in body
 
 
 def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_session, monkeypatch):
@@ -220,17 +261,17 @@ def test_trade_opportunity_rule_matches_strict_actionable_range_and_recovers(db_
     assert (reentered['matched'], reentered['sent']) == (2, 1)
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
     assert [item.payload_json['message']['title'] for item in deliveries] == [
-        '🟢🔴 可做交易机会 · 2 个', '⚪ 可做交易机会已退出 · 1 个', '🟢 可做交易机会 · 1 个',
+        '📣 可做交易机会 · 2 个', '❌ 可做交易机会已退出 · 1 个', '📣 可做交易机会 · 1 个',
     ]
     first_body = deliveries[0].payload_json['message']['body']
-    assert '01\nBTCUSDT · 可做多' in first_body
+    assert '1️⃣\n🟢 BTC · 可做多' in first_body
     assert '止损 98（距离 2.00%）' in first_body
-    assert '目标1 104 (2R)\n目标2 108 (4R)\n目标3 112 (6R)' in first_body
+    assert '目标1 104（距离 4.00% · 2R）\n目标2 108（距离 8.00% · 4R）\n目标3 112（距离 12.00% · 6R）' in first_body
     assert '信号评分：入场 70.0 · 趋势 45.0 · 时机 25.0 · 风险 0.0' in first_body
     assert '风险提示：资金费率过热' in first_body
     assert '规则：严格可做 · 止损范围 2%–8%' in first_body
     assert '扫描 5 · 当前机会 2 · 更优更新 0 · 已恢复 0' in first_body
-    assert 'BTCUSDT · 当前 观望' in deliveries[1].payload_json['message']['body']
+    assert 'BTC · 当前 观望' in deliveries[1].payload_json['message']['body']
     assert '之前止损距离 2.00%' in deliveries[1].payload_json['message']['body']
     assert 'SOLUSDT' not in deliveries[0].payload_json['message']['body']
 
@@ -270,7 +311,7 @@ def test_trade_opportunity_rule_debounces_trigger_and_recovery(db_session, monke
     assert [result['sent'] for result in results] == [0, 1, 0, 0, 0, 0, 1]
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
     assert [delivery.payload_json['message']['title'] for delivery in deliveries] == [
-        '🟢 可做交易机会 · 1 个', '⚪ 可做交易机会已退出 · 1 个',
+        '📣 可做交易机会 · 1 个', '❌ 可做交易机会已退出 · 1 个',
     ]
     assert '连续确认 2 次触发 · 连续失配 3 次退出' in deliveries[0].payload_json['message']['body']
 
@@ -306,8 +347,8 @@ def test_trade_opportunity_rule_notifies_only_materially_better_entries(db_sessi
 
     assert [result['sent'] for result in results] == [1, 1, 0]
     deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
-    assert deliveries[1].payload_json['message']['title'] == '🟡 交易机会更新'
-    assert '01\nBTCUSDT · 可做多 · 更优入场' in deliveries[1].payload_json['message']['body']
+    assert deliveries[1].payload_json['message']['title'] == '🔄 交易机会更新'
+    assert '1️⃣\n🟢 BTC · 可做多 · 更优入场' in deliveries[1].payload_json['message']['body']
     assert '上次入场 100 → 新入场 98' in deliveries[1].payload_json['message']['body']
     assert '改善 2（阈值 0.5R）' in deliveries[1].payload_json['message']['body']
 
