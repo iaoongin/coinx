@@ -830,6 +830,13 @@ def _get_exchange_common_time(oi_by_time, kline_by_time):
     return common_times[-1]
 
 
+def _get_exchange_common_time_at_or_before(oi_by_time, kline_by_time, upper_bound=None):
+    common_times = set(oi_by_time).intersection(kline_by_time)
+    if upper_bound is not None:
+        common_times = {timestamp for timestamp in common_times if timestamp <= int(upper_bound)}
+    return max(common_times) if common_times else None
+
+
 def _exchange_supports_homepage_anchor(exchange, oi_by_time, kline_by_time, anchor_time):
     return not _collect_exchange_homepage_rejection_reasons(
         exchange,
@@ -839,9 +846,13 @@ def _exchange_supports_homepage_anchor(exchange, oi_by_time, kline_by_time, anch
     )
 
 
-def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time):
+def _build_exchange_homepage_snapshot(exchange, oi_by_time, kline_by_time, anchor_time=None):
     _s = __import__('time').perf_counter()
-    current_time = _get_exchange_common_time(oi_by_time, kline_by_time)
+    current_time = _get_exchange_common_time_at_or_before(
+        oi_by_time,
+        kline_by_time,
+        upper_bound=anchor_time,
+    )
     _t1 = __import__('time').perf_counter()
     _ct_ms = (_t1 - _s) * 1000
     if current_time is None:
@@ -1154,18 +1165,30 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
     kline_latest = repo.latest_series_times(
         'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
     )
-    common_latest = {
-        symbol: min(oi_latest[symbol], kline_latest[symbol])
-        for symbol in symbols
-        if symbol in oi_latest and symbol in kline_latest
-    }
-    if not common_latest:
+    taker_latest = {}
+    if not _has_unreliable_taker_source(exchange):
+        taker_latest = repo.latest_series_times(
+            'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+        )
+
+    candidate_latest = {}
+    for symbol in symbols:
+        source_times = [oi_latest.get(symbol), kline_latest.get(symbol)]
+        if any(value is None for value in source_times):
+            continue
+        # Net inflow is displayed beside OI and price, so a lagging Taker
+        # series must move the exchange anchor back instead of being reported
+        # as zero completeness at a newer OI/Kline timestamp.
+        if symbol in taker_latest:
+            source_times.append(taker_latest[symbol])
+        candidate_latest[symbol] = min(source_times)
+    if not candidate_latest:
         return empty
 
     # The lower bound is based on the slowest actual common timestamp, not the
     # wall-clock/as_of upper bound. This preserves the exact 168h point when an
     # exchange is a few minutes behind the global homepage anchor.
-    lower = max(0, min(common_latest.values()) - _interval_to_ms('168h'))
+    lower = max(0, min(candidate_latest.values()) - _interval_to_ms('168h'))
     oi_rows = repo.market_rows(
         'market_open_interest_hist',
         'symbol, event_time, sum_open_interest, sum_open_interest_value',
@@ -1209,6 +1232,19 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
         row = _prepare_clickhouse_homepage_row(row, 'market_taker_buy_sell_vol', symbols)
         if row is not None:
             taker_by_symbol.setdefault(row['symbol'], []).append(row)
+
+    common_latest = {}
+    for symbol, candidate in candidate_latest.items():
+        if _has_unreliable_taker_source(exchange) or not taker_by_symbol.get(symbol):
+            common_latest[symbol] = candidate
+            continue
+        taker_times = {int(row['event_time']) for row in taker_by_symbol[symbol]}
+        common_times = (
+            set(oi_by_symbol.get(symbol, {}))
+            .intersection(all_klines.get(symbol, {}))
+            .intersection(taker_times)
+        )
+        common_latest[symbol] = max(common_times) if common_times else candidate
 
     net_result = _empty_net_inflow_map(symbols)
     for symbol in symbols:
@@ -1418,6 +1454,7 @@ def _aggregate_homepage_series_maps(
                     exchange=exchange,
                     oi_by_time=symbol_oi,
                     kline_by_time=symbol_kline,
+                    anchor_time=unified_latest.get(symbol),
                 )
                 _t_snap = (__import__('time').perf_counter() - _t4) * 1000
 

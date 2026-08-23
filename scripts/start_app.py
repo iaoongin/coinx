@@ -5,6 +5,7 @@ Flask应用启停脚本
 """
 import os
 import re
+import subprocess
 import sys
 import time
 import psutil
@@ -262,8 +263,10 @@ class FlaskAppManager:
                     cmd,
                     cwd=str(project_root),
                     env=env,
+                    stdin=subprocess.DEVNULL,
                     stdout=stdout_file,
                     stderr=stderr_file,
+                    start_new_session=True,
                     text=True,
                 )
                 

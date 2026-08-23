@@ -241,6 +241,96 @@ def test_clickhouse_homepage_loader_keeps_168h_when_latest_lags_global_anchor(mo
     assert all(lower == target_168h for _table, lower, _upper in calls)
 
 
+def test_clickhouse_homepage_loader_aligns_anchor_to_lagging_taker_series(monkeypatch):
+    import coinx.repositories.homepage_series as homepage
+
+    upper = 1_800_000_000_000
+    latest = upper - FIVE_MINUTES_MS
+    taker_latest = latest - FIVE_MINUTES_MS
+    target_168h = taker_latest - 168 * 60 * 60 * 1000
+
+    class FakeClickHouseRepository:
+        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None):
+            if table == 'market_taker_buy_sell_vol':
+                return {'BTCUSDT': taker_latest}
+            return {'BTCUSDT': latest}
+
+        def market_rows(self, table, columns, **kwargs):
+            if table == 'market_open_interest_hist':
+                return [
+                    {'symbol': 'BTCUSDT', 'event_time': target_168h, 'sum_open_interest': 100.0, 'sum_open_interest_value': 10_000.0},
+                    {'symbol': 'BTCUSDT', 'event_time': taker_latest, 'sum_open_interest': 200.0, 'sum_open_interest_value': 20_000.0},
+                    {'symbol': 'BTCUSDT', 'event_time': latest, 'sum_open_interest': 300.0, 'sum_open_interest_value': 30_000.0},
+                ]
+            if table == 'market_klines':
+                return [
+                    {'symbol': 'BTCUSDT', 'open_time': target_168h, 'close_price': 100.0},
+                    {'symbol': 'BTCUSDT', 'open_time': taker_latest, 'close_price': 200.0},
+                    {'symbol': 'BTCUSDT', 'open_time': latest, 'close_price': 300.0},
+                ]
+            return [
+                {'symbol': 'BTCUSDT', 'event_time': target_168h, 'buy_vol': 10.0, 'sell_vol': 5.0},
+                {'symbol': 'BTCUSDT', 'event_time': taker_latest, 'buy_vol': 20.0, 'sell_vol': 5.0},
+            ]
+
+    monkeypatch.setattr(homepage, 'get_clickhouse_repository', lambda: FakeClickHouseRepository())
+    monkeypatch.setattr(homepage, '_has_unreliable_taker_source', lambda exchange: False)
+
+    _oi_map, _kline_map, net_map, latest_map = _load_homepage_exchange_maps_clickhouse(
+        'binance', ['BTCUSDT'], upper_bound=upper,
+    )
+
+    assert latest_map == {'BTCUSDT': taker_latest}
+    assert net_map['BTCUSDT']['health']['5m'] == 100.0
+    assert net_map['BTCUSDT']['net_inflow']['5m'] == 15.0
+
+
+def test_homepage_aggregation_uses_loader_anchor_for_all_metrics(monkeypatch):
+    import coinx.repositories.homepage_series as homepage
+
+    monkeypatch.setattr(homepage, 'ENABLED_EXCHANGES', ['binance'])
+    monkeypatch.setattr(homepage, 'PRIMARY_PRICE_EXCHANGE', 'binance')
+    monkeypatch.setattr(homepage, 'get_supported_exchange_ids', lambda: ['binance'])
+    monkeypatch.setattr(homepage, '_supports_taker', lambda exchange: False)
+
+    slow_latest = 1_800_000_000_000
+    fast_latest = slow_latest + FIVE_MINUTES_MS
+    start = slow_latest - 168 * 60 * 60 * 1000
+    intervals = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']
+
+    def point_maps():
+        oi = {}
+        klines = {}
+        target_times = {start, slow_latest, fast_latest}
+        target_times.update(slow_latest - homepage._interval_to_ms(interval) for interval in intervals)
+        for timestamp in sorted(target_times):
+            oi[timestamp] = HomepageOpenInterestPoint('BTCUSDT', timestamp, float(timestamp), float(timestamp))
+            klines[timestamp] = HomepageKlinePoint('BTCUSDT', timestamp, 1.0, 1.0, float(timestamp), 1.0, 1.0)
+        return oi, klines
+
+    oi, klines = point_maps()
+    net = {
+        'net_inflow': {interval: 1.0 for interval in intervals},
+        'net_inflow_value': {interval: 100.0 for interval in intervals},
+        'health': {interval: 100.0 for interval in intervals},
+    }
+    maps = {
+        'binance': ({'BTCUSDT': oi}, {'BTCUSDT': klines}, {'BTCUSDT': net}, {'BTCUSDT': slow_latest}),
+    }
+
+    aggregate, selected_kline, _unused, coverage = _aggregate_homepage_series_maps(
+        None,
+        ['BTCUSDT'],
+        upper_bound=fast_latest,
+        exchange_maps_override=maps,
+        exchange_adapters_override={},
+    )
+
+    assert coverage['BTCUSDT']['latest_time'] == slow_latest
+    assert fast_latest not in selected_kline['BTCUSDT']
+    assert aggregate['BTCUSDT'][slow_latest].sum_open_interest == float(slow_latest)
+
+
 def test_homepage_aggregation_uses_slowest_common_exchange_anchor(monkeypatch):
     import coinx.repositories.homepage_series as homepage
 
