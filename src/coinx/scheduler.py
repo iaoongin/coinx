@@ -1,5 +1,6 @@
 import threading
 import time
+from collections import Counter
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -208,23 +209,209 @@ def get_all_job_runtime_metadata():
         return {job_id: dict(metadata) for job_id, metadata in JOB_METADATA.items()}
 
 
+_REPAIR_STAGE_SUMMARY_FIELDS = (
+    'status',
+    'mode',
+    'period',
+    'series_types',
+    'exchanges',
+    'success_count',
+    'failure_count',
+    'skipped_count',
+    'precheck_skipped_count',
+    'pending_task_count',
+    'unsupported_count',
+    'expected_records',
+    'api_records',
+    'records',
+    'missing_records',
+    'written_records',
+    'no_data_records',
+    'affected',
+    'duration_ms',
+    'precheck_duration_ms',
+    'duration_breakdown_ms',
+    'duration_breakdown_by_exchange',
+    'duration_breakdown_by_series_type',
+    'history_missing_day_stats',
+    'coverage_hours',
+    'start_time',
+    'end_time',
+    'full_scan',
+    'current_day_trimmed_end_time',
+    'message',
+    'stage',
+)
+
+
+def _sum_duration_breakdowns(summaries, field='duration_breakdown_ms'):
+    total = {}
+    for summary in summaries:
+        breakdown = summary.get(field) or {}
+        if field == 'duration_breakdown_ms':
+            breakdowns = {'_total': breakdown}
+        else:
+            breakdowns = breakdown
+        for group, values in breakdowns.items():
+            group_total = total.setdefault(group, {})
+            for key, value in (values or {}).items():
+                group_total[key] = round(group_total.get(key, 0) + float(value or 0), 2)
+    return total.get('_total', {}) if field == 'duration_breakdown_ms' else total
+
+
+def _compact_repair_stage_summary(summary):
+    """Keep task history useful without persisting every repair result."""
+    results = summary.get('results') or []
+    compact = {
+        key: summary[key]
+        for key in _REPAIR_STAGE_SUMMARY_FIELDS
+        if key in summary
+    }
+    compact['symbol_count'] = len(summary.get('symbols') or [])
+    compact['result_count'] = len(results)
+    compact['result_status_counts'] = dict(
+        Counter(item.get('status') or 'unknown' for item in results)
+    )
+    compact['skip_reason_counts'] = dict(
+        Counter(
+            item.get('reason') or 'unknown'
+            for item in results
+            if item.get('status') == 'skipped'
+        )
+    )
+    compact['failure_reason_counts'] = dict(
+        Counter(
+            item.get('reason') or 'exception'
+            for item in results
+            if item.get('status') == 'error'
+        )
+    )
+
+    exchange_summaries = {}
+    for item in results:
+        exchange = item.get('exchange') or 'unknown'
+        exchange_summary = exchange_summaries.setdefault(
+            exchange,
+            {
+                'exchange': exchange,
+                'result_count': 0,
+                'success_count': 0,
+                'failure_count': 0,
+                'skipped_count': 0,
+            },
+        )
+        exchange_summary['result_count'] += 1
+        status = item.get('status')
+        if status == 'success':
+            exchange_summary['success_count'] += 1
+        elif status == 'error':
+            exchange_summary['failure_count'] += 1
+        elif status == 'skipped':
+            exchange_summary['skipped_count'] += 1
+    if exchange_summaries:
+        compact['exchange_summaries'] = exchange_summaries
+
+    progress = summary.get('exchange_progress') or {}
+    if progress:
+        compact['exchange_progress'] = {
+            exchange: {
+                key: stats.get(key, 0)
+                for key in ('supported_symbols', 'complete', 'pending', 'unsupported')
+            }
+            for exchange, stats in progress.items()
+        }
+    return compact
+
+
 def _merge_repair_summaries(stage_summaries):
     summaries = [summary for summary in stage_summaries if summary]
+    compact_stages = [_compact_repair_stage_summary(summary) for summary in summaries]
     status = 'success'
     if any((summary.get('status') or 'success') == 'error' for summary in summaries):
         status = 'error'
     elif any((summary.get('failure_count', 0) or 0) > 0 for summary in summaries):
         status = 'partial'
 
-    return {
+    symbols = {
+        symbol
+        for summary in summaries
+        for symbol in (summary.get('symbols') or [])
+    }
+    merged = {
+        'summary_version': 2,
         'status': status,
-        'stages': summaries,
+        'mode': summaries[0].get('mode') if summaries else None,
+        'period': summaries[0].get('period') if summaries else None,
+        'stages': compact_stages,
+        'stage_count': len(compact_stages),
+        'symbol_count': len(symbols),
+        'result_count': sum(stage.get('result_count', 0) for stage in compact_stages),
+        'result_status_counts': dict(
+            sum((Counter(stage.get('result_status_counts') or {}) for stage in compact_stages), Counter())
+        ),
+        'skip_reason_counts': dict(
+            sum((Counter(stage.get('skip_reason_counts') or {}) for stage in compact_stages), Counter())
+        ),
+        'failure_reason_counts': dict(
+            sum((Counter(stage.get('failure_reason_counts') or {}) for stage in compact_stages), Counter())
+        ),
         'success_count': sum(summary.get('success_count', 0) or 0 for summary in summaries),
         'failure_count': sum(summary.get('failure_count', 0) or 0 for summary in summaries),
         'skipped_count': sum(summary.get('skipped_count', 0) or 0 for summary in summaries),
         'precheck_skipped_count': sum(summary.get('precheck_skipped_count', 0) or 0 for summary in summaries),
         'duration_ms': sum(summary.get('duration_ms', 0) or 0 for summary in summaries),
     }
+    merged['series_types'] = list(dict.fromkeys(
+        series_type
+        for summary in summaries
+        for series_type in (summary.get('series_types') or [])
+    ))
+    merged['exchanges'] = list(dict.fromkeys(
+        exchange
+        for summary in summaries
+        for exchange in (summary.get('exchanges') or [])
+    ))
+    for field in (
+        'pending_task_count',
+        'unsupported_count',
+        'expected_records',
+        'api_records',
+        'records',
+        'missing_records',
+        'written_records',
+        'no_data_records',
+        'affected',
+        'precheck_duration_ms',
+    ):
+        merged[field] = sum(summary.get(field, 0) or 0 for summary in summaries)
+    merged['duration_breakdown_ms'] = _sum_duration_breakdowns(summaries)
+    merged['duration_breakdown_by_exchange'] = _sum_duration_breakdowns(
+        summaries,
+        'duration_breakdown_by_exchange',
+    )
+    merged['duration_breakdown_by_series_type'] = _sum_duration_breakdowns(
+        summaries,
+        'duration_breakdown_by_series_type',
+    )
+
+    exchange_summaries = {}
+    for stage in compact_stages:
+        for exchange, stats in (stage.get('exchange_summaries') or {}).items():
+            target = exchange_summaries.setdefault(
+                exchange,
+                {
+                    'exchange': exchange,
+                    'result_count': 0,
+                    'success_count': 0,
+                    'failure_count': 0,
+                    'skipped_count': 0,
+                },
+            )
+            for key in ('result_count', 'success_count', 'failure_count', 'skipped_count'):
+                target[key] += stats.get(key, 0) or 0
+    if exchange_summaries:
+        merged['exchange_summaries'] = exchange_summaries
+    return merged
 
 
 @scheduled_job(

@@ -3,6 +3,61 @@ from types import SimpleNamespace
 import coinx.scheduler as scheduler_module
 
 
+def test_merge_repair_summaries_keeps_counts_without_task_details():
+    summary = scheduler_module._merge_repair_summaries([
+        {
+            'status': 'partial_success',
+            'mode': 'rolling',
+            'period': '5m',
+            'symbols': ['BTCUSDT', 'ETHUSDT'],
+            'series_types': ['klines', 'open_interest_hist'],
+            'exchanges': ['binance'],
+            'success_count': 1,
+            'failure_count': 1,
+            'skipped_count': 1,
+            'precheck_skipped_count': 2,
+            'pending_task_count': 3,
+            'unsupported_count': 1,
+            'duration_ms': 120.5,
+            'duration_breakdown_ms': {'api_ms': 100, 'db_write_ms': 20.5},
+            'duration_breakdown_by_exchange': {'binance': {'api_ms': 100}},
+            'duration_breakdown_by_series_type': {'klines': {'api_ms': 100}},
+            'results': [
+                {'exchange': 'binance', 'status': 'success', 'symbol': 'BTCUSDT'},
+                {'exchange': 'binance', 'status': 'error', 'symbol': 'ETHUSDT', 'error': 'timeout'},
+                {
+                    'exchange': 'binance',
+                    'status': 'skipped',
+                    'symbol': 'ETHUSDT',
+                    'reason': 'unsupported_symbol',
+                    'target_times': [1, 2, 3],
+                },
+            ],
+            'target_times': [1, 2, 3],
+            'exchange_summaries': {
+                'binance': {'results': [{'symbol': 'BTCUSDT'}]},
+            },
+        },
+    ])
+
+    stage = summary['stages'][0]
+    assert summary['summary_version'] == 2
+    assert summary['symbol_count'] == 2
+    assert summary['result_count'] == 3
+    assert summary['skip_reason_counts'] == {'unsupported_symbol': 1}
+    assert summary['failure_reason_counts'] == {'exception': 1}
+    assert 'symbols' not in stage
+    assert 'results' not in stage
+    assert 'target_times' not in stage
+    assert stage['exchange_summaries']['binance'] == {
+        'exchange': 'binance',
+        'result_count': 3,
+        'success_count': 1,
+        'failure_count': 1,
+        'skipped_count': 1,
+    }
+
+
 def test_job_metadata_persists_successful_lifecycle(monkeypatch):
     created = []
     completed = []
