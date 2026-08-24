@@ -73,6 +73,33 @@ def test_notification_time_is_fixed_to_china_standard_time():
     assert notifications.format_notification_time(0) == '1970-01-01 08:00:00'
 
 
+def test_disabled_notification_evaluation_explains_global_switch(db_session, monkeypatch):
+    monkeypatch.setattr(config, 'NOTIFICATIONS_ENABLED', False)
+
+    result = notifications.evaluate_price_oi_outflow_retest_rules(session=db_session)
+
+    assert result['status'] == 'disabled'
+    assert result['reason'] == 'notifications_disabled'
+    assert 'NOTIFICATIONS_ENABLED=true' in result['error']
+    assert '重启服务' in result['error']
+
+
+def test_disabled_evaluation_persists_explanation_in_run(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session, channel, notifications.EVENT_PRICE_OI_OUTFLOW_RETEST,
+        'structure_retests', {},
+    )
+    monkeypatch.setattr(config, 'NOTIFICATIONS_ENABLED', False)
+
+    result = notifications.evaluate_rule_with_run(rule, 'manual', session=db_session)
+
+    run = db_session.query(AlertEvaluationRun).filter_by(id=result['run_id']).one()
+    assert run.status == 'disabled'
+    assert run.error_message == result['error']
+
+
 def test_trade_opportunity_rule_requires_ordered_positive_stop_range():
     payload = {
         'name': 'actionable',
@@ -110,6 +137,69 @@ def test_trade_opportunity_rule_requires_ordered_positive_stop_range():
             raise AssertionError('expected invalid stop-loss range to fail validation')
 
 
+def test_structure_retest_rule_uses_documented_defaults():
+    payload = {
+        'name': '前高反弹结构',
+        'event_type': notifications.EVENT_PRICE_OI_OUTFLOW_RETEST,
+        'scope_type': 'structure_retests',
+        'scope': {},
+        'params': {},
+    }
+
+    validated = notifications.validate_rule_payload(payload)
+
+    assert validated['params_json'] == {
+        'high_timeframe': '1h',
+        'retest_tolerance_percent': 0.3,
+        'min_oi_increase_percent': 1.0,
+        'min_outflow_ratio_percent': 0.5,
+        'min_outflow_increase_percent': 20.0,
+        'trigger_confirmations': 2,
+        'recovery_confirmations': 3,
+    }
+
+
+def test_structure_retest_aggregates_exchange_metrics_by_open_interest_weight():
+    row = {
+        'current_price': 101,
+        'exchange_scores': [
+            {
+                'exchange': 'binance',
+                'weight': 0.75,
+                'current_price': 100,
+                'previous_high_1h': 100,
+                'previous_high_1h_time': 1,
+                'price_change_1h': 0.01,
+                'oi_change_1h': 0.02,
+                'flow_ratio_1h': -0.018,
+                'previous_flow_ratio_1h': -0.01,
+            },
+            {
+                'exchange': 'okx',
+                'weight': 0.25,
+                'current_price': 104,
+                'previous_high_1h': 104,
+                'previous_high_1h_time': 2,
+                'price_change_1h': 0.02,
+                'oi_change_1h': 0.04,
+                'flow_ratio_1h': -0.022,
+                'previous_flow_ratio_1h': -0.014,
+            },
+        ],
+    }
+
+    metric = notifications._aggregate_structure_metric(row)
+
+    assert metric['exchange'] == 'aggregated'
+    assert metric['current_price'] == 101
+    assert metric['previous_high_1h'] == 101
+    assert metric['previous_high_1h_time'] == 1
+    assert metric['price_change_1h'] == 0.0125
+    assert metric['oi_change_1h'] == 0.025
+    assert round(metric['flow_ratio_1h'], 10) == -0.019
+    assert round(metric['previous_flow_ratio_1h'], 10) == -0.011
+
+
 def _trade_opportunity(symbol, entry_state='可做多', stop_percent=-2, plan_status='ready', space_status='adequate'):
     return {
         'symbol': symbol,
@@ -138,6 +228,98 @@ def _trade_opportunity(symbol, entry_state='可做多', stop_percent=-2, plan_st
             'tp3_r': 6,
         },
     }
+
+
+def _structure_retest_row(symbol='BTCUSDT', **overrides):
+    metric = {
+        'exchange': 'binance',
+        'current_price': 100.2,
+        'previous_high_1h': 100,
+        'previous_high_1h_time': 1_700_000_000_000,
+        'price_change_1h': 0.01,
+        'oi_change_1h': 0.02,
+        'flow_ratio_1h': -0.018,
+        'previous_flow_ratio_1h': -0.01,
+    }
+    metric.update(overrides)
+    return {'symbol': symbol, 'exchange_scores': [metric]}
+
+
+def test_structure_retest_alert_requires_all_conditions_and_recovers(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session,
+        channel,
+        notifications.EVENT_PRICE_OI_OUTFLOW_RETEST,
+        'structure_retests',
+        {
+            'high_timeframe': '1h',
+            'retest_tolerance_percent': 0.3,
+            'min_oi_increase_percent': 1,
+            'min_outflow_ratio_percent': 0.5,
+            'min_outflow_increase_percent': 20,
+            'trigger_confirmations': 1,
+            'recovery_confirmations': 1,
+        },
+    )
+    snapshots = [
+        [_structure_retest_row(exchange='okx')],
+        [_structure_retest_row(exchange='okx', current_price=101)],
+        [_structure_retest_row(exchange='okx')],
+    ]
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {'data': snapshots.pop(0), 'cache_update_time': 1_700_000_000_000},
+    )
+
+    first = notifications.evaluate_price_oi_outflow_retest_rules(session=db_session, rule_id=rule.id)
+    recovered = notifications.evaluate_price_oi_outflow_retest_rules(session=db_session, rule_id=rule.id)
+    reentered = notifications.evaluate_price_oi_outflow_retest_rules(session=db_session, rule_id=rule.id)
+
+    assert [(result['checked'], result['matched'], result['sent']) for result in (first, recovered, reentered)] == [
+        (1, 1, 1),
+        (1, 0, 1),
+        (1, 1, 1),
+    ]
+    deliveries = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id).all()
+    assert [item.payload_json['message']['title'] for item in deliveries] == [
+        '🔴 前高反弹结构告警', '✅ 前高反弹结构告警已恢复', '🔴 前高反弹结构告警',
+    ]
+    assert 'OI 1h +2.00%' in deliveries[0].payload_json['message']['body']
+    assert '净流出 1h 1.80% · 较前一小时 +80.00%' in deliveries[0].payload_json['message']['body']
+
+
+def test_structure_retest_alert_does_not_match_when_one_condition_fails(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session,
+        channel,
+        notifications.EVENT_PRICE_OI_OUTFLOW_RETEST,
+        'structure_retests',
+        {'trigger_confirmations': 1, 'recovery_confirmations': 1},
+    )
+    rows = [
+        _structure_retest_row(current_price=101),
+        _structure_retest_row(oi_change_1h=0.005),
+        _structure_retest_row(flow_ratio_1h=-0.011),
+    ]
+    snapshots = [[row] for row in rows]
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {'data': snapshots.pop(0), 'cache_update_time': 1_700_000_000_000},
+    )
+
+    results = [
+        notifications.evaluate_price_oi_outflow_retest_rules(session=db_session, rule_id=rule.id)
+        for _ in range(3)
+    ]
+
+    assert [result['matched'] for result in results] == [0, 0, 0]
+    assert [result['sent'] for result in results] == [0, 0, 0]
 
 
 def test_trade_opportunity_message_uses_safe_placeholders_for_missing_optional_values():

@@ -75,6 +75,8 @@ if FETCH_COINS_ENABLED:
 | `FETCH_COINS_ENABLED` | true | 是否启用成交额前N修补 |
 | `FETCH_COINS_INTERVAL` | 600 | 成交额前N任务间隔（秒） |
 | `FETCH_COINS_TOP_VOLUME_COUNT` | 100 | 成交额前N数量 |
+| `FETCH_COINS_TOP_GAINERS_COUNT` | 25 | 补采涨幅榜前N数量 |
+| `FETCH_COINS_TOP_LOSERS_COUNT` | 25 | 补采跌幅榜前N数量 |
 
 ## 6. 修改文件清单
 

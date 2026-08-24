@@ -73,6 +73,35 @@ def test_clickhouse_quote_volume_is_aggregated_server_side():
     assert "FINAL" not in sql
 
 
+def test_clickhouse_available_structure_symbols_is_server_side_and_cached():
+    class SymbolClient(FakeClickHouseClient):
+        def query_rows(self, sql):
+            self.sql.append(sql)
+            return [{'symbol': 'BTCUSDT'}, {'symbol': 'ETHUSDT'}]
+
+    client = SymbolClient()
+    repository = ClickHouseMarketReadRepository(client, "coinx")
+
+    first = repository.available_market_structure_symbols(
+        exchanges=['binance', 'okx'],
+        upper_bound=1_700_000_000_000,
+    )
+    second = repository.available_market_structure_symbols(
+        exchanges=['binance', 'okx'],
+        upper_bound=1_700_000_000_000,
+    )
+
+    assert first == second == ['BTCUSDT', 'ETHUSDT']
+    assert len(client.sql) == 1
+    sql = client.sql[0]
+    assert 'uniqExact(open_time) AS kline_points' in sql
+    assert 'HAVING kline_points >= 60' in sql
+    assert 'FROM coinx.market_klines' in sql
+    assert 'FROM coinx.market_open_interest_hist' in sql
+    assert 'PREWHERE exchange IN (\'binance\', \'okx\')' in sql
+    assert 'max_threads = 2' in sql
+
+
 def test_clickhouse_market_rows_deduplicates_without_final():
     client = FakeClickHouseClient()
     repository = ClickHouseMarketReadRepository(client, "coinx")

@@ -32,6 +32,7 @@ _CACHE_KEY_LOCKS: Dict[Tuple[str, Any], Lock] = {}
 _LATEST_FUNDING_CACHE: Dict[Any, Any] = {}
 _FUNDING_HISTORY_CACHE: Dict[Any, Any] = {}
 _LATEST_TICKER_CACHE: Dict[Any, Any] = {}
+_AVAILABLE_STRUCTURE_SYMBOLS_CACHE: Dict[Any, Any] = {}
 _CACHE_MAX_ENTRIES = 128
 # Keep large ClickHouse aggregations spillable. This is a per-query threshold,
 # not a request to raise the process/container memory limit.
@@ -56,6 +57,7 @@ def clear_market_read_cache() -> None:
         _LATEST_FUNDING_CACHE.clear()
         _FUNDING_HISTORY_CACHE.clear()
         _LATEST_TICKER_CACHE.clear()
+        _AVAILABLE_STRUCTURE_SYMBOLS_CACHE.clear()
         _CACHE_KEY_LOCKS.clear()
 
 
@@ -336,6 +338,83 @@ class ClickHouseMarketReadRepository:
             for row in rows
             if row.get('symbol') and row.get('latest_time') is not None
         }
+
+    def available_market_structure_symbols(
+        self,
+        exchanges: Sequence[str],
+        upper_bound: Optional[int] = None,
+        kline_lookback_ms: int = (120 - 1) * 5 * 60 * 1000,
+        min_kline_points: int = 60,
+    ) -> List[str]:
+        """Return symbols with enough recent K-lines and at least one OI point.
+
+        This is intentionally a symbol-only readiness query. It avoids loading
+        raw series for ticker symbols that cannot produce a trade metric, while
+        leaving the final common-anchor check to the metric loader.
+        """
+        exchange_values = tuple(dict.fromkeys(str(value).strip().lower() for value in exchanges if value))
+        if not exchange_values:
+            return []
+        upper = int(upper_bound if upper_bound is not None else time.time() * 1000)
+        cache_key = (
+            self._cache_namespace,
+            exchange_values,
+            upper,
+            int(kline_lookback_ms),
+            int(min_kline_points),
+        )
+        with _cache_key_lock("available_structure_symbols", cache_key):
+            cached_rows = self._cached_rows(
+                _AVAILABLE_STRUCTURE_SYMBOLS_CACHE,
+                cache_key,
+                10.0,
+            )
+            if cached_rows is not None:
+                return [str(row["symbol"]) for row in cached_rows if row.get("symbol")]
+
+            exchange_filter = _in_list(exchange_values)
+            kline_lower = max(0, upper - int(kline_lookback_ms))
+            oi_lower = max(0, upper - 6 * 60 * 60 * 1000)
+            rows = self.client.query_rows(
+                f"""
+                WITH kline_candidates AS (
+                    SELECT exchange, symbol,
+                        uniqExact(open_time) AS kline_points,
+                        max(open_time) AS kline_latest
+                    FROM {self._table('market_klines', final=False)}
+                    PREWHERE exchange IN ({exchange_filter})
+                        AND period = '5m'
+                        AND open_time >= {kline_lower}
+                        AND open_time <= {upper}
+                    GROUP BY exchange, symbol
+                    HAVING kline_points >= {max(1, int(min_kline_points))}
+                ), oi_candidates AS (
+                    SELECT exchange, symbol,
+                        max(event_time) AS oi_latest
+                    FROM {self._table('market_open_interest_hist', final=False)}
+                    PREWHERE exchange IN ({exchange_filter})
+                        AND period = '5m'
+                        AND event_time >= {oi_lower}
+                        AND event_time <= {upper}
+                    GROUP BY exchange, symbol
+                )
+                SELECT k.symbol
+                FROM kline_candidates AS k
+                INNER JOIN oi_candidates AS oi
+                    ON oi.exchange = k.exchange AND oi.symbol = k.symbol
+                GROUP BY k.symbol
+                ORDER BY k.symbol
+                SETTINGS max_threads = {_QUERY_MAX_THREADS},
+                    max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}
+                """
+            )
+            normalized = [
+                {"symbol": str(row["symbol"])}
+                for row in rows
+                if row.get("symbol")
+            ]
+            self._store_rows(_AVAILABLE_STRUCTURE_SYMBOLS_CACHE, cache_key, normalized)
+            return [row["symbol"] for row in normalized]
 
     def table_count(self, table: str) -> int:
         # This is a migration diagnostic and must retain logical row-count

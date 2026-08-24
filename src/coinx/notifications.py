@@ -36,19 +36,33 @@ EVENT_FUNDING_RATE = 'market.funding_rate.threshold'
 EVENT_PRICE_VOLUME = 'market.price_volume.threshold'
 EVENT_JOB_FAILURE = 'system.job.failure'
 EVENT_TRADE_OPPORTUNITY = 'market.trade_opportunity.actionable'
+EVENT_PRICE_OI_OUTFLOW_RETEST = 'market.price_oi_outflow.retest'
 TRADE_OPPORTUNITY_TRIGGER_CONFIRMATIONS = 2
 TRADE_OPPORTUNITY_RECOVERY_CONFIRMATIONS = 3
 TRADE_OPPORTUNITY_BETTER_ENTRY_THRESHOLD = 0.5
 TRADE_OPPORTUNITY_BETTER_ENTRY_UNITS = {'r', 'atr'}
+STRUCTURE_RETEST_TRIGGER_CONFIRMATIONS = 2
+STRUCTURE_RETEST_RECOVERY_CONFIRMATIONS = 3
+STRUCTURE_RETEST_HIGH_TIMEFRAMES = {'1h', '4h'}
+STRUCTURE_RETEST_TOLERANCE_PERCENT = 0.3
+STRUCTURE_RETEST_MIN_OI_INCREASE_PERCENT = 1.0
+STRUCTURE_RETEST_MIN_OUTFLOW_RATIO_PERCENT = 0.5
+STRUCTURE_RETEST_MIN_OUTFLOW_INCREASE_PERCENT = 20.0
+PRICE_VOLUME_DEFAULT_SCOPE_LIMIT = 100
 
 EVENT_SCOPE = {
     EVENT_FUNDING_RATE: 'all_market',
     EVENT_PRICE_VOLUME: 'market_rank_top',
     EVENT_JOB_FAILURE: 'system_jobs',
     EVENT_TRADE_OPPORTUNITY: 'trade_opportunities',
+    EVENT_PRICE_OI_OUTFLOW_RETEST: 'structure_retests',
 }
 
 EVALUATION_RUN_LOCK = threading.Lock()
+NOTIFICATIONS_DISABLED_MESSAGE = (
+    '通知总开关已关闭（NOTIFICATIONS_ENABLED=false），本次评估未执行；'
+    '请在 .env 设置 NOTIFICATIONS_ENABLED=true 后重启服务。'
+)
 ACTIVE_EVALUATION_RUN_IDS = set()
 NOTIFICATION_TIME_ZONE = ZoneInfo('Asia/Shanghai')
 APPRISE_TARGET_TYPES = {
@@ -291,6 +305,143 @@ def _float_or_none(value):
         return None
 
 
+def _notifications_disabled_result():
+    return {
+        'status': 'disabled',
+        'evaluated': 0,
+        'checked': 0,
+        'matched': 0,
+        'sent': 0,
+        'error': NOTIFICATIONS_DISABLED_MESSAGE,
+        'reason': 'notifications_disabled',
+    }
+
+
+def _weighted_structure_value(metrics, field):
+    candidates = []
+    for metric in metrics:
+        value = _float_or_none(metric.get(field))
+        if value is None:
+            continue
+        weight = _float_or_none(metric.get('weight'))
+        candidates.append((value, max(weight, 0.0) if weight is not None else None))
+    if not candidates:
+        return None
+    weighted = [(value, weight) for value, weight in candidates if weight is not None]
+    total_weight = sum(weight for _, weight in weighted)
+    if total_weight > 0:
+        return sum(value * weight for value, weight in weighted) / total_weight
+    return sum(value for value, _ in candidates) / len(candidates)
+
+
+def _aggregate_structure_metric(row):
+    metrics = [
+        item for item in row.get('exchange_scores') or []
+        if isinstance(item, dict)
+    ]
+    metric = {
+        'exchange': 'aggregated',
+        'current_price': _float_or_none(row.get('current_price')) or _weighted_structure_value(metrics, 'current_price'),
+        'price_change_1h': _weighted_structure_value(metrics, 'price_change_1h'),
+        'oi_change_1h': _weighted_structure_value(metrics, 'oi_change_1h'),
+        'flow_ratio_1h': _weighted_structure_value(metrics, 'flow_ratio_1h'),
+        'previous_flow_ratio_1h': _weighted_structure_value(metrics, 'previous_flow_ratio_1h'),
+    }
+    for timeframe in STRUCTURE_RETEST_HIGH_TIMEFRAMES:
+        field = f'previous_high_{timeframe}'
+        metric[field] = _weighted_structure_value(metrics, field)
+        high_metrics = [
+            item for item in metrics
+            if _float_or_none(item.get(field)) is not None
+        ]
+        if high_metrics:
+            source = max(
+                high_metrics,
+                key=lambda item: _float_or_none(item.get('weight')) or 0.0,
+            )
+            metric[f'{field}_time'] = source.get(f'{field}_time')
+        else:
+            metric[f'{field}_time'] = None
+    return metric
+
+
+def _structure_retest_observation(metric, params):
+    if not metric:
+        return None
+    high_timeframe = params['high_timeframe']
+    current_price = _float_or_none(metric.get('current_price'))
+    previous_high = _float_or_none(metric.get(f'previous_high_{high_timeframe}'))
+    oi_change = _float_or_none(metric.get('oi_change_1h'))
+    price_change = _float_or_none(metric.get('price_change_1h'))
+    flow_ratio = _float_or_none(metric.get('flow_ratio_1h'))
+    previous_flow_ratio = _float_or_none(metric.get('previous_flow_ratio_1h'))
+    if current_price is None or previous_high in (None, 0) or oi_change is None or price_change is None:
+        return None
+    if flow_ratio is None or previous_flow_ratio is None:
+        return None
+
+    price_distance = (current_price - previous_high) / previous_high
+    current_outflow_ratio = max(0.0, -flow_ratio)
+    previous_outflow_ratio = max(0.0, -previous_flow_ratio)
+    outflow_growth = (
+        (current_outflow_ratio - previous_outflow_ratio) / previous_outflow_ratio
+        if previous_outflow_ratio > 0 else None
+    )
+    tolerance = params['retest_tolerance_percent'] / 100
+    minimum_oi_change = params['min_oi_increase_percent'] / 100
+    minimum_outflow_ratio = params['min_outflow_ratio_percent'] / 100
+    minimum_outflow_growth = params['min_outflow_increase_percent'] / 100
+    matched = (
+        abs(price_distance) <= tolerance
+        and price_change > 0
+        and oi_change >= minimum_oi_change
+        and current_outflow_ratio >= minimum_outflow_ratio
+        and previous_outflow_ratio > 0
+        and outflow_growth is not None
+        and outflow_growth >= minimum_outflow_growth
+    )
+    return {
+        'matched': matched,
+        'high_timeframe': high_timeframe,
+        'current_price': current_price,
+        'previous_high': previous_high,
+        'previous_high_time': metric.get(f'previous_high_{high_timeframe}_time'),
+        'price_distance': price_distance,
+        'price_change_1h': price_change,
+        'oi_change_1h': oi_change,
+        'flow_ratio_1h': flow_ratio,
+        'previous_flow_ratio_1h': previous_flow_ratio,
+        'current_outflow_ratio': current_outflow_ratio,
+        'previous_outflow_ratio': previous_outflow_ratio,
+        'outflow_growth': outflow_growth,
+    }
+
+
+def _format_optional_signed_percent(value):
+    return '-' if value is None else format_signed_percent(value)
+
+
+def format_structure_retest_trigger(symbol, observation):
+    return '\n'.join((
+        f'{symbol} · 反弹触及 {observation["high_timeframe"]} 前高',
+        f'现价 {format_price(observation["current_price"])} · 前高 {format_price(observation["previous_high"])}'
+        f'（距离 {_format_optional_signed_percent(observation["price_distance"])}）',
+        f'反弹 1h {_format_optional_signed_percent(observation["price_change_1h"])}',
+        f'OI 1h {_format_optional_signed_percent(observation["oi_change_1h"])}',
+        f'净流出 1h {observation["current_outflow_ratio"] * 100:.2f}%'
+        f' · 较前一小时 {_format_optional_signed_percent(observation["outflow_growth"])}',
+    ))
+
+
+def format_structure_retest_recovery(symbol, observation, previous):
+    return '\n'.join((
+        f'{symbol} · 前高反弹结构已失配',
+        f'当前现价 {format_price(observation.get("current_price"))} · 前高 {format_price(observation.get("previous_high"))}',
+        f'之前 OI 1h {_format_optional_signed_percent(previous.get("oi_change_1h"))}'
+        f' · 净流出 {previous.get("current_outflow_ratio", 0) * 100:.2f}%',
+    ))
+
+
 def trade_entry_improvement(previous_values, entry_state, plan, threshold, unit):
     """Return the favorable entry-price change when it clears the configured threshold."""
     if threshold <= 0:
@@ -472,7 +623,7 @@ def validate_rule_payload(payload):
             raise NotificationConfigError('invalid direction')
         rank_type = scope.get('rank_type', 'quote_volume')
         try:
-            limit = int(scope.get('limit', config.FETCH_COINS_TOP_VOLUME_COUNT))
+            limit = int(scope.get('limit', PRICE_VOLUME_DEFAULT_SCOPE_LIMIT))
         except (TypeError, ValueError) as exc:
             raise NotificationConfigError('invalid rank limit') from exc
         if rank_type != 'quote_volume' or limit < 1 or limit > 500:
@@ -514,6 +665,51 @@ def validate_rule_payload(payload):
             'recovery_confirmations': recovery_confirmations,
             'better_entry_threshold': better_entry_threshold,
             'better_entry_unit': better_entry_unit,
+        }
+        scope = {}
+    elif event_type == EVENT_PRICE_OI_OUTFLOW_RETEST:
+        high_timeframe = params.get('high_timeframe', '1h')
+        if high_timeframe not in STRUCTURE_RETEST_HIGH_TIMEFRAMES:
+            raise NotificationConfigError('invalid high_timeframe')
+        tolerance = _positive_number(
+            params.get('retest_tolerance_percent', STRUCTURE_RETEST_TOLERANCE_PERCENT),
+            'retest_tolerance_percent',
+        )
+        if tolerance > 10:
+            raise NotificationConfigError('invalid retest_tolerance_percent')
+        min_oi_increase = _positive_number(
+            params.get('min_oi_increase_percent', STRUCTURE_RETEST_MIN_OI_INCREASE_PERCENT),
+            'min_oi_increase_percent',
+        )
+        min_outflow_ratio = _positive_number(
+            params.get('min_outflow_ratio_percent', STRUCTURE_RETEST_MIN_OUTFLOW_RATIO_PERCENT),
+            'min_outflow_ratio_percent',
+        )
+        min_outflow_increase = _positive_number(
+            params.get('min_outflow_increase_percent', STRUCTURE_RETEST_MIN_OUTFLOW_INCREASE_PERCENT),
+            'min_outflow_increase_percent',
+        )
+        try:
+            trigger_confirmations = int(
+                params.get('trigger_confirmations', STRUCTURE_RETEST_TRIGGER_CONFIRMATIONS),
+            )
+            recovery_confirmations = int(
+                params.get('recovery_confirmations', STRUCTURE_RETEST_RECOVERY_CONFIRMATIONS),
+            )
+        except (TypeError, ValueError) as exc:
+            raise NotificationConfigError('invalid structure retest confirmation count') from exc
+        if not 1 <= trigger_confirmations <= 12:
+            raise NotificationConfigError('invalid trigger_confirmations')
+        if not 1 <= recovery_confirmations <= 12:
+            raise NotificationConfigError('invalid recovery_confirmations')
+        params = {
+            'high_timeframe': high_timeframe,
+            'retest_tolerance_percent': tolerance,
+            'min_oi_increase_percent': min_oi_increase,
+            'min_outflow_ratio_percent': min_outflow_ratio,
+            'min_outflow_increase_percent': min_outflow_increase,
+            'trigger_confirmations': trigger_confirmations,
+            'recovery_confirmations': recovery_confirmations,
         }
         scope = {}
     else:
@@ -852,6 +1048,7 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         EVENT_PRICE_VOLUME: ('价格放量异动', '价格放量异动已恢复', '价格放量异动'),
         EVENT_JOB_FAILURE: ('定时任务执行失败', '定时任务已恢复', '定时任务'),
         EVENT_TRADE_OPPORTUNITY: ('可做交易机会', '可做交易机会已退出', '交易机会'),
+        EVENT_PRICE_OI_OUTFLOW_RETEST: ('前高反弹结构告警', '前高反弹结构告警已恢复', '前高反弹结构'),
     }[rule.event_type]
     if triggered and recovered:
         title = f'📊 {event_titles[2]}状态更新'
@@ -1060,7 +1257,7 @@ def _load_price_volume_metrics(db, scope_limit):
 
 def evaluate_funding_rate_rules(session=None, rule_id=None):
     if not config.NOTIFICATIONS_ENABLED:
-        return {'status': 'disabled', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0}
+        return _notifications_disabled_result()
     own_session = session is None
     db = session or get_session()
     started_at = time.perf_counter()
@@ -1150,7 +1347,7 @@ def evaluate_funding_rate_rules(session=None, rule_id=None):
 
 def evaluate_price_volume_rules(session=None, rule_id=None):
     if not config.NOTIFICATIONS_ENABLED:
-        return {'status': 'disabled', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0}
+        return _notifications_disabled_result()
     own_session = session is None
     db = session or get_session()
     started_at = time.perf_counter()
@@ -1165,7 +1362,7 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
             rule_checked = 0
             stage_started = time.perf_counter()
             metrics_by_symbol = _load_price_volume_metrics(
-                db, int(scope.get('limit', config.FETCH_COINS_TOP_VOLUME_COUNT)),
+                db, int(scope.get('limit', PRICE_VOLUME_DEFAULT_SCOPE_LIMIT)),
             )
             stages['metric_load_ms'] += (time.perf_counter() - stage_started) * 1000
             symbols = list(metrics_by_symbol)
@@ -1257,7 +1454,7 @@ def evaluate_price_volume_rules(session=None, rule_id=None):
 
 def evaluate_trade_opportunity_rules(session=None, rule_id=None):
     if not config.NOTIFICATIONS_ENABLED:
-        return {'status': 'disabled', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0}
+        return _notifications_disabled_result()
     own_session = session is None
     db = session or get_session()
     started_at = time.perf_counter()
@@ -1416,9 +1613,146 @@ def evaluate_trade_opportunity_rules(session=None, rule_id=None):
             db.close()
 
 
+def evaluate_price_oi_outflow_retest_rules(session=None, rule_id=None):
+    if not config.NOTIFICATIONS_ENABLED:
+        return _notifications_disabled_result()
+    own_session = session is None
+    db = session or get_session()
+    started_at = time.perf_counter()
+    stages = defaultdict(float)
+    try:
+        rules = _enabled_rules(db, EVENT_PRICE_OI_OUTFLOW_RETEST, rule_id=rule_id)
+        if not rules:
+            return {
+                'status': 'success', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0,
+                'metrics': _evaluation_metrics(started_at, stages, symbols=0),
+            }
+
+        stage_started = time.perf_counter()
+        snapshot = get_trade_opportunity_snapshot()
+        rows = snapshot.get('data') or []
+        snapshot_time = snapshot.get('cache_update_time')
+        stages['snapshot_load_ms'] += (time.perf_counter() - stage_started) * 1000
+        symbols = [row.get('symbol') for row in rows if row.get('symbol')]
+        sent = checked = matched_count = 0
+        rule_configs = {}
+
+        for rule in rules:
+            raw_params = rule.params_json or {}
+            params = {
+                'high_timeframe': raw_params.get('high_timeframe', '1h'),
+                'retest_tolerance_percent': float(raw_params.get('retest_tolerance_percent', STRUCTURE_RETEST_TOLERANCE_PERCENT)),
+                'min_oi_increase_percent': float(raw_params.get('min_oi_increase_percent', STRUCTURE_RETEST_MIN_OI_INCREASE_PERCENT)),
+                'min_outflow_ratio_percent': float(raw_params.get('min_outflow_ratio_percent', STRUCTURE_RETEST_MIN_OUTFLOW_RATIO_PERCENT)),
+                'min_outflow_increase_percent': float(raw_params.get('min_outflow_increase_percent', STRUCTURE_RETEST_MIN_OUTFLOW_INCREASE_PERCENT)),
+            }
+            high_timeframe = params['high_timeframe']
+            trigger_confirmations = int(
+                raw_params.get('trigger_confirmations', STRUCTURE_RETEST_TRIGGER_CONFIRMATIONS),
+            )
+            recovery_confirmations = int(
+                raw_params.get('recovery_confirmations', STRUCTURE_RETEST_RECOVERY_CONFIRMATIONS),
+            )
+            rule_configs[str(rule.id)] = dict(params)
+            states = _load_rule_states(db, rule.id, high_timeframe, symbols)
+            events = []
+            rule_checked = 0
+            stage_started = time.perf_counter()
+            for row in rows:
+                symbol = row.get('symbol')
+                if not symbol:
+                    continue
+                metric = _aggregate_structure_metric(row)
+                observation = _structure_retest_observation(metric, params)
+                if observation is None:
+                    continue
+                values = {
+                    **observation,
+                    'snapshot_time': snapshot_time,
+                    'retest_tolerance_percent': params['retest_tolerance_percent'],
+                    'min_oi_increase_percent': params['min_oi_increase_percent'],
+                    'min_outflow_ratio_percent': params['min_outflow_ratio_percent'],
+                    'min_outflow_increase_percent': params['min_outflow_increase_percent'],
+                }
+                checked += 1
+                rule_checked += 1
+                matched_count += int(observation['matched'])
+                result = _observe(
+                    db,
+                    rule,
+                    symbol,
+                    high_timeframe,
+                    observation['matched'],
+                    values,
+                    f'{symbol} 前高反弹结构告警',
+                    '价格触及前高，同时 OI 增加且净流出扩大。',
+                    trigger_confirmations=trigger_confirmations,
+                    recovery_confirmations=recovery_confirmations,
+                    state=states.get(symbol),
+                    aggregate=True,
+                )
+                if result.get('state') and result['event_status']:
+                    previous = result['previous_values'] or {}
+                    events.append({
+                        'status': result['event_status'],
+                        'state': result['state'],
+                        'severity': max(
+                            abs(observation['price_distance']) / max(params['retest_tolerance_percent'] / 100, 1e-9),
+                            observation['oi_change_1h'] / max(params['min_oi_increase_percent'] / 100, 1e-9),
+                            (observation['outflow_growth'] or 0) / max(params['min_outflow_increase_percent'] / 100, 1e-9),
+                        ),
+                        'triggered': format_structure_retest_trigger(symbol, observation),
+                        'recovered': format_structure_retest_recovery(symbol, observation, previous),
+                    })
+            stages['observation_ms'] += (time.perf_counter() - stage_started) * 1000
+            stage_started = time.perf_counter()
+            sent += _deliver_evaluation_summary(
+                db,
+                rule,
+                rule_checked,
+                events,
+                f'规则：多交易所 OI 权重聚合 · {high_timeframe} 前高距离 ≤ {params["retest_tolerance_percent"]:.2f}% · '
+                f'OI 1h ≥ +{params["min_oi_increase_percent"]:.2f}% · '
+                f'净流出 1h ≥ {params["min_outflow_ratio_percent"]:.2f}% '
+                f'且扩大 ≥ {params["min_outflow_increase_percent"]:.2f}%\n'
+                f'连续确认 {trigger_confirmations} 次触发 · 连续失配 {recovery_confirmations} 次恢复\n'
+                f'数据 {format_notification_time(snapshot_time)}',
+            )
+            stages['delivery_ms'] += (time.perf_counter() - stage_started) * 1000
+        stage_started = time.perf_counter()
+        db.commit()
+        stages['commit_ms'] += (time.perf_counter() - stage_started) * 1000
+        scanned = len(symbols) * len(rules)
+        return {
+            'status': 'success', 'evaluated': len(rules), 'checked': checked,
+            'matched': matched_count, 'sent': sent,
+            'metrics': _evaluation_metrics(
+                started_at,
+                stages,
+                symbols=len(symbols),
+                scanned=scanned,
+                valid_observations=checked,
+                skipped=max(0, scanned - checked),
+                snapshot_time=snapshot_time,
+                rule_configs=rule_configs,
+            ),
+        }
+    except Exception:
+        db.rollback()
+        logger.exception('前高反弹结构告警评估失败')
+        return {
+            'status': 'error', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0,
+            'error': 'price oi outflow retest evaluation failed',
+            'metrics': _evaluation_metrics(started_at, stages),
+        }
+    finally:
+        if own_session:
+            db.close()
+
+
 def evaluate_job_failure_rules(metadata, session=None, rule_id=None):
     if not config.NOTIFICATIONS_ENABLED:
-        return {'status': 'disabled', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0}
+        return _notifications_disabled_result()
     own_session = session is None
     db = session or get_session()
     started_at = time.perf_counter()
@@ -1503,6 +1837,8 @@ def evaluate_rule(rule, session=None, metadata=None):
         return evaluate_price_volume_rules(session=session, rule_id=rule.id)
     if rule.event_type == EVENT_TRADE_OPPORTUNITY:
         return evaluate_trade_opportunity_rules(session=session, rule_id=rule.id)
+    if rule.event_type == EVENT_PRICE_OI_OUTFLOW_RETEST:
+        return evaluate_price_oi_outflow_retest_rules(session=session, rule_id=rule.id)
     return evaluate_job_failure_rules(metadata or {}, session=session, rule_id=rule.id)
 
 

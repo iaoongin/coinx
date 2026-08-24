@@ -20,7 +20,7 @@ from coinx.config import (
 from coinx.database import get_session
 from coinx.repositories.market_tickers import get_market_scope_symbols, get_market_ticker_symbols
 from coinx.repositories.funding_rate import load_latest_funding_rates
-from coinx.read_backend import is_clickhouse_read
+from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.repositories.market_structure_series import load_market_structure_exchange_maps
 from coinx.utils import logger
 
@@ -88,11 +88,32 @@ def _normalize_exchange_list(exchanges):
 
 def get_market_structure_score_symbols(
     session=None,
-    top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
-    top_gainers_limit=FETCH_COINS_TOP_GAINERS_COUNT,
-    top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
+    top_volume_limit=None,
+    top_gainers_limit=None,
+    top_losers_limit=None,
 ):
     tracked_symbols = get_active_coins()
+    dynamic_scope = all(
+        value is None
+        for value in (top_volume_limit, top_gainers_limit, top_losers_limit)
+    )
+    if dynamic_scope and session is None and is_clickhouse_read():
+        anchor = latest_closed_5m_open_time(int(time.time() * 1000))
+        available = get_clickhouse_repository().available_market_structure_symbols(
+            exchanges=_normalize_exchange_list(ENABLED_EXCHANGES),
+            upper_bound=anchor,
+        )
+        seen = set()
+        result = []
+        for symbol in list(tracked_symbols or []) + available:
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                result.append(symbol)
+        return result
+
+    top_volume_limit = FETCH_COINS_TOP_VOLUME_COUNT if top_volume_limit is None else top_volume_limit
+    top_gainers_limit = FETCH_COINS_TOP_GAINERS_COUNT if top_gainers_limit is None else top_gainers_limit
+    top_losers_limit = FETCH_COINS_TOP_LOSERS_COUNT if top_losers_limit is None else top_losers_limit
     if session is None and is_clickhouse_read():
         ranked = []
         ranked.extend(get_market_ticker_symbols(

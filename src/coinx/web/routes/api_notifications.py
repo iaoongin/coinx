@@ -468,6 +468,16 @@ def get_alert_evaluation_run_logs(run_id):
                     + (f'; {stage_text}' if stage_text else '')
                 ),
             })
+            if metrics.get('scanned') is not None:
+                logs.append({
+                    'timestamp': run.completed_at or now_ms(),
+                    'level': 'info',
+                    'message': (
+                        f'evaluation counts: scanned={metrics["scanned"]}, '
+                        f'valid={metrics.get("valid_observations", run.checked_count)}, '
+                        f'skipped={metrics.get("skipped", 0)}'
+                    ),
+                })
         deliveries = db.query(NotificationDelivery).filter(
             NotificationDelivery.rule_id == run.rule_id,
             NotificationDelivery.sent_at >= run.started_at,

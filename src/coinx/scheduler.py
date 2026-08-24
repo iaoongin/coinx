@@ -139,12 +139,14 @@ def _evaluate_market_notifications(event_type):
             EVENT_FUNDING_RATE,
             EVENT_PRICE_VOLUME,
             EVENT_TRADE_OPPORTUNITY,
+            EVENT_PRICE_OI_OUTFLOW_RETEST,
             evaluate_scheduled_rules,
         )
         event_types = {
             'funding_rate': EVENT_FUNDING_RATE,
             'price_volume': EVENT_PRICE_VOLUME,
             'trade_opportunity': EVENT_TRADE_OPPORTUNITY,
+            'price_oi_outflow_retest': EVENT_PRICE_OI_OUTFLOW_RETEST,
         }
         if event_type in event_types:
             return evaluate_scheduled_rules(event_types[event_type])
@@ -461,7 +463,11 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
         _mark_job_started('repair_market_rolling_job')
         try:
             tracked_symbols = list(dict.fromkeys(get_active_coins()))
-            score_symbols = get_market_structure_score_symbols()
+            score_symbols = get_market_structure_score_symbols(
+                top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
+                top_gainers_limit=FETCH_COINS_TOP_GAINERS_COUNT,
+                top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
+            )
             tracked_symbol_set = set(tracked_symbols)
             top_symbols = [symbol for symbol in score_symbols if symbol not in tracked_symbol_set]
             worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
@@ -528,6 +534,7 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
             _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
             _evaluate_market_notifications('price_volume')
             _evaluate_market_notifications('trade_opportunity')
+            _evaluate_market_notifications('price_oi_outflow_retest')
             precheck_complete = summary.get('precheck_skipped_count', 0)
             task_total = (
                 (summary.get('success_count', 0) or 0)

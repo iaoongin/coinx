@@ -55,6 +55,28 @@ def test_market_structure_symbols_include_tracked_and_ranked_symbols(monkeypatch
     assert symbols == ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']
 
 
+def test_market_structure_symbols_use_clickhouse_available_symbols(monkeypatch):
+    captured = {}
+
+    class Repository:
+        def available_market_structure_symbols(self, **kwargs):
+            captured.update(kwargs)
+            return ['SOLUSDT', 'BTCUSDT']
+
+    monkeypatch.setattr('coinx.repositories.market_structure_score.get_active_coins', lambda: [])
+    monkeypatch.setattr('coinx.repositories.market_structure_score.is_clickhouse_read', lambda: True)
+    monkeypatch.setattr('coinx.repositories.market_structure_score.get_clickhouse_repository', lambda: Repository())
+    monkeypatch.setattr('coinx.repositories.market_structure_score.latest_closed_5m_open_time', lambda _: 1700000000000)
+
+    symbols = get_market_structure_score_symbols()
+
+    assert symbols == ['SOLUSDT', 'BTCUSDT']
+    assert captured == {
+        'exchanges': ['binance', 'okx', 'bybit', 'gate'],
+        'upper_bound': 1700000000000,
+    }
+
+
 def test_component_scoring_rules_match_thresholds():
     assert _calc_trend_score(110, 100, 90) == (30, '多头趋势')
     assert _calc_trend_score(80, 90, 100) == (-30, '空头趋势')

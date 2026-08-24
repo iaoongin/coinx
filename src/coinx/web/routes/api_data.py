@@ -17,6 +17,9 @@ from coinx.repositories.market_tickers import get_market_tickers, get_latest_clo
 from coinx.repositories.contract_detail import RANGE_HOURS, get_contract_detail, get_contract_structure_score, load_contract_chart_series
 from coinx.config import (
     ENABLED_EXCHANGES,
+    FETCH_COINS_TOP_GAINERS_COUNT,
+    FETCH_COINS_TOP_LOSERS_COUNT,
+    FETCH_COINS_TOP_VOLUME_COUNT,
     HOMEPAGE_SERIES_REPAIR_ENABLED,
     REPAIR_HISTORY_COVERAGE_HOURS,
     REPAIR_HISTORY_ENABLED,
@@ -686,7 +689,11 @@ def get_coins():
                             active_coins, series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES)
                         ))
                     if homepage_refresh_started:
-                        score_symbols = get_market_structure_score_symbols()
+                        score_symbols = get_market_structure_score_symbols(
+                            top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
+                            top_gainers_limit=FETCH_COINS_TOP_GAINERS_COUNT,
+                            top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
+                        )
                         score_only_symbols = [
                             symbol for symbol in score_symbols if symbol not in set(active_coins)
                         ]

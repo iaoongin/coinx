@@ -29,9 +29,10 @@ CoinX 已具备行情、资金费率、市场结构评分、历史序列修补�
 | --- | --- | --- | --- | --- |
 | `market.funding_rate.threshold` | 所有币种 | `market_funding_rate` | 资金费率绝对值穿越阈值 | `triggered` / `recovered` |
 | `market.price_volume.threshold` | 成交额榜单前 N 币种 | 5 分钟 K 线 | 短周期涨跌幅和成交额放大倍数同时达到阈值 | `triggered` / `recovered` |
+| `market.price_oi_outflow.retest` | 交易机会快照中的多交易所聚合币种 | 5 分钟 K 线、OI、主动买卖量、1h/4h 聚合 K 线 | 价格接近确认前高、OI 增加、净流出扩大同时成立 | `triggered` / `recovered` |
 | `system.job.failure` | 系统任务 | `JOB_METADATA` | 任务失败，或连续失败次数达到阈值 | `triggered` / `recovered` |
 
-命名统一采用 `<domain>.<metric>.<condition>`：`market` 是市场数据事件，`system` 是运行时任务事件；`condition` 使用 `threshold` 表示指标越过规则阈值，使用 `failure` 表示运行失败。`market.funding_rate.threshold` 固定作用于所有币种，`market.price_volume.threshold` 固定作用于成交额榜单前 N 币种；系统规则只允许选择已注册任务。
+命名统一采用 `<domain>.<metric>.<condition>`：`market` 是市场数据事件，`system` 是运行时任务事件；`condition` 使用 `threshold` 表示指标越过规则阈值，使用 `retest` 表示结构回测组合条件，使用 `failure` 表示运行失败。`market.funding_rate.threshold` 固定作用于所有币种，`market.price_volume.threshold` 固定作用于成交额榜单前 N 币种；系统规则只允许选择已注册任务。
 
 ### 2.2 触发原则
 
@@ -81,9 +82,10 @@ NotificationDelivery（发送记录）
 
 - `collect_funding_rates_job`：资金费率规则。
 - `repair_market_rolling_job`：滚动修补完成后，对成交额榜单前 N 币种评估价格放量规则。
+- `repair_market_rolling_job`：同一份交易机会快照评估多交易所聚合前高反弹、OI 增长与净流出扩大的组合规则。
 - 所有已注册任务：任务失败/恢复规则。
 
-榜单币范围复用 `get_market_ticker_symbols(rank_type='quote_volume', limit=FETCH_COINS_TOP_VOLUME_COUNT)`，与当前滚动修补的榜单币范围一致，不新增行情采集任务或数据表。首次实现不在页面请求中触发评估，避免刷新页面导致重复推送；手工刷新 API 仅在实际数据刷新完成后调用同一评估入口。
+查询、评分、交易机会和结构告警动态读取 CK 中具备足够近期 K 线与 OI 数据的币种；行情补采仍使用 `FETCH_COINS_TOP_*` 数量。候选符号查询只返回数据库聚合后的符号列表并短时缓存，不把原始时序数据重复加载到应用层。首次实现不在页面请求中触发评估，避免刷新页面导致重复推送；手工刷新 API 仅在实际数据刷新完成后调用同一评估入口。
 
 ## 4. 数据模型
 
@@ -108,7 +110,7 @@ NotificationDelivery（发送记录）
 | `id` | 主键 |
 | `name` | 规则名称 |
 | `event_type` | 2.1 中的事件类型 |
-| `scope_type` | `all_market`、`market_rank_top` 或 `system_jobs` |
+| `scope_type` | `all_market`、`market_rank_top`、`trade_opportunities`、`structure_retests` 或 `system_jobs` |
 | `scope_json` | `all_market` 固定为空对象；`market_rank_top` 保存榜单维度与数量；`system_jobs` 保存任务 ID 数组 |
 | `params_json` | 与事件类型对应的阈值参数 |
 | `cooldown_seconds` | 相同事件键的最短发送间隔 |
@@ -122,7 +124,10 @@ NotificationDelivery（发送记录）
 | --- | --- |
 | `market.funding_rate.threshold` | `threshold`、`direction`（`positive` / `negative` / `absolute`）、`recovery_confirmations`（连续低于阈值的恢复确认次数，默认 3） |
 | `market.price_volume.threshold` | `period`（首期固定 `5m`）、`price_change_threshold`、`volume_ratio_threshold`、`direction` |
+| `market.price_oi_outflow.retest` | `high_timeframe`（`1h` / `4h`）、`retest_tolerance_percent`、`min_oi_increase_percent`、`min_outflow_ratio_percent`、`min_outflow_increase_percent`、`trigger_confirmations`、`recovery_confirmations` |
 | `system.job.failure` | `job_ids`、`consecutive_failures`（默认 1） |
+
+`market.price_oi_outflow.retest` 使用交易机会快照中各启用交易所按 OI 权重聚合的当前价格、前高、1h 价格变化、OI 和主动买卖量指标；最近 1h 价格上涨，价格距离选定周期前高不超过 0.3%，1h OI 增幅至少 1%，当前 1h 净流出至少占成交额 0.5%，且较上一小时扩大至少 20%。聚合后的前高、OI 和流量任一数据不足时跳过本次观测；三个条件必须同时成立才算命中。
 
 后端必须按 `event_type` 校验参数类型、范围与匹配的 `scope_type`。规则 API 不得传入自由表达式、SQL 片段或渠道密钥；渠道创建/编辑 API 仅允许提交 Apprise URL，且该值不会在后续读取接口中返回。
 
@@ -252,7 +257,7 @@ NOTIFICATION_TIMEOUT_SECONDS=5
 NOTIFICATION_ENCRYPTION_KEY=
 ```
 
-`NOTIFICATIONS_ENABLED=false` 时不判定、不发送、不写入发送记录。规则可继续在页面维护，启用总开关后才实际生效。`NOTIFICATION_ENCRYPTION_KEY` 缺失或无效时，服务必须拒绝启用通知渠道。
+`NOTIFICATIONS_ENABLED=false` 时不判定、不发送、不写入发送记录；手动或定时评估会返回 `status=disabled`，并明确提示需要设置 `NOTIFICATIONS_ENABLED=true` 后重启服务。规则可继续在页面维护，启用总开关后才实际生效。`NOTIFICATION_ENCRYPTION_KEY` 缺失或无效时，服务必须拒绝启用通知渠道。
 
 ### 7.2 管理 API
 
@@ -335,10 +340,11 @@ NOTIFICATION_ENCRYPTION_KEY=
 | --- | --- |
 | `tests/test_notification_crypto.py` | Fernet 加解密往返；相同 URL 的密文不同；缺失/错误密钥拒绝启用；旧 `key_version` 可解密；轮换后改写为新版本 |
 | `tests/test_notification_channels.py` | Apprise URL 合法性；创建/更新只存密文；删除渠道时规则关联的处理；发送测试成功、超时与失败记录 |
-| `tests/test_alert_rules.py` | 三种 `event_type` 与 `scope_type` 匹配；阈值、方向、榜单数量、任务 ID 校验；禁用规则或渠道不参与投递 |
+| `tests/test_alert_rules.py` | 各 `event_type` 与 `scope_type` 匹配；阈值、方向、榜单数量、任务 ID 校验；禁用规则或渠道不参与投递 |
 | `tests/test_alert_evaluator.py` | `normal -> triggered -> recovered`；重复执行不重复发送；冷却期只更新状态；同一规则不同币种/方向状态独立；评估异常不向上抛出 |
 | `tests/test_funding_rate_alert.py` | `funding_rate` 等于、低于、高于阈值；正/负/绝对值三种方向；`funding_rate is null` 时跳过；恢复后再次穿越可再次触发 |
 | `tests/test_price_volume_alert.py` | 仅成交额榜单前 N 参与；涨跌幅和放量条件必须同时成立；上涨/下跌独立；未收盘、序列不足、缺失数据跳过；榜单变更后不再产生新触发 |
+| `tests/test_price_oi_outflow_alert.py` | 前高距离、OI 增长、当前净流出与净流出扩大必须同时成立；多交易所聚合数据不足跳过；连续确认、恢复和重复执行语义正确 |
 | `tests/test_job_failure_alert.py` | 单次与连续任务失败；任务恢复；服务重启后从 `alert_states` 恢复连续失败状态；告警评估失败不改变原任务的成功/失败结果 |
 
 阈值边界必须包含 `>`、`=`、`<` 三组用例；时间相关测试固定注入 `now_ms`，不得依赖真实系统时间或 `sleep`。

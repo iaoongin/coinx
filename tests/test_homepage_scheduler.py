@@ -1,5 +1,6 @@
 import logging
 
+import coinx.scheduler as scheduler_module
 from coinx.repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
 from coinx.scheduler import scheduled_repair_market_history, scheduled_repair_market_rolling
 
@@ -24,10 +25,13 @@ def test_scheduled_repair_market_rolling_repairs_tracked_symbols_before_top_symb
         }
 
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT', 'ETHUSDT'])
-    monkeypatch.setattr(
-        'coinx.scheduler.get_market_structure_score_symbols',
-        lambda: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'],
-    )
+    score_scope = {}
+
+    def fake_score_symbols(**kwargs):
+        score_scope.update(kwargs)
+        return ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
+
+    monkeypatch.setattr('coinx.scheduler.get_market_structure_score_symbols', fake_score_symbols)
     monkeypatch.setattr('coinx.scheduler.ENABLED_EXCHANGES', ['binance', 'okx', 'bybit'])
     monkeypatch.setattr('coinx.scheduler.repair_rolling_tracked_symbols', fake_repair)
 
@@ -46,6 +50,11 @@ def test_scheduled_repair_market_rolling_repairs_tracked_symbols_before_top_symb
             'max_workers': 3,
         },
     ]
+    assert score_scope == {
+        'top_volume_limit': scheduler_module.FETCH_COINS_TOP_VOLUME_COUNT,
+        'top_gainers_limit': scheduler_module.FETCH_COINS_TOP_GAINERS_COUNT,
+        'top_losers_limit': scheduler_module.FETCH_COINS_TOP_LOSERS_COUNT,
+    }
     messages = [record.getMessage() for record in caplog.records]
     tracked_start_index = next(
         index for index, message in enumerate(messages)
@@ -62,7 +71,7 @@ def test_scheduled_repair_market_rolling_skips_when_no_market_symbols(monkeypatc
     calls = {'repair': 0}
 
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: [])
-    monkeypatch.setattr('coinx.scheduler.get_market_structure_score_symbols', lambda: [])
+    monkeypatch.setattr('coinx.scheduler.get_market_structure_score_symbols', lambda **kwargs: [])
     monkeypatch.setattr(
         'coinx.scheduler.repair_rolling_tracked_symbols',
         lambda **kwargs: calls.__setitem__('repair', calls['repair'] + 1),

@@ -12,7 +12,9 @@ from coinx.repositories.trade_opportunities import (
     _build_trade_plan,
     _entry_score,
     _entry_state,
+    _flow_window_metrics,
     _higher_timeframe_price_trend_score,
+    _latest_confirmed_pivot_high,
     _trend_state,
 )
 from coinx.web.routes.api_data import api_data_bp
@@ -116,6 +118,23 @@ def test_higher_timeframe_trend_requires_60_bars_and_scores_alignment_and_slope(
 
     assert (score, state) == (4, '震荡')
     assert _higher_timeframe_price_trend_score(points[:59], alignment_weight=3, slope_weight=1) == (0, '数据不足')
+
+
+def test_structure_helpers_use_latest_confirmed_high_and_windowed_flow():
+    points = [
+        SimpleNamespace(open_time=index, high_price=high, low_price=90, close_price=100, quote_volume=100)
+        for index, high in enumerate([101, 102, 110, 102, 101])
+    ]
+    assert _latest_confirmed_pivot_high(points) == {'price': 110.0, 'time': 2}
+
+    taker_map = {
+        point.open_time: SimpleNamespace(buy_vol=49, sell_vol=51)
+        for point in points
+    }
+    flow_value, flow_ratio = _flow_window_metrics(points, taker_map)
+
+    assert flow_value == -1000
+    assert flow_ratio == -2
 
 
 def test_trade_plan_prefers_higher_timeframe_targets_over_5m_targets():

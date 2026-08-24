@@ -169,6 +169,21 @@ def _flow_point(taker_map, timestamp):
     return taker_map.get(timestamp)
 
 
+def _flow_window_metrics(points, taker_map):
+    flow_value = 0.0
+    quote_volume = 0.0
+    for point in points:
+        flow_point = _flow_point(taker_map, point.open_time)
+        if flow_point is None:
+            continue
+        buy = _float(getattr(flow_point, 'buy_vol', None)) or 0.0
+        sell = _float(getattr(flow_point, 'sell_vol', None)) or 0.0
+        price = _float(point.close_price) or 0.0
+        flow_value += (buy - sell) * price
+        quote_volume += _float(point.quote_volume) or 0.0
+    return flow_value, flow_value / quote_volume if quote_volume else None
+
+
 def _confirmed_pivots(points):
     highs, lows = [], []
     for index in range(PIVOT_RADIUS, len(points) - PIVOT_RADIUS):
@@ -191,6 +206,17 @@ def _confirmed_pivots(points):
             if all(value is not None and low < value for value in neighbors):
                 lows.append((index, low))
     return highs, lows
+
+
+def _latest_confirmed_pivot_high(points):
+    pivot_highs, _ = _confirmed_pivots(points)
+    if not pivot_highs:
+        return None
+    index, price = pivot_highs[-1]
+    return {
+        'price': price,
+        'time': getattr(points[index], 'open_time', None),
+    }
 
 
 def _distinct_levels(levels, atr, reverse=False):
@@ -375,6 +401,7 @@ def _exchange_metric(
     hour_price = _float(getattr(hour_price_point, 'close_price', None))
     oi_trend_score = 0
     oi_change_1h = None
+    price_change_1h = None
     if current_oi not in (None, 0) and hour_oi not in (None, 0) and hour_price not in (None, 0):
         oi_change_1h = (current_oi - hour_oi) / hour_oi
         price_change_1h = (current_price - hour_price) / hour_price
@@ -389,17 +416,10 @@ def _exchange_metric(
     except Exception:
         taker_period = '5m'
     taker_map = (taker_maps or {}).get(taker_period, {})
-    flow_value = quote_volume = 0.0
-    for point in points[-FLOW_WINDOW_POINTS:]:
-        flow_point = _flow_point(taker_map, point.open_time)
-        if flow_point is None:
-            continue
-        buy = _float(getattr(flow_point, 'buy_vol', None)) or 0.0
-        sell = _float(getattr(flow_point, 'sell_vol', None)) or 0.0
-        price = _float(point.close_price) or 0.0
-        flow_value += (buy - sell) * price
-        quote_volume += _float(point.quote_volume) or 0.0
-    flow_ratio_1h = flow_value / quote_volume if quote_volume else None
+    flow_value, flow_ratio_1h = _flow_window_metrics(points[-FLOW_WINDOW_POINTS:], taker_map)
+    previous_flow_value, previous_flow_ratio_1h = _flow_window_metrics(
+        points[-(FLOW_WINDOW_POINTS * 2):-FLOW_WINDOW_POINTS], taker_map,
+    )
     flow_trend_score = _clamp((flow_ratio_1h or 0) * 100, -10, 10)
     trend_score = price_trend_score + oi_trend_score + flow_trend_score
     direction = _sign(trend_score)
@@ -455,6 +475,10 @@ def _exchange_metric(
         risk_score -= 10; reasons.append('短周期波动过大')
     risk_score = max(-30, risk_score)
     oi_value = _float(getattr(oi_by_time[anchor], 'sum_open_interest_value', None)) or 0.0
+    previous_highs = {
+        timeframe: _latest_confirmed_pivot_high(higher_timeframe_points.get(timeframe) or [])
+        for timeframe in ('1h', '4h')
+    }
     return {
         'exchange': exchange, 'current_price': current_price, 'open_interest_value': oi_value,
         'ema20': ema20, 'atr': atr, '_plan_points': points,
@@ -464,8 +488,17 @@ def _exchange_metric(
         'flow_trend_score': flow_trend_score, 'htf_price_trend_score': htf_price_trend_score,
         'timeframe_trends': {'1h': one_hour_state, '4h': four_hour_state}, 'price_timing_score': price_timing_score,
         'contract_timing_score': contract_timing_score, 'ema20_distance_atr': distance_atr,
-        'oi_change_5m': oi_5m_change, 'oi_change_1h': oi_change_1h,
-        'flow_ratio_1h': flow_ratio_1h, 'funding_rate': funding_rate, 'risk_reasons': reasons,
+        'oi_change_5m': oi_5m_change, 'oi_change_1h': oi_change_1h, 'price_change_1h': price_change_1h,
+        'flow_value_1h': flow_value, 'flow_ratio_1h': flow_ratio_1h,
+        'previous_flow_value_1h': previous_flow_value,
+        'previous_flow_ratio_1h': previous_flow_ratio_1h,
+        'net_outflow_ratio_1h': max(0.0, -(flow_ratio_1h or 0.0)),
+        'previous_net_outflow_ratio_1h': max(0.0, -(previous_flow_ratio_1h or 0.0)),
+        'previous_high_1h': previous_highs['1h']['price'] if previous_highs['1h'] else None,
+        'previous_high_1h_time': previous_highs['1h']['time'] if previous_highs['1h'] else None,
+        'previous_high_4h': previous_highs['4h']['price'] if previous_highs['4h'] else None,
+        'previous_high_4h_time': previous_highs['4h']['time'] if previous_highs['4h'] else None,
+        'funding_rate': funding_rate, 'risk_reasons': reasons,
         'current_time': anchor,
     }
 
