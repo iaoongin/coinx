@@ -1158,17 +1158,55 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
     if not symbols:
         return empty
 
+    exchange_started = time.perf_counter()
+
+    def timed_query(stage, callback):
+        started = time.perf_counter()
+        try:
+            result = callback()
+        except Exception as exc:
+            logger.warning(
+                'ClickHouse homepage query failed: exchange=%s stage=%s duration_ms=%.1f error_type=%s',
+                exchange,
+                stage,
+                (time.perf_counter() - started) * 1000,
+                type(exc).__name__,
+            )
+            raise
+
+        if isinstance(result, dict):
+            result_count = len(result)
+        else:
+            result_count = len(result or [])
+        logger.info(
+            'ClickHouse homepage query: exchange=%s stage=%s duration_ms=%.1f result_count=%s',
+            exchange,
+            stage,
+            (time.perf_counter() - started) * 1000,
+            result_count,
+        )
+        return result
+
     upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
-    oi_latest = repo.latest_series_times(
-        'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+    oi_latest = timed_query(
+        'latest_open_interest',
+        lambda: repo.latest_series_times(
+            'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+        ),
     )
-    kline_latest = repo.latest_series_times(
-        'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+    kline_latest = timed_query(
+        'latest_kline',
+        lambda: repo.latest_series_times(
+            'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+        ),
     )
     taker_latest = {}
     if not _has_unreliable_taker_source(exchange):
-        taker_latest = repo.latest_series_times(
-            'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+        taker_latest = timed_query(
+            'latest_taker',
+            lambda: repo.latest_series_times(
+                'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+            ),
         )
 
     candidate_latest = {}
@@ -1183,32 +1221,60 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
             source_times.append(taker_latest[symbol])
         candidate_latest[symbol] = min(source_times)
     if not candidate_latest:
+        logger.info(
+            'ClickHouse homepage exchange load: exchange=%s duration_ms=%.1f symbols=%s candidate_symbols=0',
+            exchange,
+            (time.perf_counter() - exchange_started) * 1000,
+            len(symbols),
+        )
         return empty
 
     # The lower bound is based on the slowest actual common timestamp, not the
     # wall-clock/as_of upper bound. This preserves the exact 168h point when an
     # exchange is a few minutes behind the global homepage anchor.
     lower = max(0, min(candidate_latest.values()) - _interval_to_ms('168h'))
-    oi_rows = repo.market_rows(
-        'market_open_interest_hist',
-        'symbol, event_time, sum_open_interest, sum_open_interest_value',
-        symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
-        lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
-        deduplicate=True,
+    oi_rows = timed_query(
+        'rows_open_interest',
+        lambda: repo.market_rows(
+            'market_open_interest_hist',
+            'symbol, event_time, sum_open_interest, sum_open_interest_value',
+            symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
+            lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
+            deduplicate=True,
+        ),
     )
-    kline_rows = repo.market_rows(
-        'market_klines',
-        'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
-        symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
-        lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
-        deduplicate=True,
+    kline_rows = timed_query(
+        'rows_kline',
+        lambda: repo.market_rows(
+            'market_klines',
+            'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
+            symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
+            lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
+            deduplicate=True,
+        ),
     )
-    taker_rows = [] if _has_unreliable_taker_source(exchange) else repo.market_rows(
-        'market_taker_buy_sell_vol',
-        'symbol, event_time, buy_vol, sell_vol',
-        symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
-        lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
-        deduplicate=True,
+    taker_rows = []
+    if not _has_unreliable_taker_source(exchange):
+        taker_rows = timed_query(
+            'rows_taker',
+            lambda: repo.market_rows(
+                'market_taker_buy_sell_vol',
+                'symbol, event_time, buy_vol, sell_vol',
+                symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
+                lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
+                deduplicate=True,
+            ),
+        )
+
+    logger.info(
+        'ClickHouse homepage exchange load: exchange=%s duration_ms=%.1f symbols=%s candidate_symbols=%s oi_rows=%s kline_rows=%s taker_rows=%s',
+        exchange,
+        (time.perf_counter() - exchange_started) * 1000,
+        len(symbols),
+        len(candidate_latest),
+        len(oi_rows),
+        len(kline_rows),
+        len(taker_rows),
     )
 
     oi_by_symbol = {symbol: {} for symbol in symbols}
