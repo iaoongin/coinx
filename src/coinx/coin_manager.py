@@ -322,7 +322,9 @@ from coinx.config import USE_PROXY, PROXY_URL, HTTPS_PROXY_URL
 def get_session():
     """创建带代理配置的requests会话"""
     session = requests.Session()
-    
+    # Only use the proxy explicitly configured by CoinX.
+    session.trust_env = False
+
     if USE_PROXY:
         proxies = {
             'http': PROXY_URL,

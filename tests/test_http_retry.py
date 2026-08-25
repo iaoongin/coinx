@@ -96,6 +96,21 @@ def test_parse_proxy_pool_urls_keeps_socks5_scheme():
     assert proxies == [{'id': 'DE', 'url': 'socks5://DE:token@proxy.example.com:2261'}]
 
 
+def test_exchange_sessions_do_not_inherit_system_proxy(monkeypatch):
+    monkeypatch.setattr('coinx.collector.binance.client._global_session', None)
+    monkeypatch.setattr('coinx.collector.binance.client.USE_PROXY', False)
+
+    exchange_session = __import__('coinx.collector.binance.client', fromlist=['get_session']).get_session()
+    direct_pool_session = proxy_pool._build_session()
+    configured_pool_session = proxy_pool._build_session('http://proxy.example.com:2261')
+
+    assert exchange_session.trust_env is False
+    assert direct_pool_session.trust_env is False
+    assert direct_pool_session.proxies == {}
+    assert configured_pool_session.trust_env is False
+    assert configured_pool_session.proxies['https'] == 'http://proxy.example.com:2261'
+
+
 def test_proxy_pool_filters_unavailable_proxies_during_initialization(monkeypatch):
     pool = ProxyPool(
         proxies=[

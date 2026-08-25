@@ -25,6 +25,9 @@ PROXY_CHECK_TIMEOUT_SECONDS = 5
 
 def _build_session(proxy_url=None):
     session = requests.Session()
+    # Use only the proxy explicitly selected by CoinX, if any. This prevents
+    # system proxy settings from being layered underneath proxy-pool routing.
+    session.trust_env = False
     session.headers.update(
         {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

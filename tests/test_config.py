@@ -1,6 +1,14 @@
 import pytest
 
-from coinx.config import resolve_market_backends
+from coinx.config import get_env, resolve_market_backends
+
+
+def test_get_env_converts_typed_default_values(monkeypatch):
+    monkeypatch.delenv('COINX_TEST_INTERVALS', raising=False)
+    monkeypatch.delenv('COINX_TEST_ENABLED', raising=False)
+
+    assert get_env('COINX_TEST_INTERVALS', '5m,15m', list) == ['5m', '15m']
+    assert get_env('COINX_TEST_ENABLED', False, bool) is False
 
 
 def test_market_backend_selects_both_directions():

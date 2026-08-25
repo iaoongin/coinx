@@ -44,12 +44,20 @@ os.makedirs(LOGS_DIR, exist_ok=True)
 
 def get_env(key, default=None, type_func=None):
     val = os.getenv(key)
+    if val is None:
+        val = default
+        if type_func is None:
+            return val
     if val is not None:
         if type_func:
             try:
                 if type_func == bool:
+                    if isinstance(val, bool):
+                        return val
                     return val.strip().lower() in ('1', 'true', 'yes', 'y', 'on')
                 if type_func == list:
+                    if isinstance(val, list):
+                        return val
                     return [v.strip() for v in val.split(',') if v.strip()]
                 return type_func(val)
             except:

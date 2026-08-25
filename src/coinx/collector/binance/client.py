@@ -38,6 +38,9 @@ def get_session():
     global _global_session
     if _global_session is None:
         _global_session = requests.Session()
+        # Exchange routing is controlled by CoinX configuration. Do not let
+        # Windows or process-level proxy settings silently override it.
+        _global_session.trust_env = False
         _global_session.headers.update(
             {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
