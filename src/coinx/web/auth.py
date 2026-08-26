@@ -18,15 +18,21 @@ from coinx.config import (
     WEB_JWT_COOKIE_SECURE,
     WEB_JWT_REFRESH_TOKEN_EXPIRES_DAYS,
     WEB_JWT_SECRET_KEY,
+    WEB_AUTH_DISABLED,
     WEB_PASSWORD,
     WEB_USERNAME,
 )
 from coinx.utils import logger
 
 
-_resolved_password = WEB_PASSWORD or secrets.token_urlsafe(12)
-_password_source = '环境变量' if WEB_PASSWORD else '自动生成'
-_password_hash = generate_password_hash(_resolved_password)
+if WEB_AUTH_DISABLED:
+    _resolved_password = None
+    _password_source = '已禁用'
+    _password_hash = None
+else:
+    _resolved_password = WEB_PASSWORD or secrets.token_urlsafe(12)
+    _password_source = '环境变量' if WEB_PASSWORD else '自动生成'
+    _password_hash = generate_password_hash(_resolved_password)
 
 # JWT 密钥：优先使用配置，未配置时自动生成
 _jwt_secret_key = WEB_JWT_SECRET_KEY or secrets.token_urlsafe(64)
@@ -61,7 +67,12 @@ def get_auth_context():
 
 
 def log_startup_credentials():
-    if _password_source == '自动生成':
+    if WEB_AUTH_DISABLED:
+        logger.warning(
+            '安全提示：已禁用 Web 登录授权（WEB_AUTH_DISABLED=true），'
+            '所有页面和 API 无需登录，请仅在受信任的本地网络使用'
+        )
+    elif _password_source == '自动生成':
         logger.warning('未配置 Web 登录密码，已为用户 %s 自动生成临时密码: %s', WEB_USERNAME, _resolved_password)
     else:
         logger.info('已启用 Web 登录，用户 %s 的密码来自环境变量 WEB_PASSWORD', WEB_USERNAME)
@@ -89,7 +100,7 @@ def clear_auth_cookies(response):
 
 
 def verify_password(password):
-    return check_password_hash(_password_hash, password or '')
+    return bool(_password_hash and check_password_hash(_password_hash, password or ''))
 
 
 def verify_username(username):

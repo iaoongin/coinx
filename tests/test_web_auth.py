@@ -117,6 +117,30 @@ def test_generated_password_is_created_when_missing(monkeypatch):
     importlib.reload(auth_module)
 
 
+def test_disabled_auth_does_not_generate_password_or_log_credentials(monkeypatch, caplog):
+    original_password = config_module.WEB_PASSWORD
+    original_auth_disabled = config_module.WEB_AUTH_DISABLED
+    monkeypatch.setattr(config_module, 'WEB_PASSWORD', None, raising=False)
+    monkeypatch.setattr(config_module, 'WEB_AUTH_DISABLED', True, raising=False)
+
+    reloaded = importlib.reload(auth_module)
+    auth_context = reloaded.get_auth_context()
+
+    assert auth_context['password'] is None
+    assert auth_context['password_source'] == '已禁用'
+    assert reloaded.verify_password('anything') is False
+
+    with caplog.at_level('WARNING'):
+        reloaded.log_startup_credentials()
+
+    assert '已禁用 Web 登录授权' in caplog.text
+    assert '临时密码' not in caplog.text
+
+    monkeypatch.setattr(config_module, 'WEB_PASSWORD', original_password, raising=False)
+    monkeypatch.setattr(config_module, 'WEB_AUTH_DISABLED', original_auth_disabled, raising=False)
+    importlib.reload(auth_module)
+
+
 # ---- JWT 专属测试 ----
 
 def _login(client):
