@@ -974,7 +974,7 @@
           loading.value = true;
           try {
             if (force) await refreshHomepageSeries();
-            const response = await fetch('/api/coins');
+            const response = await fetch(force ? '/api/coins?nocache=1' : '/api/coins');
             const result = await response.json();
             if (result.status === 'success') {
               coins.value = result.data || [];
