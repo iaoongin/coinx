@@ -119,9 +119,9 @@ PROXY_POOL_STRATEGY = get_env('PROXY_POOL_STRATEGY', 'round_robin')
 PROXY_POOL_FAIL_COOLDOWN_SECONDS = get_env('PROXY_POOL_FAIL_COOLDOWN_SECONDS', 30, int)
 
 DB_TYPE = get_env('DB_TYPE', 'mysql')  # 'mysql' | 'starrocks'
-DB_HOST = get_env('DB_HOST', 'localhost')
+DB_HOST = get_env('DB_HOST', 'mysql')
 DB_PORT = get_env('DB_PORT', 3306, int)
-DB_USER = get_env('DB_USER', 'root')
+DB_USER = get_env('DB_USER', 'coinx')
 DB_PASSWORD = get_env('DB_PASSWORD', '')
 DB_NAME = get_env('DB_NAME', 'coinx')
 DB_CHARSET = get_env('DB_CHARSET', 'utf8mb4')
@@ -201,16 +201,16 @@ if DB_TYPE == 'starrocks':
 else:
     DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset={DB_CHARSET}"
 
-BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://proxy.yffjglcms.com/fapi.binance.com')
+BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://fapi.binance.com')
 
-ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx,gate', list)
+ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx,bybit,gate', list)
 PRIMARY_PRICE_EXCHANGE = get_env('PRIMARY_PRICE_EXCHANGE', 'binance')
-OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://proxy.yffjglcms.com/www.okx.com')
+OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://www.okx.com')
 OKX_RUBIK_MIN_INTERVAL_MS = get_env('OKX_RUBIK_MIN_INTERVAL_MS', 500, int)
 OKX_429_RETRY_FALLBACK_SECONDS = get_env('OKX_429_RETRY_FALLBACK_SECONDS', 5, int)
-BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://proxy.yffjglcms.com/api.bybit.com')
+BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://api.bybit.com')
 BYBIT_CATEGORY = get_env('BYBIT_CATEGORY', 'linear')
-GATE_BASE_URL = get_env('GATE_BASE_URL', 'https://proxy.yffjglcms.com/api.gateio.ws')
+GATE_BASE_URL = get_env('GATE_BASE_URL', 'https://fx-api.gateio.ws')
 GATE_SETTLE = get_env('GATE_SETTLE', 'usdt')
 GATE_MIN_INTERVAL_MS = get_env('GATE_MIN_INTERVAL_MS', 60, int)
 GATE_403_RETRY_FALLBACK_SECONDS = get_env('GATE_403_RETRY_FALLBACK_SECONDS', 8, int)
