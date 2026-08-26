@@ -12,6 +12,7 @@ from coinx.repositories.trade_opportunities import (
     _build_trade_plan,
     _entry_score,
     _entry_state,
+    _effective_resistance,
     _flow_window_metrics,
     _higher_timeframe_price_trend_score,
     _latest_confirmed_pivot_high,
@@ -100,7 +101,7 @@ def test_sql_aggregation_returns_only_complete_5m_buckets(db_session):
         ['BTCUSDT'],
         upper_bound=23 * 5 * 60 * 1000,
         intervals={'1h': ONE_HOUR_MS},
-        lookback_points=2,
+        lookback_points={'1h': 2},
     )
 
     points = list(aggregated['1h']['BTCUSDT'].values())
@@ -135,6 +136,44 @@ def test_structure_helpers_use_latest_confirmed_high_and_windowed_flow():
 
     assert flow_value == -1000
     assert flow_ratio == -2
+
+
+def test_effective_resistance_ignores_broken_levels_and_clusters_nearby_highs():
+    points = [
+        SimpleNamespace(
+            open_time=index,
+            high_price=high,
+            low_price=90,
+            close_price=100,
+            quote_volume=100,
+        )
+        for index, high in enumerate([100, 100, 150, 100, 100, 100, 149, 100, 100, 100])
+    ]
+
+    resistance = _effective_resistance(points, 140)
+
+    assert resistance['price'] == 149.0
+    assert resistance['time'] == 6
+    assert set(resistance['levels']) == {149.0, 150.0}
+
+
+def test_effective_resistance_discards_a_pivot_broken_by_a_later_high():
+    points = [
+        SimpleNamespace(
+            open_time=index,
+            high_price=high,
+            low_price=90,
+            close_price=100,
+            quote_volume=100,
+        )
+        for index, high in enumerate([100, 100, 150, 100, 100, 160, 100, 100, 100])
+    ]
+
+    assert _effective_resistance(points, 140) == {
+        'price': 160.0,
+        'time': 5,
+        'levels': [160.0],
+    }
 
 
 def test_trade_plan_prefers_higher_timeframe_targets_over_5m_targets():

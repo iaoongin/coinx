@@ -392,7 +392,7 @@ def _structure_retest_observation(metric, params):
     minimum_outflow_ratio = params['min_outflow_ratio_percent'] / 100
     minimum_outflow_growth = params['min_outflow_increase_percent'] / 100
     matched = (
-        abs(price_distance) <= tolerance
+        -tolerance <= price_distance <= 0
         and price_change > 0
         and oi_change >= minimum_oi_change
         and current_outflow_ratio >= minimum_outflow_ratio

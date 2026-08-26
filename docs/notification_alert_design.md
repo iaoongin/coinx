@@ -127,7 +127,7 @@ NotificationDelivery（发送记录）
 | `market.price_oi_outflow.retest` | `high_timeframe`（`1h` / `4h`）、`retest_tolerance_percent`、`min_oi_increase_percent`、`min_outflow_ratio_percent`、`min_outflow_increase_percent`、`trigger_confirmations`、`recovery_confirmations` |
 | `system.job.failure` | `job_ids`、`consecutive_failures`（默认 1） |
 
-`market.price_oi_outflow.retest` 使用交易机会快照中各启用交易所按 OI 权重聚合的当前价格、前高、1h 价格变化、OI 和主动买卖量指标；最近 1h 价格上涨，价格距离选定周期前高不超过 0.3%，1h OI 增幅至少 1%，当前 1h 净流出至少占成交额 0.5%，且较上一小时扩大至少 20%。聚合后的前高、OI 和流量任一数据不足时跳过本次观测；三个条件必须同时成立才算命中。
+`market.price_oi_outflow.retest` 使用交易机会快照中各启用交易所按 OI 权重聚合的当前价格、有效阻力、1h 价格变化、OI 和主动买卖量指标。1h 与 4h 结构均从 5m K 线数据库侧聚合最近 30 天；有效阻力取当前价格上方最近的、未被后续高点突破的确认摆动高点，相差不超过 1% 的高点合并为阻力区。做空检测要求当前价格不高于有效阻力且距离不超过配置容差，最近 1h 价格上涨，1h OI 增幅至少 1%，当前 1h 净流出至少占成交额 0.5%，且较上一小时扩大至少 20%。当前未收盘的高周期 K 线只作为原始数据，不直接作为确认前高。聚合后的阻力、OI 和流量任一数据不足时跳过本次观测；全部条件必须同时成立才算命中。
 
 后端必须按 `event_type` 校验参数类型、范围与匹配的 `scope_type`。规则 API 不得传入自由表达式、SQL 片段或渠道密钥；渠道创建/编辑 API 仅允许提交 Apprise URL，且该值不会在后续读取接口中返回。
 
