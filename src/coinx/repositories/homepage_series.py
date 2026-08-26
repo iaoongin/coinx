@@ -1150,7 +1150,44 @@ def _calculate_clickhouse_net_inflow(rows, kline_by_time, anchor_time):
     return result
 
 
-def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None):
+def _load_clickhouse_exchange_candidate_latest(exchange, symbols, upper_bound=None):
+    """Return the latest candidate anchor for each symbol on one exchange."""
+    repo = get_clickhouse_repository()
+    symbols = list(symbols or [])
+    if not symbols:
+        return {}
+
+    upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
+    oi_latest = repo.latest_series_times(
+        'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+    )
+    kline_latest = repo.latest_series_times(
+        'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+    )
+    taker_latest = {}
+    if not _has_unreliable_taker_source(exchange):
+        taker_latest = repo.latest_series_times(
+            'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+        )
+
+    candidate_latest = {}
+    for symbol in symbols:
+        source_times = [oi_latest.get(symbol), kline_latest.get(symbol)]
+        if any(value is None for value in source_times):
+            continue
+        if symbol in taker_latest:
+            source_times.append(taker_latest[symbol])
+        candidate_latest[symbol] = min(source_times)
+    return candidate_latest
+
+
+def _load_homepage_exchange_maps_clickhouse(
+    exchange,
+    symbols,
+    upper_bound=None,
+    shared_anchor_by_symbol=None,
+    candidate_latest_override=None,
+):
     """Load a full aligned window from ClickHouse for one exchange."""
     repo = get_clickhouse_repository()
     symbols = list(symbols or [])
@@ -1188,38 +1225,45 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
         return result
 
     upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
-    oi_latest = timed_query(
-        'latest_open_interest',
-        lambda: repo.latest_series_times(
-            'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
-        ),
-    )
-    kline_latest = timed_query(
-        'latest_kline',
-        lambda: repo.latest_series_times(
-            'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
-        ),
-    )
-    taker_latest = {}
-    if not _has_unreliable_taker_source(exchange):
-        taker_latest = timed_query(
-            'latest_taker',
+    if candidate_latest_override is None:
+        oi_latest = timed_query(
+            'latest_open_interest',
             lambda: repo.latest_series_times(
-                'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+                'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
             ),
         )
+        kline_latest = timed_query(
+            'latest_kline',
+            lambda: repo.latest_series_times(
+                'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+            ),
+        )
+        taker_latest = {}
+        if not _has_unreliable_taker_source(exchange):
+            taker_latest = timed_query(
+                'latest_taker',
+                lambda: repo.latest_series_times(
+                    'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+                ),
+            )
 
-    candidate_latest = {}
-    for symbol in symbols:
-        source_times = [oi_latest.get(symbol), kline_latest.get(symbol)]
-        if any(value is None for value in source_times):
-            continue
-        # Net inflow is displayed beside OI and price, so a lagging Taker
-        # series must move the exchange anchor back instead of being reported
-        # as zero completeness at a newer OI/Kline timestamp.
-        if symbol in taker_latest:
-            source_times.append(taker_latest[symbol])
-        candidate_latest[symbol] = min(source_times)
+        candidate_latest = {}
+        for symbol in symbols:
+            source_times = [oi_latest.get(symbol), kline_latest.get(symbol)]
+            if any(value is None for value in source_times):
+                continue
+            # Net inflow is displayed beside OI and price, so a lagging Taker
+            # series must move the exchange anchor back instead of being reported
+            # as zero completeness at a newer OI/Kline timestamp.
+            if symbol in taker_latest:
+                source_times.append(taker_latest[symbol])
+            candidate_latest[symbol] = min(source_times)
+    else:
+        candidate_latest = {
+            symbol: int(value)
+            for symbol, value in candidate_latest_override.items()
+            if symbol in symbols and value is not None
+        }
     if not candidate_latest:
         logger.info(
             'ClickHouse homepage exchange load: exchange=%s duration_ms=%.1f symbols=%s candidate_symbols=0',
@@ -1229,10 +1273,15 @@ def _load_homepage_exchange_maps_clickhouse(exchange, symbols, upper_bound=None)
         )
         return empty
 
-    # The lower bound is based on the slowest actual common timestamp, not the
-    # wall-clock/as_of upper bound. This preserves the exact 168h point when an
-    # exchange is a few minutes behind the global homepage anchor.
-    lower = max(0, min(candidate_latest.values()) - _interval_to_ms('168h'))
+    # Every exchange must load from the shared anchor. Otherwise a fast exchange
+    # loads from its own latest-168h boundary, then loses the target when the
+    # aggregation anchor moves back to a slower exchange.
+    window_anchors = [
+        (shared_anchor_by_symbol or {}).get(symbol, candidate_latest.get(symbol))
+        for symbol in symbols
+        if candidate_latest.get(symbol) is not None
+    ]
+    lower = max(0, min(window_anchors) - _interval_to_ms('168h'))
     oi_rows = timed_query(
         'rows_open_interest',
         lambda: repo.market_rows(
@@ -1924,13 +1973,68 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
                 exchange, adapter = future.result()
                 exchange_adapters[exchange] = adapter
 
+        # Discover the slowest candidate anchor before loading any wide window.
+        # The final aggregation can only move an anchor backwards, so every
+        # exchange must include history from this shared point.
+        candidate_latest_by_exchange = {}
+
+        def load_candidate_latest(exchange):
+            try:
+                candidate = _load_clickhouse_exchange_candidate_latest(
+                    exchange, symbols, upper_bound=upper_bound
+                )
+                return exchange, candidate, None
+            except Exception as exc:
+                logger.warning(
+                    'ClickHouse homepage anchor query failed: exchange=%s error_type=%s',
+                    exchange,
+                    type(exc).__name__,
+                )
+                return exchange, None, exc
+
+        candidate_exchanges = [
+            exchange for exchange in enabled_exchanges if exchange in supported_exchanges
+        ]
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(candidate_exchanges)))) as executor:
+            futures = {
+                executor.submit(load_candidate_latest, exchange): exchange
+                for exchange in candidate_exchanges
+            }
+            for future in as_completed(futures):
+                exchange, candidate, error = future.result()
+                if error is None:
+                    candidate_latest_by_exchange[exchange] = candidate
+
+        shared_anchor_by_symbol = {}
+        for symbol in symbols:
+            candidates = [
+                candidate.get(symbol)
+                for candidate in candidate_latest_by_exchange.values()
+                if candidate.get(symbol) is not None
+            ]
+            if candidates:
+                shared_anchor_by_symbol[symbol] = min(candidates)
+
+        logger.info(
+            'ClickHouse homepage shared anchor prepared: exchanges=%s symbols=%s anchored_symbols=%s',
+            len(candidate_latest_by_exchange),
+            len(symbols),
+            len(shared_anchor_by_symbol),
+        )
+
         for exchange in enabled_exchanges:
             if exchange not in supported_exchanges:
                 exchange_maps[exchange] = empty_map
                 exchange_adapters[exchange] = None
                 continue
+
+            candidate_latest = candidate_latest_by_exchange.get(exchange)
             exchange_maps[exchange] = _load_homepage_exchange_maps_clickhouse(
-                exchange, symbols, upper_bound=upper_bound
+                exchange,
+                symbols,
+                upper_bound=upper_bound,
+                shared_anchor_by_symbol=shared_anchor_by_symbol,
+                candidate_latest_override=candidate_latest,
             )
 
         aggregate_oi_map, selected_kline_map, _, coverage_map = _aggregate_homepage_series_maps(

@@ -241,6 +241,65 @@ def test_clickhouse_homepage_loader_keeps_168h_when_latest_lags_global_anchor(mo
     assert all(lower == target_168h for _table, lower, _upper in calls)
 
 
+def test_clickhouse_homepage_loader_uses_shared_anchor_for_fast_exchange(monkeypatch):
+    import coinx.repositories.homepage_series as homepage
+
+    upper = 1_800_000_000_000
+    fast_latest = upper
+    shared_anchor = fast_latest - 3 * FIVE_MINUTES_MS
+    target_168h = shared_anchor - 168 * 60 * 60 * 1000
+    calls = []
+
+    class FakeClickHouseRepository:
+        def market_rows(self, table, columns, **kwargs):
+            calls.append((table, kwargs['lower_bound']))
+            if table == 'market_open_interest_hist':
+                return [
+                    {
+                        'symbol': 'BTCUSDT',
+                        'event_time': target_168h,
+                        'sum_open_interest': 100.0,
+                        'sum_open_interest_value': 10_000.0,
+                    },
+                    {
+                        'symbol': 'BTCUSDT',
+                        'event_time': fast_latest,
+                        'sum_open_interest': 200.0,
+                        'sum_open_interest_value': 20_000.0,
+                    },
+                ]
+            if table == 'market_klines':
+                return [
+                    {
+                        'symbol': 'BTCUSDT',
+                        'open_time': target_168h,
+                        'close_price': 100.0,
+                    },
+                    {
+                        'symbol': 'BTCUSDT',
+                        'open_time': fast_latest,
+                        'close_price': 200.0,
+                    },
+                ]
+            return []
+
+    monkeypatch.setattr(homepage, 'get_clickhouse_repository', lambda: FakeClickHouseRepository())
+    monkeypatch.setattr(homepage, '_has_unreliable_taker_source', lambda exchange: True)
+
+    oi_map, kline_map, _net_map, latest_map = _load_homepage_exchange_maps_clickhouse(
+        'binance',
+        ['BTCUSDT'],
+        upper_bound=upper,
+        shared_anchor_by_symbol={'BTCUSDT': shared_anchor},
+        candidate_latest_override={'BTCUSDT': fast_latest},
+    )
+
+    assert latest_map == {'BTCUSDT': fast_latest}
+    assert target_168h in oi_map['BTCUSDT']
+    assert target_168h in kline_map['BTCUSDT']
+    assert all(lower == target_168h for _table, lower in calls)
+
+
 def test_clickhouse_homepage_loader_aligns_anchor_to_lagging_taker_series(monkeypatch):
     import coinx.repositories.homepage_series as homepage
 
@@ -1333,7 +1392,13 @@ def test_clickhouse_homepage_prewarms_support_cache_before_loading_maps(monkeypa
 
     monkeypatch.setattr(homepage, 'get_exchange_adapter', lambda exchange: FakeAdapter())
 
-    def fake_load(exchange, symbols, upper_bound=None):
+    def fake_load(
+        exchange,
+        symbols,
+        upper_bound=None,
+        shared_anchor_by_symbol=None,
+        candidate_latest_override=None,
+    ):
         state['load_saw_warmed'] = state['warmed']
         empty = {symbol: {} for symbol in symbols}
         return empty, empty.copy(), homepage._empty_net_inflow_map(symbols), {}
