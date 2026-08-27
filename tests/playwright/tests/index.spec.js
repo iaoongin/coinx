@@ -33,6 +33,42 @@ test.describe('首页测试', () => {
     await expect(page.locator('.coin-meta-line')).toBeVisible();
     await expect(page.locator('body')).not.toContainText('采集：');
   });
+
+  test('搜索条件通过URL参数恢复并支持清除', async ({ page }) => {
+    await visit(page, '/?symbol=BTC');
+
+    const input = page.locator('.search-input');
+    await expect(input).toHaveValue('BTC');
+    await expect(page.locator('.coin-panel')).toHaveCount(1);
+
+    await page.reload();
+    await expect(input).toHaveValue('BTC');
+
+    await page.getByRole('button', { name: '清除搜索' }).click();
+    await expect(input).toHaveValue('');
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator('.coin-panel')).toHaveCount(1);
+  });
+
+  test('搜索记录可在输入框聚焦时展示并重新使用', async ({ page }) => {
+    await page.evaluate(() => localStorage.removeItem('coinx.homepage.search-history'));
+    await visit(page, '/');
+
+    const input = page.locator('.search-input');
+    await input.fill('BTC');
+    await input.press('Enter');
+    await expect(page).toHaveURL(/symbol=BTC/);
+
+    await input.fill('');
+    await input.focus();
+    await expect(page.getByRole('listbox', { name: '最近搜索' })).toBeVisible();
+    await expect(page.getByRole('option', { name: 'BTC' })).toBeVisible();
+
+    await page.getByRole('option', { name: 'BTC' }).click();
+    await expect(input).toHaveValue('BTC');
+    await expect(page).toHaveURL(/symbol=BTC/);
+  });
+
   test('点击资费标签展示 24 小时走势图并支持 Esc 关闭', async ({ page }) => {
     const historyRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
