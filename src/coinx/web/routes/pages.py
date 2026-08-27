@@ -12,6 +12,11 @@ def index():
     return render_template('index.html')
 
 
+@pages_bp.route('/pwa-start')
+def pwa_start():
+    return render_template('pwa_start.html')
+
+
 @pages_bp.route('/new-home')
 def new_home():
     logger.info("访问多周期矩阵兼容入口，重定向到默认首页")

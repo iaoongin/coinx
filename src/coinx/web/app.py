@@ -1,7 +1,7 @@
 import os
 import sys
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_jwt_extended import JWTManager
 
 # 添加项目根目录到路径
@@ -69,11 +69,22 @@ def create_app():
             return None
         # 登录页、退出接口和静态资源不需要登录，其余请求统一拦截
         endpoint = request.endpoint or ''
-        if endpoint in {'auth.login', 'auth.logout', 'auth.refresh', 'static', 'read_backend_health_endpoint'}:
+        if endpoint in {'auth.login', 'auth.logout', 'auth.refresh', 'static', 'service_worker', 'pages.pwa_start', 'read_backend_health_endpoint'}:
             return None
         if is_authenticated():
             return None
         return unauthorized_response()
+
+    @app.route('/service-worker.js')
+    def service_worker():
+        response = send_from_directory(
+            os.path.dirname(__file__),
+            'service-worker.js',
+            mimetype='application/javascript',
+            max_age=0,
+        )
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
 
     @app.before_request
     def enforce_clickhouse_read_only():
