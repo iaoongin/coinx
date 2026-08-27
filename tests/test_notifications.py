@@ -233,7 +233,7 @@ def _trade_opportunity(symbol, entry_state='可做多', stop_percent=-2, plan_st
 def _structure_retest_row(symbol='BTCUSDT', **overrides):
     metric = {
         'exchange': 'binance',
-        'current_price': 100.2,
+        'current_price': 99.8,
         'previous_high_1h': 100,
         'previous_high_1h_time': 1_700_000_000_000,
         'price_change_1h': 0.01,
@@ -289,6 +289,40 @@ def test_structure_retest_alert_requires_all_conditions_and_recovers(db_session,
     ]
     assert 'OI 1h +2.00%' in deliveries[0].payload_json['message']['body']
     assert '净流出 1h 1.80% · 较前一小时 +80.00%' in deliveries[0].payload_json['message']['body']
+
+
+def test_structure_retest_alert_does_not_match_after_price_breaks_above_high(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session,
+        channel,
+        notifications.EVENT_PRICE_OI_OUTFLOW_RETEST,
+        'structure_retests',
+        {
+            'high_timeframe': '1h',
+            'retest_tolerance_percent': 3,
+            'min_oi_increase_percent': 1,
+            'min_outflow_ratio_percent': 0.5,
+            'min_outflow_increase_percent': 20,
+            'trigger_confirmations': 1,
+            'recovery_confirmations': 1,
+        },
+    )
+    monkeypatch.setattr(
+        notifications,
+        'get_trade_opportunity_snapshot',
+        lambda: {
+            'data': [_structure_retest_row(current_price=101)],
+            'cache_update_time': 1_700_000_000_000,
+        },
+    )
+
+    result = notifications.evaluate_price_oi_outflow_retest_rules(session=db_session, rule_id=rule.id)
+
+    assert result['checked'] == 1
+    assert result['matched'] == 0
+    assert result['sent'] == 0
 
 
 def test_structure_retest_alert_does_not_match_when_one_condition_fails(db_session, monkeypatch):

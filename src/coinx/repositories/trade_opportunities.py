@@ -30,7 +30,8 @@ ONE_HOUR_MS = 12 * FIVE_MINUTES_MS
 FOUR_HOURS_MS = 48 * FIVE_MINUTES_MS
 HIGHER_TIMEFRAME_SLOPE_POINTS = 12
 TRADE_KLINE_LOOKBACK_MS = (TREND_KLINE_POINTS - 1) * FIVE_MINUTES_MS
-HIGHER_TIMEFRAME_KLINE_POINTS = 72
+HIGHER_TIMEFRAME_LOOKBACK_POINTS = {'1h': 720, '4h': 180}
+RESISTANCE_CLUSTER_TOLERANCE = 0.01
 PIVOT_RADIUS = 2
 STOP_ATR_BUFFER = 0.25
 FALLBACK_STOP_ATR = 1.5
@@ -216,6 +217,56 @@ def _latest_confirmed_pivot_high(points):
     return {
         'price': price,
         'time': getattr(points[index], 'open_time', None),
+    }
+
+
+def _weighted_median(items):
+    ordered = sorted(items, key=lambda item: item['price'])
+    total_weight = sum(item['weight'] for item in ordered)
+    midpoint = total_weight / 2
+    accumulated = 0.0
+    for item in ordered:
+        accumulated += item['weight']
+        if accumulated >= midpoint:
+            return item['price']
+    return ordered[-1]['price']
+
+
+def _effective_resistance(points, current_price):
+    """Select the nearest unbroken resistance above the current price."""
+    current_price = _float(current_price)
+    if current_price is None:
+        return None
+
+    candidates = []
+    pivot_highs, _ = _confirmed_pivots(points)
+    last_index = max(len(points) - 1, 1)
+    for index, price in pivot_highs:
+        if price < current_price:
+            continue
+        later_highs = [
+            _float(getattr(point, 'high_price', None))
+            for point in points[index + 1:]
+        ]
+        if any(value is not None and value > price for value in later_highs):
+            continue
+        candidates.append({
+            'price': price,
+            'time': getattr(points[index], 'open_time', None),
+            'weight': 1.0 + index / last_index,
+        })
+    if not candidates:
+        return None
+
+    nearest = min(candidates, key=lambda item: item['price'])
+    cluster = [
+        item for item in candidates
+        if (item['price'] - nearest['price']) / nearest['price'] <= RESISTANCE_CLUSTER_TOLERANCE
+    ]
+    return {
+        'price': _weighted_median(cluster),
+        'time': max(cluster, key=lambda item: item['weight'])['time'],
+        'levels': [item['price'] for item in cluster],
     }
 
 
@@ -476,7 +527,10 @@ def _exchange_metric(
     risk_score = max(-30, risk_score)
     oi_value = _float(getattr(oi_by_time[anchor], 'sum_open_interest_value', None)) or 0.0
     previous_highs = {
-        timeframe: _latest_confirmed_pivot_high(higher_timeframe_points.get(timeframe) or [])
+        timeframe: _effective_resistance(
+            higher_timeframe_points.get(timeframe) or [],
+            current_price,
+        )
         for timeframe in ('1h', '4h')
     }
     return {
@@ -538,7 +592,7 @@ def _build_trade_opportunity_snapshot(symbols, exchanges, anchor):
                 symbols,
                 anchor,
                 intervals={'1h': ONE_HOUR_MS, '4h': FOUR_HOURS_MS},
-                lookback_points=HIGHER_TIMEFRAME_KLINE_POINTS,
+                lookback_points=HIGHER_TIMEFRAME_LOOKBACK_POINTS,
             )
     funding_maps = _load_exchange_funding_rate_maps(maps.keys(), symbols, as_of_ms=anchor)
     data = []

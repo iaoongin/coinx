@@ -418,6 +418,11 @@ def load_market_structure_aggregated_kline_maps(
     lookback_points=72,
 ):
     """Return strict UTC-aligned 5m aggregations without transferring raw history."""
+    def _lookback_for_interval(name):
+        if isinstance(lookback_points, dict):
+            return int(lookback_points.get(name, 72))
+        return int(lookback_points)
+
     if session is None and is_clickhouse_read():
         repo = get_clickhouse_repository()
         result = {name: {symbol: {} for symbol in symbols} for name in (intervals or {})}
@@ -428,7 +433,7 @@ def load_market_structure_aggregated_kline_maps(
             interval_ms = int(interval_ms)
             lower = None
             if upper is not None:
-                lower = max(0, upper - (int(lookback_points) + 1) * interval_ms)
+                lower = max(0, upper - (_lookback_for_interval(name) + 1) * interval_ms)
             rows = repo.aggregate_kline_rows(
                 symbols=symbols,
                 exchange=exchange,
@@ -459,7 +464,7 @@ def load_market_structure_aggregated_kline_maps(
             lower_bound = None
             if upper_bound is not None:
                 # One extra bucket accommodates a partially formed latest bucket.
-                lower_bound = max(0, int(upper_bound) - (int(lookback_points) + 1) * interval_ms)
+                lower_bound = max(0, int(upper_bound) - (_lookback_for_interval(name) + 1) * interval_ms)
 
             bucket_time = (
                 func.floor(MarketKline.open_time / interval_ms) * interval_ms
