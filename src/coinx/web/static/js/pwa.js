@@ -13,7 +13,6 @@
     try {
       const target = new URL(value, window.location.origin);
       return target.origin === window.location.origin
-        && target.pathname !== '/'
         && !target.pathname.startsWith('/api/')
         && !target.pathname.startsWith('/static/')
         && target.pathname !== '/service-worker.js'
@@ -32,6 +31,19 @@
     } catch (error) {
       console.warn('CoinX PWA 无法保存上次页面:', error);
     }
+  };
+
+  const watchRouteChanges = () => {
+    ['pushState', 'replaceState'].forEach((method) => {
+      const original = window.history[method];
+      window.history[method] = function wrappedHistoryMethod(...args) {
+        const result = original.apply(this, args);
+        rememberCurrentRoute();
+        return result;
+      };
+    });
+    window.addEventListener('popstate', rememberCurrentRoute);
+    window.addEventListener('hashchange', rememberCurrentRoute);
   };
 
   const restoreLastRoute = async () => {
@@ -82,6 +94,7 @@
   } else {
     bootstrapPwaRoute();
   }
+  watchRouteChanges();
 
   if (!('serviceWorker' in navigator)) return;
 

@@ -16,6 +16,17 @@ test.describe('PWA安装能力', () => {
     })).toContain('/service-worker.js');
   });
 
+  test('记录首页及运行时更新的URL参数', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => {
+      window.history.replaceState({}, '', '/?symbol=BTCUSDT');
+    });
+
+    await expect.poll(() => page.evaluate(() => (
+      localStorage.getItem('coinx.pwa.last-route')
+    ))).toBe('/?symbol=BTCUSDT');
+  });
+
   test('PWA启动时恢复上次页面', async ({ page }) => {
     await page.evaluate(() => localStorage.setItem('coinx.pwa.last-route', '/market-rank'));
 
