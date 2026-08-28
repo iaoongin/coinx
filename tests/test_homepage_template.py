@@ -25,3 +25,14 @@ def test_homepage_loads_pinned_echarts_from_unpkg():
 
     assert "https://unpkg.com/echarts@6.0.0/dist/echarts.min.js" in template
     assert "cdn.jsdelivr.net/npm/echarts" not in template
+
+
+def test_homepage_search_persists_in_url_and_supports_recent_history():
+    template = Path('src/coinx/web/templates/index.html').read_text(encoding='utf-8')
+
+    assert 'type="search"' in template
+    assert "SEARCH_QUERY_PARAM = 'symbol'" in template
+    assert 'history.replaceState' in template
+    assert "SEARCH_HISTORY_STORAGE_KEY = 'coinx.homepage.search-history'" in template
+    assert 'role="listbox"' in template
+    assert 'aria-label="清除搜索"' in template

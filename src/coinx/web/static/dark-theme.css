@@ -1010,6 +1010,14 @@ textarea:focus {
 }
 
 @media (max-width: 768px) {
+  /* iOS Safari zooms the viewport when a focused editable control is below 16px. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea,
+  .el-input__inner {
+    font-size: 16px !important;
+  }
+
   :root {
     --page-padding: 12px;
     --nav-height: 48px;

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+  <title>CoinX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  {% include 'components/pwa_head.html' %}
+  <style>
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      background: var(--bg-primary);
+    }
+
+    .pwa-start {
+      display: flex;
+      align-items: center;
+      flex-direction: column;
+      gap: 12px;
+      width: min(280px, calc(100% - 40px));
+      text-align: center;
+    }
+
+    .pwa-start-mark {
+      width: 76px;
+      height: 76px;
+      border-radius: 18px;
+      box-shadow: 0 0 28px rgba(212, 175, 55, 0.16);
+    }
+
+    .pwa-start-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .pwa-start-subtitle {
+      margin: -6px 0 3px;
+      color: var(--gold-primary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .pwa-start-status {
+      min-height: 18px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .pwa-start-progress {
+      position: relative;
+      overflow: hidden;
+      width: 124px;
+      height: 2px;
+      margin-top: 3px;
+      border-radius: 2px;
+      background: var(--border-default);
+    }
+
+    .pwa-start-progress::after {
+      position: absolute;
+      inset: 0 auto 0 -45%;
+      width: 45%;
+      background: var(--gold-primary);
+      content: '';
+      animation: pwa-progress 1.25s ease-in-out infinite;
+    }
+
+    .pwa-start-fallback {
+      margin-top: 6px;
+      color: var(--text-muted);
+      font-size: 11px;
+      text-decoration: none;
+    }
+
+    .pwa-start-fallback:hover {
+      color: var(--gold-bright);
+    }
+
+    @keyframes pwa-progress {
+      from { transform: translateX(0); }
+      to { transform: translateX(325%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pwa-start-progress::after {
+        animation: none;
+        inset: 0;
+        width: 100%;
+        opacity: 0.7;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="pwa-start" aria-labelledby="pwa-start-title">
+    <img
+      class="pwa-start-mark"
+      src="{{ url_for('static', filename='brand/coinx-mark.svg') }}"
+      alt="CoinX"
+      width="76"
+      height="76"
+    >
+    <h1 id="pwa-start-title" class="pwa-start-title">CoinX</h1>
+    <div class="pwa-start-subtitle">Crypto Signal Desk</div>
+    <div class="pwa-start-status" data-pwa-start-status aria-live="polite">正在准备工作区...</div>
+    <div class="pwa-start-progress" aria-hidden="true"></div>
+    <a class="pwa-start-fallback" href="/">进入首页</a>
+  </main>
+</body>
+</html>

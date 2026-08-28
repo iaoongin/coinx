@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
   <title>合约详情 - CoinX</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  {% include 'components/pwa_head.html' %}
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/echarts@6.0.0/dist/echarts.min.js"></script>
   <style>

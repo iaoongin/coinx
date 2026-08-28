@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
   <title>多周期矩阵</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  {% include 'components/pwa_head.html' %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
@@ -90,18 +91,112 @@
     }
 
     .search-input {
-      width: 190px;
+      width: 100%;
       height: 30px;
-      padding: 0 9px;
+      padding: 0 30px 0 9px;
       color: var(--text-primary);
       background: var(--bg-secondary);
       border: 1px solid var(--border-default);
       border-radius: 6px;
       outline: none;
+      box-sizing: border-box;
     }
 
     .search-input:focus {
       border-color: var(--gold-primary);
+    }
+
+    .search-control {
+      position: relative;
+      width: 190px;
+    }
+
+    .search-input::-webkit-search-cancel-button {
+      display: none;
+    }
+
+    .search-clear {
+      position: absolute;
+      top: 50%;
+      right: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      transform: translateY(-50%);
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .search-clear:hover,
+    .search-clear:focus-visible {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      outline: none;
+    }
+
+    .search-history {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 4px);
+      right: 0;
+      left: 0;
+      overflow: hidden;
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      background: var(--bg-elevated);
+      box-shadow: var(--shadow-card);
+    }
+
+    .search-history-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 9px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .search-history-clear {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .search-history-clear:hover,
+    .search-history-clear:focus-visible {
+      color: var(--gold-bright);
+      outline: none;
+    }
+
+    .search-history-item {
+      display: block;
+      width: 100%;
+      padding: 8px 9px;
+      border: 0;
+      background: transparent;
+      color: var(--text-primary);
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .search-history-item:hover,
+    .search-history-item:focus-visible {
+      background: var(--bg-secondary);
+      outline: none;
     }
 
     .btn {
@@ -482,6 +577,10 @@
         width: 100%;
       }
 
+      .search-control {
+        width: 100%;
+      }
+
       .funding-modal-backdrop { padding: 12px; }
       .funding-chart-wrap { height: 320px; }
     }
@@ -505,11 +604,53 @@
 
       <div class="toolbar">
         <div class="toolbar-left">
-          <input class="search-input" v-model.trim="keyword" placeholder="搜索币种">
+          <div ref="searchControl" class="search-control" @focusout="handleSearchFocusout">
+            <input
+              ref="searchInput"
+              class="search-input"
+              type="search"
+              v-model.trim="keyword"
+              placeholder="搜索币种"
+              aria-label="搜索币种"
+              role="combobox"
+              aria-controls="homepage-search-history"
+              :aria-expanded="searchFocused && !keyword && searchHistory.length > 0"
+              aria-autocomplete="list"
+              autocomplete="off"
+              spellcheck="false"
+              @focus="searchFocused = true"
+              @keydown="handleSearchKeydown"
+              @change="rememberSearch()"
+            >
+            <button
+              v-if="keyword"
+              type="button"
+              class="search-clear"
+              aria-label="清除搜索"
+              title="清除搜索"
+              @mousedown.prevent
+              @click="clearKeyword"
+            >&times;</button>
+            <div v-if="searchFocused && !keyword && searchHistory.length" id="homepage-search-history" class="search-history" role="listbox" aria-label="最近搜索">
+              <div class="search-history-head">
+                <span>最近搜索</span>
+                <button type="button" class="search-history-clear" @mousedown.prevent @click="clearSearchHistory">清空历史</button>
+              </div>
+              <button
+                v-for="item in searchHistory"
+                :key="item"
+                type="button"
+                class="search-history-item"
+                role="option"
+                @mousedown.prevent
+                @click="selectSearchHistory(item)"
+              >[[ item ]]</button>
+            </div>
+          </div>
           <span class="subtitle">显示 [[ filteredCoins.length ]] / [[ coins.length ]]</span>
         </div>
         <div class="toolbar-right">
-          <button class="btn" @click="keyword = ''">清空</button>
+          <button class="btn" @click="clearKeyword">清空</button>
           <button class="btn btn-primary" @click="loadData(true)" :disabled="loading">
             [[ loading ? '刷新中' : '刷新' ]]
           </button>
@@ -607,7 +748,7 @@
 
   <script src="{{ url_for('static', filename='js/components/CoinConfigModal.js') }}"></script>
   <script>
-    const { createApp, ref, computed, nextTick, onMounted, onUnmounted } = Vue;
+    const { createApp, ref, computed, watch, nextTick, onMounted, onUnmounted } = Vue;
 
     const app = createApp({
       delimiters: ['[[', ']]'],
@@ -616,6 +757,13 @@
         const coins = ref([]);
         const loading = ref(false);
         const keyword = ref('');
+        const searchHistory = ref([]);
+        const searchFocused = ref(false);
+        const searchControl = ref(null);
+        const searchInput = ref(null);
+        const SEARCH_QUERY_PARAM = 'symbol';
+        const SEARCH_HISTORY_STORAGE_KEY = 'coinx.homepage.search-history';
+        const SEARCH_HISTORY_LIMIT = 8;
         const lastUpdateTime = ref('');
         const countdown = ref('--');
         const FIVE_MINUTES_MS = 5 * 60 * 1000;
@@ -637,6 +785,111 @@
           if (!term) return coins.value;
           return coins.value.filter((coin) => String(coin.symbol).toUpperCase().includes(term));
         });
+
+        const normalizeSearchTerm = (value) => String(value || '').trim();
+
+        const updateSearchUrl = (value) => {
+          const url = new URL(window.location.href);
+          const term = normalizeSearchTerm(value);
+          const current = url.searchParams.get(SEARCH_QUERY_PARAM) || '';
+          if (term === current && (term || !url.searchParams.has(SEARCH_QUERY_PARAM))) return;
+          if (term) {
+            url.searchParams.set(SEARCH_QUERY_PARAM, term);
+          } else {
+            url.searchParams.delete(SEARCH_QUERY_PARAM);
+          }
+          window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+        };
+
+        const persistSearchHistory = () => {
+          try {
+            window.localStorage.setItem(SEARCH_HISTORY_STORAGE_KEY, JSON.stringify(searchHistory.value));
+          } catch (error) {
+            console.warn('无法保存首页搜索历史:', error);
+          }
+        };
+
+        const restoreSearchHistory = () => {
+          try {
+            const saved = JSON.parse(window.localStorage.getItem(SEARCH_HISTORY_STORAGE_KEY) || '[]');
+            if (!Array.isArray(saved)) return;
+            const seen = new Set();
+            searchHistory.value = saved
+              .map(normalizeSearchTerm)
+              .map((item) => item.toUpperCase())
+              .filter((item) => item && !seen.has(item) && seen.add(item))
+              .slice(0, SEARCH_HISTORY_LIMIT);
+          } catch (error) {
+            searchHistory.value = [];
+          }
+        };
+
+        const rememberSearch = (value = keyword.value) => {
+          const term = normalizeSearchTerm(value).toUpperCase();
+          if (!term) return;
+          searchHistory.value = [
+            term,
+            ...searchHistory.value.filter((item) => item !== term),
+          ].slice(0, SEARCH_HISTORY_LIMIT);
+          persistSearchHistory();
+        };
+
+        const selectSearchHistory = (value) => {
+          keyword.value = normalizeSearchTerm(value);
+          searchFocused.value = false;
+          nextTick(() => searchInput.value?.focus());
+        };
+
+        const clearSearchHistory = () => {
+          searchHistory.value = [];
+          persistSearchHistory();
+        };
+
+        const clearKeyword = () => {
+          keyword.value = '';
+          searchFocused.value = true;
+          nextTick(() => searchInput.value?.focus());
+        };
+
+        const handleSearchKeydown = (event) => {
+          if (event.isComposing) return;
+          if (event.key === 'Enter') {
+            rememberSearch();
+            return;
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            if (keyword.value) {
+              clearKeyword();
+            } else {
+              searchFocused.value = false;
+            }
+          }
+        };
+
+        const handleSearchOutsideClick = (event) => {
+          if (!searchControl.value?.contains(event.target)) searchFocused.value = false;
+        };
+
+        const handleSearchFocusout = (event) => {
+          if (!searchControl.value?.contains(event.relatedTarget)) searchFocused.value = false;
+        };
+
+        watch(keyword, (value) => {
+          const normalized = normalizeSearchTerm(value);
+          if (normalized !== value) {
+            keyword.value = normalized;
+            return;
+          }
+          updateSearchUrl(normalized);
+        });
+
+        const restoreSearchState = () => {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has(SEARCH_QUERY_PARAM)) {
+            keyword.value = normalizeSearchTerm(url.searchParams.get(SEARCH_QUERY_PARAM));
+          }
+        };
 
         const fundingChartMessage = computed(() => ({
           loading: '加载中...',
@@ -991,13 +1244,17 @@
         };
 
         onMounted(() => {
+          restoreSearchHistory();
+          restoreSearchState();
           loadData();
+          document.addEventListener('click', handleSearchOutsideClick);
           window.addEventListener('keydown', handleFundingKeydown);
           window.addEventListener('resize', handleFundingResize);
           if (window.visualViewport) window.visualViewport.addEventListener('resize', handleFundingResize);
         });
         onUnmounted(() => {
           if (countdownTimer) clearInterval(countdownTimer);
+          document.removeEventListener('click', handleSearchOutsideClick);
           window.removeEventListener('keydown', handleFundingKeydown);
           window.removeEventListener('resize', handleFundingResize);
           if (window.visualViewport) window.visualViewport.removeEventListener('resize', handleFundingResize);
@@ -1008,6 +1265,10 @@
           coins,
           loading,
           keyword,
+          searchHistory,
+          searchFocused,
+          searchControl,
+          searchInput,
           filteredCoins,
           lastUpdateTime,
           countdown,
@@ -1033,6 +1294,12 @@
           formatExchangeEntry,
           coinMetaLine,
           loadData,
+          rememberSearch,
+          clearKeyword,
+          clearSearchHistory,
+          selectSearchHistory,
+          handleSearchKeydown,
+          handleSearchFocusout,
           openFundingModal,
           closeFundingModal,
           showCoinConfig,
