@@ -1,3 +1,6 @@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='flatpickr-coinx.css') }}">
+
 <div class="nav-container">
   <a class="brand-lockup" href="/" aria-label="CoinX 首页">
     <img
@@ -70,8 +73,9 @@
       id="as-of-input"
       class="as-of-input"
       data-as-of-input
-      type="datetime-local"
-      step="60"
+      type="text"
+      readonly
+      placeholder="选择日期时间"
       aria-label="指定行情数据时点（上海时间）"
     >
     <button class="as-of-button as-of-button-primary" data-as-of-apply type="button">应用</button>
@@ -79,6 +83,8 @@
     <span class="as-of-status" data-as-of-status aria-live="polite">实时数据</span>
   </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/zh.js"></script>
 <script src="{{ url_for('static', filename='js/as_of_control.js') }}"></script>
 <script>
   (() => {

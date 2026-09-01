@@ -334,11 +334,16 @@ body::after {
   background: var(--bg-card);
   color: var(--text-primary);
   font: 11px var(--font-mono);
+  cursor: pointer;
 }
 
 .as-of-input:focus {
   outline: none;
   border-color: var(--gold-primary);
+}
+
+.as-of-input::placeholder {
+  color: var(--text-muted);
 }
 
 .as-of-button {
@@ -1039,13 +1044,28 @@ textarea:focus {
 
   .as-of-control {
     order: 3;
-    width: 100%;
+    width: calc(100% + 24px);
+    margin: 0 -12px;
     justify-content: flex-start;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 6px;
+    padding: 6px 12px;
+    border: 0;
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 0;
+    background: transparent;
   }
 
   .as-of-input {
     flex: 0 0 166px;
+  }
+
+  .as-of-status {
+    flex: 1 0 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .nav {

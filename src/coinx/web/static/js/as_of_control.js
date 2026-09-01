@@ -29,6 +29,22 @@
       + `T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
   }
 
+  function formatPickerValue(timestamp) {
+    return formatInputValue(timestamp).replace('T', ' ');
+  }
+
+  function pickerDateToTimestamp(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const timestamp = Date.UTC(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+    ) - SHANGHAI_OFFSET_MS;
+    return readTimestamp(timestamp);
+  }
+
   function readTimestamp(value) {
     const timestamp = Number(value);
     return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
@@ -108,16 +124,70 @@
     const applyButton = control.querySelector('[data-as-of-apply]');
     const clearButton = control.querySelector('[data-as-of-clear]');
     const timestamp = getActiveTimestamp();
-    if (timestamp !== null) input.value = formatInputValue(timestamp);
+    let pendingTimestamp = timestamp;
 
-    const updateStatus = (message, active = timestamp !== null) => {
+    const updateStatus = (message, active = pendingTimestamp !== null) => {
       status.textContent = message;
       status.classList.toggle('is-active', active);
     };
-    updateStatus(timestamp === null ? '实时数据' : `回放至 ${formatInputValue(timestamp).replace('T', ' ')}`);
+    updateStatus(timestamp === null ? '实时数据' : `回放至 ${formatPickerValue(timestamp)}`);
+
+    if (typeof window.flatpickr === 'function') {
+      const syncPickerTimestamp = (selectedDates, dateString, instance) => {
+        if (!selectedDates.length) {
+          pendingTimestamp = null;
+        } else {
+          const selectedDate = new Date(selectedDates[0].getTime());
+          const hour = Number(instance?.hourElement?.value);
+          const minute = Number(instance?.minuteElement?.value);
+          if (Number.isInteger(hour) && Number.isInteger(minute)) {
+            selectedDate.setHours(hour, minute, 0, 0);
+          }
+          pendingTimestamp = pickerDateToTimestamp(selectedDate);
+        }
+        updateStatus(
+          pendingTimestamp === null
+            ? '请选择数据时点'
+            : `待应用 ${formatPickerValue(pendingTimestamp)}`,
+          pendingTimestamp !== null,
+        );
+      };
+      window.flatpickr(input, {
+        allowInput: false,
+        dateFormat: 'Y-m-d H:i',
+        defaultDate: timestamp === null ? null : formatPickerValue(timestamp),
+        disableMobile: true,
+        enableTime: true,
+        locale: window.flatpickr.l10ns.zh,
+        minuteIncrement: 5,
+        onChange: syncPickerTimestamp,
+        onClose: syncPickerTimestamp,
+        onValueUpdate: syncPickerTimestamp,
+        onReady: (selectedDates, dateString, instance) => {
+          const syncTimeControls = () => syncPickerTimestamp(
+            instance.selectedDates,
+            input.value,
+            instance,
+          );
+          [instance.hourElement, instance.minuteElement].forEach((element) => {
+            if (!element) return;
+            element.addEventListener('change', syncTimeControls);
+            element.addEventListener('input', syncTimeControls);
+          });
+        },
+        time_24hr: true,
+      });
+    } else {
+      input.readOnly = false;
+      input.type = 'datetime-local';
+      input.step = '300';
+      if (timestamp !== null) input.value = formatInputValue(timestamp);
+    }
 
     applyButton.addEventListener('click', () => {
-      const nextTimestamp = parseInputValue(input.value);
+      const nextTimestamp = typeof window.flatpickr === 'function'
+        ? pendingTimestamp
+        : parseInputValue(input.value);
       if (nextTimestamp === null) {
         updateStatus('请输入有效时间', false);
         input.focus();
@@ -128,6 +198,8 @@
     });
 
     clearButton.addEventListener('click', () => {
+      pendingTimestamp = null;
+      if (input._flatpickr) input._flatpickr.clear();
       setTimestamp(null);
       updateCurrentUrl(null);
     });
