@@ -3,9 +3,14 @@ from pathlib import Path
 
 def test_homepage_shows_taker_source_tags_for_single_source():
     template = Path('src/coinx/web/templates/index.html').read_text(encoding='utf-8')
+    component = Path('src/coinx/web/static/js/components/PeriodMatrix.js').read_text(encoding='utf-8')
 
-    assert 'v-if="allTakerExchanges(coin).length"' in template
-    assert 'v-for="item in allTakerExchanges(coin)"' in template
+    assert '<period-matrix :coin="coin"></period-matrix>' in template
+    assert "filename='css/period-matrix.css'" in template
+    assert "filename='js/components/PeriodMatrix.js'" in template
+    assert "app.component('PeriodMatrix', PeriodMatrix)" in template
+    assert 'v-if="allTakerExchanges(coin).length"' in component
+    assert 'v-for="item in allTakerExchanges(coin)"' in component
 
 
 def test_homepage_funding_label_opens_24_hour_chart_modal():

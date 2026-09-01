@@ -3,9 +3,10 @@ from pathlib import Path
 
 def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     template = Path('src/coinx/web/templates/coin_detail.html').read_text(encoding='utf-8')
+    component = Path('src/coinx/web/static/js/components/PeriodMatrix.js').read_text(encoding='utf-8')
     assert 'intervalChanges' not in template
     assert 'SPKUSDT' not in template
-    assert 'detail.intervals' in template
+    assert 'current.intervals' in template
     assert 'detail.exchange_distribution' in template
     assert '<h2 class="overview-heading">基础信息</h2>' in template
     assert '<h2 class="overview-heading">交易所持仓分布</h2>' in template
@@ -55,9 +56,9 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'opportunity.risk_reasons' in template
     assert 'chartCompact' in template
     assert 'chartMoney' in template
-    assert 'formatPercent(row.price_change_percent)' in template
-    assert 'formatPercent(row.open_interest_change_percent)' in template
-    assert 'formatPercent(row.open_interest_value_change_percent)' in template
+    assert 'formatChange(row.price_change_percent)' in component
+    assert 'formatChange(row.ratio)' in component
+    assert 'formatChange(row.value_ratio)' in component
     assert '.chart { height: 360px; width: 100%; }' in template
     assert 'tooltip:{valueFormatter:value=>chartMoney(value)}' in template
     assert 'tooltip:{valueFormatter:value=>chartCompact(value)}' in template
@@ -87,14 +88,16 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'v-if="loading && !detail"' not in template
     assert '历史趋势' in template
     assert '正在加载摘要...' in template
-    assert 'class="period-matrix"' in template
-    assert '<div class="period-cell period-head">净流入</div>' in template
-    assert '<div class="period-cell period-head">价格</div>' in template
-    assert '<div class="period-cell period-head">量</div>' in template
-    assert '<div class="period-cell period-head">价值</div>' in template
-    assert 'row.current_price_formatted' in template
-    assert 'row.open_interest_formatted' in template
-    assert 'row.open_interest_value_formatted' in template
+    assert '<period-matrix :coin="matrixCoin"></period-matrix>' in template
+    assert "filename='css/period-matrix.css'" in template
+    assert "filename='js/components/PeriodMatrix.js'" in template
+    assert "app.component('PeriodMatrix', PeriodMatrix)" in template
+    assert 'const matrixCoin = computed' in template
+    assert 'ratio: row.open_interest_change_percent' in template
+    assert 'value_ratio: row.open_interest_value_change_percent' in template
+    assert 'row.current_price_formatted' in component
+    assert 'row.open_interest_formatted' in component
+    assert 'row.open_interest_value_formatted' in component
     assert 'item.snapshot_share_percent' in template
     assert 'class="metric-sub exchange-sub"' in template
     assert 'class="exchange-warning">多周期未纳入</span>' in template

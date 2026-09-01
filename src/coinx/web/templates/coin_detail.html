@@ -9,6 +9,7 @@
   {% include 'components/pwa_head.html' %}
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/echarts@6.0.0/dist/echarts.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/period-matrix.css') }}">
   <style>
     body { margin: 0; padding: var(--page-padding); background: var(--bg-primary); color: var(--text-primary); }
     * { box-sizing: border-box; }
@@ -65,16 +66,6 @@
     th { color: var(--text-muted); font-weight: 500; background: var(--bg-secondary); }
     th:first-child, td:first-child { text-align: left; }
     tbody tr:last-child td { border-bottom: 0; }
-    .period-matrix-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: 6px; }
-    .period-matrix { min-width: 648px; display: grid; grid-template-columns: 72px repeat(7, minmax(80px, 1fr)); border-top: 1px solid rgba(212, 175, 55, .28); }
-    .period-cell { min-height: 30px; display: flex; align-items: center; justify-content: center; padding: 4px 6px; border-right: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
-    .period-cell:nth-child(8n) { border-right: 0; }
-    .period-head { min-height: 30px; background: linear-gradient(180deg, rgba(212, 175, 55, .16), rgba(212, 175, 55, .06)), var(--bg-elevated); color: var(--gold-bright); font-size: 11px; font-weight: 700; letter-spacing: .04em; border-bottom-color: rgba(212, 175, 55, .26); }
-    .period-window { justify-content: flex-start; color: var(--text-secondary); font-family: var(--font-mono); font-weight: 700; background: rgba(255, 255, 255, .015); }
-    .period-metric { min-width: 0; font-family: var(--font-mono); font-weight: 700; line-height: 1.15; }
-    .period-metric.positive { background: rgba(34, 197, 94, .08); }
-    .period-metric.negative { background: rgba(239, 68, 68, .08); }
-    .period-raw { font-family: var(--font-mono); color: var(--text-primary); }
     .exchange-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
     .exchange { padding: 12px; border: 1px solid var(--border-default); background: var(--bg-card); border-radius: 6px; }
     .exchange-head { display: flex; justify-content: space-between; margin-bottom: 8px; }
@@ -247,35 +238,17 @@
 
         <section v-if="detail" class="section">
           <div class="section-heading"><h2>多周期变化</h2><div class="section-heading-actions"><span class="section-updated">数据时间：[[ formatTime(detail.as_of) ]]</span><button class="btn section-refresh" type="button" @click="loadData" :disabled="loading">[[ loading ? '加载中' : '刷新' ]]</button></div></div>
-          <div class="period-matrix-wrap"><div class="period-matrix">
-            <div class="period-cell period-head period-window">窗口</div>
-            <div class="period-cell period-head">净流入</div>
-            <div class="period-cell period-head">价格</div>
-            <div class="period-cell period-head">价格%</div>
-            <div class="period-cell period-head">量</div>
-            <div class="period-cell period-head">量%</div>
-            <div class="period-cell period-head">价值</div>
-            <div class="period-cell period-head">价值%</div>
-            <template v-for="row in detail.intervals" :key="row.interval">
-              <div class="period-cell period-window">[[ row.interval ]]</div>
-              <div class="period-cell period-metric" :class="tone(row.net_inflow_value ?? row.net_inflow)">[[ row.net_inflow_value_formatted || formatSignedCompact(row.net_inflow_value ?? row.net_inflow, '$') ]]</div>
-              <div class="period-cell period-raw">[[ row.current_price_formatted || 'N/A' ]]</div>
-              <div class="period-cell period-metric" :class="tone(row.price_change_percent)">[[ formatPercent(row.price_change_percent) ]]</div>
-              <div class="period-cell period-raw">[[ row.open_interest_formatted || 'N/A' ]]</div>
-              <div class="period-cell period-metric" :class="tone(row.open_interest_change_percent)">[[ formatPercent(row.open_interest_change_percent) ]]</div>
-              <div class="period-cell period-raw">[[ row.open_interest_value_formatted || 'N/A' ]]</div>
-              <div class="period-cell period-metric" :class="tone(row.open_interest_value_change_percent)">[[ formatPercent(row.open_interest_value_change_percent) ]]</div>
-            </template>
-          </div></div>
+          <period-matrix :coin="matrixCoin"></period-matrix>
         </section>
         <section v-else class="section"><div class="section-heading"><h2>多周期变化</h2></div><div class="empty">正在加载多周期数据...</div></section>
 
       </template>
     </main>
   </div>
+  <script src="{{ url_for('static', filename='js/components/PeriodMatrix.js') }}"></script>
   <script>
     const { createApp, ref, computed, nextTick, onMounted, onBeforeUnmount } = Vue;
-    createApp({
+    const app = createApp({
       delimiters: ['[[', ']]'],
       setup() {
         const symbol = ref(''); const detail = ref(null); const loading = ref(false); const error = ref(''); const selectionRequired = ref(false);
@@ -284,6 +257,26 @@
         const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
         const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const symbolSearchEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
+        const matrixCoin = computed(() => {
+          const current = detail.value || {};
+          const intervals = Array.isArray(current.intervals) ? current.intervals : [];
+          const changes = intervals.reduce((result, row) => {
+            result[row.interval] = {
+              ...row,
+              ratio: row.open_interest_change_percent,
+              value_ratio: row.open_interest_value_change_percent,
+            };
+            return result;
+          }, {});
+          return {
+            symbol: current.symbol || symbol.value,
+            changes,
+            net_inflow: Object.fromEntries(intervals.map(row => [row.interval, row.net_inflow])),
+            net_inflow_value: Object.fromEntries(intervals.map(row => [row.interval, row.net_inflow_value])),
+            net_inflow_value_formatted: Object.fromEntries(intervals.map(row => [row.interval, row.net_inflow_value_formatted])),
+            exchange_statuses: current.exchange_distribution || [],
+          };
+        });
         const filteredSymbols = computed(() => { const query = symbolQuery.value.trim().toUpperCase(); return symbolOptions.value.filter(item => !query || item.includes(query)).slice(0, 100); });
         const statusText = computed(() => ({ complete: '数据完整', partial: '部分数据', empty: '暂无数据' }[detail.value?.data_status] || '状态未知'));
         const missingExchangeDetails = computed(() => {
@@ -361,9 +354,11 @@
         onMounted(() => { readRecentSymbols(); loadSymbolOptions(); const requestedSymbol = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); symbol.value = requestedSymbol || recentSymbols.value[0] || ''; if (symbol.value) { if (!requestedSymbol) history.replaceState({}, '', `/coin-detail?symbol=${encodeURIComponent(symbol.value)}`); loadData(); loadOpportunity(); loadSeries(); } else { selectionRequired.value = true; } });
         const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
         const formatR = value => value == null ? 'N/A' : `${Number(value).toFixed(2)}R`;
-        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, statusText, missingExchangeDetails, opportunity, opportunityAsOf, opportunityLoading, opportunityError, tradePlan, tradePlanReady, stopLossDistance, opportunityStateClass, opportunityTrendClass, isCandidateOpportunity, opportunityConclusion, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, formatSignedCompact, formatSignedPrice, formatR, changeRange, loadData, loadOpportunity, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
+        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, matrixCoin, statusText, missingExchangeDetails, opportunity, opportunityAsOf, opportunityLoading, opportunityError, tradePlan, tradePlanReady, stopLossDistance, opportunityStateClass, opportunityTrendClass, isCandidateOpportunity, opportunityConclusion, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, formatSignedCompact, formatSignedPrice, formatR, changeRange, loadData, loadOpportunity, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu, goBack };
       }
-    }).mount('#app');
+    });
+    app.component('PeriodMatrix', PeriodMatrix);
+    app.mount('#app');
   </script>
 </body>
 </html>

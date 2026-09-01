@@ -12,13 +12,9 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/echarts@6.0.0/dist/echarts.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/period-matrix.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/fab-button.css') }}">
   <style>
-    :root {
-      --matrix-col-window: 56px;
-      --matrix-col: minmax(72px, 1fr);
-    }
-
     body {
       font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
       margin: 0;
@@ -377,179 +373,6 @@
       opacity: 0.7;
     }
 
-    .matrix-wrap {
-      overflow-x: auto;
-    }
-
-    .matrix {
-      min-width: 648px;
-      display: grid;
-      grid-template-columns: var(--matrix-col-window) repeat(7, var(--matrix-col));
-      border-top: 1px solid rgba(212, 175, 55, 0.28);
-    }
-
-    .cell {
-      min-height: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 4px 6px;
-      border-right: 1px solid var(--border-subtle);
-      border-bottom: 1px solid var(--border-subtle);
-      font-size: 12px;
-    }
-
-    .cell:nth-child(8n) {
-      border-right: none;
-    }
-
-    .matrix-head {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      min-height: 30px;
-      background: linear-gradient(180deg, rgba(212, 175, 55, 0.16), rgba(212, 175, 55, 0.06)), var(--bg-elevated);
-      color: var(--gold-bright);
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.26);
-      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35);
-    }
-
-    .matrix-head-net-inflow {
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      min-height: 44px;
-      text-transform: none;
-      letter-spacing: 0;
-      text-align: center;
-    }
-
-    .matrix-head-title {
-      width: 100%;
-      white-space: nowrap;
-      color: var(--gold-bright);
-      font-size: 11px;
-      font-weight: 700;
-      line-height: 1.1;
-      text-align: center;
-    }
-    .window-cell {
-      justify-content: flex-start;
-      color: var(--text-secondary);
-      font-family: var(--font-mono);
-      font-weight: 700;
-      background: rgba(255, 255, 255, 0.015);
-    }
-
-    .metric {
-      font-family: var(--font-mono);
-      font-weight: 700;
-      border-radius: 5px;
-      line-height: 1.15;
-      min-width: 0;
-    }
-
-    .metric.positive {
-      color: var(--positive);
-      background: rgba(34, 197, 94, 0.08);
-    }
-
-    .metric.negative {
-      color: var(--negative);
-      background: rgba(239, 68, 68, 0.08);
-    }
-
-    .metric.neutral {
-      color: var(--text-muted);
-    }
-
-    .metric-main {
-      font-size: 11px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-
-    .metric-sub {
-      max-width: 100%;
-      color: var(--text-muted);
-      font-size: 10px;
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .taker-exchanges {
-      display: inline-flex;
-      gap: 2px;
-      margin-left: 4px;
-      vertical-align: middle;
-    }
-
-    .taker-exchanges-line {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      width: 100%;
-      min-height: 18px;
-    }
-    .taker-tag {
-      font-size: 9px;
-      font-family: var(--font-mono);
-      font-weight: 500;
-      padding: 0 4px;
-      border-radius: 3px;
-      line-height: 16px;
-      color: var(--text-muted);
-      background: rgba(148, 163, 184, 0.1);
-      border: 1px solid rgba(148, 163, 184, 0.15);
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-
-    .taker-tag.taker-binance {
-      color: #f0b90b;
-      background: rgba(240, 185, 11, 0.08);
-      border-color: rgba(240, 185, 11, 0.2);
-    }
-
-    .taker-tag.taker-okx {
-      color: #fff;
-      background: rgba(255, 255, 255, 0.06);
-      border-color: rgba(255, 255, 255, 0.15);
-    }
-
-    .taker-tag.taker-gate {
-      color: #23c97d;
-      background: rgba(35, 201, 125, 0.08);
-      border-color: rgba(35, 201, 125, 0.2);
-    }
-
-    .taker-tag-excluded {
-      color: rgba(239, 68, 68, 0.7);
-      background: rgba(239, 68, 68, 0.06);
-      border-color: rgba(239, 68, 68, 0.18);
-      opacity: 0.75;
-      text-decoration: line-through;
-    }
-
-    .raw-value {
-      font-size: 11px;
-      color: var(--text-secondary);
-      font-family: var(--font-mono);
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
     .loading,
     .empty {
       padding: 38px 12px;
@@ -679,48 +502,7 @@
           </div>
         </div>
 
-        <div class="matrix-wrap">
-          <div class="matrix">
-            <div class="cell matrix-head window-cell">窗口</div>
-            <div class="cell matrix-head matrix-head-net-inflow">
-              <div class="matrix-head-title">净流入</div>
-              <div v-if="allTakerExchanges(coin).length" class="taker-exchanges-line">
-                <span
-                  v-for="item in allTakerExchanges(coin)"
-                  :key="`${coin.symbol}-taker-${item.exchange}-${item.status || 'unknown'}`"
-                  class="taker-tag"
-                  :class="takerExchangeBadgeClass(item)"
-                  :title="takerExchangeBadgeTitle(item)"
-                >[[ item.label ]]</span>
-              </div>
-            </div>
-            <div class="cell matrix-head">价格</div>
-            <div class="cell matrix-head">价格%</div>
-            <div class="cell matrix-head">量</div>
-            <div class="cell matrix-head">量%</div>
-            <div class="cell matrix-head">价值</div>
-            <div class="cell matrix-head">价值%</div>
-
-            <template v-for="row in matrixRows(coin)" :key="coin.symbol + row.interval">
-              <div class="cell window-cell">[[ row.interval ]]</div>
-              <div class="cell metric" :class="valueClass(row.net_inflow_value ?? row.net_inflow)">
-                [[ row.net_inflow_value_formatted || formatNetInflow(row.net_inflow_value ?? row.net_inflow) ]]
-              </div>
-              <div class="cell raw-value">[[ row.current_price_formatted || 'N/A' ]]</div>
-              <div class="cell metric" :class="valueClass(row.price_change_percent)">
-                [[ formatChange(row.price_change_percent) ]]
-              </div>
-              <div class="cell raw-value">[[ row.open_interest_formatted || 'N/A' ]]</div>
-              <div class="cell metric" :class="valueClass(row.ratio)">
-                [[ formatChange(row.ratio) ]]
-              </div>
-              <div class="cell raw-value">[[ row.open_interest_value_formatted || 'N/A' ]]</div>
-              <div class="cell metric" :class="valueClass(row.value_ratio)">
-                [[ formatChange(row.value_ratio) ]]
-              </div>
-            </template>
-          </div>
-        </div>
+        <period-matrix :coin="coin"></period-matrix>
       </article>
     </section>
     <!-- 币种配置悬浮按钮 -->
@@ -746,6 +528,7 @@
   </div>
   </div>
 
+  <script src="{{ url_for('static', filename='js/components/PeriodMatrix.js') }}"></script>
   <script src="{{ url_for('static', filename='js/components/CoinConfigModal.js') }}"></script>
   <script>
     const { createApp, ref, computed, watch, nextTick, onMounted, onUnmounted } = Vue;
@@ -753,7 +536,6 @@
     const app = createApp({
       delimiters: ['[[', ']]'],
       setup() {
-        const intervals = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h'];
         const coins = ref([]);
         const loading = ref(false);
         const keyword = ref('');
@@ -897,105 +679,11 @@
           error: '加载失败，请稍后重试',
         }[fundingChartState.value] || ''));
 
-        const normalizeChanges = (coin) => {
-          if (!Array.isArray(coin.changes)) return coin.changes || {};
-          return coin.changes.reduce((acc, item) => {
-            acc[item.interval] = item;
-            return acc;
-          }, {});
-        };
-
-        const matrixRows = (coin) => {
-          const changes = normalizeChanges(coin);
-          return intervals.map((interval) => ({
-            interval,
-            ...(changes[interval] || {}),
-            net_inflow: coin.net_inflow?.[interval],
-            net_inflow_value: coin.net_inflow_value?.[interval],
-            net_inflow_value_formatted: coin.net_inflow_value_formatted?.[interval],
-          }));
-        };
-
-        const takerExchanges = (coin) => {
-          return (coin.exchange_statuses || [])
-            .filter((item) => item.supports_taker)
-            .map((item) => item.exchange);
-        };
-
-        const takerExchangesExcluded = (coin) => {
-          return (coin.exchange_statuses || [])
-            .filter((item) => item.taker_status === 'missing')
-            .map((item) => ({
-              exchange: item.exchange,
-              reason: formatTakerRejectReason(item),
-            }));
-        };
-
-        const allTakerExchanges = (coin) => {
-          return (coin.exchange_statuses || [])
-            .filter((item) => item && item.exchange)
-            .map((item) => ({
-              ...item,
-              label: formatExchangeName(item.exchange),
-            }));
-        };
-
-        const takerExchangeBadgeClass = (item) => {
-          const exchange = String(item?.exchange || '').toLowerCase();
-          const exchangeClass = exchange ? `taker-${exchange}` : '';
-          const inactiveStatuses = new Set(['missing', 'excluded', 'unsupported', 'unreliable', 'cooldown', 'error', 'unavailable']);
-          const inactive = (
-            item?.supported === false ||
-            item?.available === false ||
-            item?.included === false ||
-            item?.enabled === false ||
-            item?.supports_taker === false ||
-            inactiveStatuses.has(String(item?.taker_status || '').toLowerCase())
-          );
-
-          return inactive ? ['taker-tag-excluded', exchangeClass] : [exchangeClass];
-        };
-
-        const formatTakerStatusText = (item) => {
-          const status = String(item?.taker_status || '').toLowerCase();
-          if (status === 'available') return '净流入可用';
-          if (status === 'missing') {
-            const reason = formatTakerRejectReason(item);
-            return reason ? `净流入不可用: ${reason}` : '净流入不可用';
-          }
-          if (status === 'unreliable') return '净流入不可用: 数据源不可靠';
-          if (status === 'excluded') return '净流入不可用: 交易所未纳入聚合';
-          if (status === 'unsupported') return '净流入不可用: 交易所不支持';
-          if (status === 'unknown') return '净流入状态未知';
-          return status ? `净流入状态: ${status}` : '';
-        };
-
-        const takerExchangeBadgeTitle = (item) => {
-          return [
-            formatExchangeName(item?.exchange),
-            formatTakerStatusText(item),
-          ].filter(Boolean).join(' · ');
-        };
-
         const shortSymbol = (symbol) => String(symbol || '').replace(/USDT$/, '');
 
         const valueClass = (value) => {
           if (typeof value !== 'number') return 'neutral';
           return value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral';
-        };
-
-        const formatChange = (value) => {
-          if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A';
-          return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
-        };
-
-        const formatNetInflow = (value) => {
-          if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A';
-          const abs = Math.abs(value);
-          if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-          if (abs >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
-          if (abs >= 1e3) return `$${(value / 1e3).toFixed(2)}K`;
-          return `$${value.toFixed(2)}`;
         };
 
         const formatPercent = (value) => {
@@ -1026,16 +714,6 @@
           };
           const label = labels[reasonKey] || reasonKey || '';
           return interval && label ? `${label}(${interval})` : label;
-        };
-
-        const formatTakerRejectReason = (item) => {
-          const reasons = Array.isArray(item?.taker_reason) ? item.taker_reason : [];
-          if (reasons.length === 0) return '';
-          const first = reasons[0];
-          const pct = first?.details?.health_pct;
-          if (first.reason === 'missing_taker_history') return '无Taker数据';
-          if (typeof pct === 'number') return `数据完整度${pct}%`;
-          return '数据不完整';
         };
 
         const formatExchangeRejectReason = (item) => {
@@ -1278,17 +956,8 @@
           fundingChartMessage,
           fundingChartElement,
           fundingCloseButton,
-          matrixRows,
-          takerExchanges,
-          takerExchangesExcluded,
-          allTakerExchanges,
-          takerExchangeBadgeClass,
-          formatTakerStatusText,
-          takerExchangeBadgeTitle,
           shortSymbol,
           valueClass,
-          formatChange,
-          formatNetInflow,
           formatPercent,
           formatExchangeName,
           formatExchangeEntry,
@@ -1307,6 +976,7 @@
         };
       },
     });
+    app.component('PeriodMatrix', PeriodMatrix);
     app.component('CoinConfigModal', CoinConfigModal);
     app.mount('#app');
   </script>

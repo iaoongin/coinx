@@ -15,13 +15,12 @@ test.describe('币种详情测试', () => {
     await expect(page.locator('body')).toContainText('72.4');
     await expect(page.locator('body')).toContainText('binance');
     await expect(page.locator('body')).toContainText('bybit');
-    await expect(page.locator('body')).toContainText('数据完整');
     await expect(button(page, '返回')).toBeVisible();
   });
 
   test('多周期变化沿用首页矩阵列序', async ({ page }) => {
     await visit(page, '/coin-detail?symbol=BTCUSDT');
-    const matrix = page.locator('.period-matrix');
+    const matrix = page.locator('.matrix');
     await expect(matrix).toBeVisible();
     await expect(matrix).toContainText('窗口');
     await expect(matrix).toContainText('净流入');
@@ -31,6 +30,51 @@ test.describe('币种详情测试', () => {
     await expect(matrix).toContainText('量%');
     await expect(matrix).toContainText('价值');
     await expect(matrix).toContainText('价值%');
+    await expect(matrix.locator('.window-cell')).toHaveCount(11);
+    await expect(matrix.locator('.taker-tag')).toHaveCount(2);
+  });
+
+  test('首页与详情页使用同一矩阵展示契约', async ({ page }) => {
+    const readMatrixContract = async () => {
+      const matrix = page.locator('.matrix');
+      expect(await matrix.count()).toBe(1);
+      return matrix.evaluate(element => ({
+      minWidth: getComputedStyle(element).minWidth,
+      columnDefinitions: [
+        getComputedStyle(element).getPropertyValue('--matrix-col-window').trim(),
+        getComputedStyle(element).getPropertyValue('--matrix-col').trim(),
+      ],
+      headings: [...element.querySelectorAll(':scope > .matrix-head')].map(cell => (
+        cell.querySelector('.matrix-head-title')?.textContent.trim() || cell.textContent.trim()
+      )),
+      windows: [...element.querySelectorAll(':scope > .window-cell')].map(cell => cell.textContent.trim()),
+      metricStyles: (() => {
+        const metric = element.querySelector('.metric');
+        const raw = element.querySelector('.raw-value');
+        return [metric, raw].map(cell => {
+          const style = getComputedStyle(cell);
+          return {
+            minHeight: style.minHeight,
+            padding: style.padding,
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+          };
+        });
+      })(),
+      }));
+    };
+
+    await visit(page, '/');
+    const homepageContract = await readMatrixContract();
+    await visit(page, '/coin-detail?symbol=BTCUSDT');
+    const detailContract = await readMatrixContract();
+
+    expect(detailContract.minWidth).toBe(homepageContract.minWidth);
+    expect(detailContract.columnDefinitions).toEqual(homepageContract.columnDefinitions);
+    expect(detailContract.headings).toEqual(homepageContract.headings);
+    expect(detailContract.windows).toEqual(homepageContract.windows);
+    expect(detailContract.metricStyles).toEqual(homepageContract.metricStyles);
+    expect(homepageContract.windows).toEqual(['窗口', '5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']);
   });
 
   test('可通过搜索下拉框切换合约并记录最近浏览', async ({ page }) => {
@@ -55,9 +99,15 @@ test.describe('币种详情测试', () => {
       scrollWidth: element.scrollWidth,
     }));
     expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+    const matrixDimensions = await page.locator('.matrix').evaluate(element => ({
+      clientWidth: element.parentElement.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(matrixDimensions.scrollWidth).toBeGreaterThan(matrixDimensions.clientWidth);
     await expect(page.locator('.detail-header')).toHaveCSS('flex-direction', 'column');
-    await expect(page.locator('.actions .btn')).toHaveCount(2);
-    await expect(page.locator('.chart')).toHaveCSS('height', '260px');
+    await expect(page.locator('.actions .btn')).toHaveCount(1);
+    const chartHeights = await page.locator('.chart').evaluateAll(elements => elements.map(element => getComputedStyle(element).height));
+    expect(chartHeights).toEqual(['260px', '260px', '260px', '260px']);
     await page.getByRole('button', { name: '搜索并切换合约' }).click();
     const menuBounds = await page.locator('.symbol-picker-menu').evaluate(element => {
       const rect = element.getBoundingClientRect();
@@ -71,8 +121,8 @@ test.describe('币种详情测试', () => {
     const opportunityRequest = page.waitForRequest(request => request.url().includes('/trade-opportunity'));
     await visit(page, '/coin-detail?symbol=BTCUSDT');
     await opportunityRequest;
-    await expect(page.getByText('交易机会', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('入场', { exact: true }).last()).toBeVisible();
+    await expect(page.getByRole('heading', { name: '交易机会', exact: true })).toBeVisible();
+    await expect(page.locator('.opportunity-plan').getByText('入场', { exact: true })).toBeVisible();
     await expect(page.getByText('目标1', { exact: true })).toBeVisible();
     await expect(page.getByText('目标2', { exact: true })).toBeVisible();
     await expect(page.getByText('目标3', { exact: true })).toBeVisible();
