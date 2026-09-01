@@ -6,7 +6,11 @@ from typing import Optional
 from sqlalchemy import and_, func, or_
 
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
-from coinx.config import ENABLED_EXCHANGES, TIME_INTERVALS
+from coinx.config import (
+    CLICKHOUSE_AGGREGATION_SYMBOL_BATCH_SIZE,
+    ENABLED_EXCHANGES,
+    TIME_INTERVALS,
+)
 from coinx.database import get_session
 from coinx.models import (
     MarketKline,
@@ -429,24 +433,29 @@ def load_market_structure_aggregated_kline_maps(
         if not symbols or not intervals:
             return result
         upper = int(upper_bound) if upper_bound is not None else None
+        # Bound the inner argMax GROUP BY while keeping each symbol's rows in
+        # one batch; batches can be merged directly because symbols are disjoint.
+        batch_size = max(1, int(CLICKHOUSE_AGGREGATION_SYMBOL_BATCH_SIZE or 32))
         for name, interval_ms in intervals.items():
             interval_ms = int(interval_ms)
             lower = None
             if upper is not None:
                 lower = max(0, upper - (_lookback_for_interval(name) + 1) * interval_ms)
-            rows = repo.aggregate_kline_rows(
-                symbols=symbols,
-                exchange=exchange,
-                period='5m',
-                interval_ms=interval_ms,
-                lower_bound=lower,
-                upper_bound=upper,
-            )
-            for row in rows:
-                point = _build_kline_point(type('Row', (), row)())
-                if point.high_price is None or point.low_price is None or point.close_price is None:
-                    continue
-                result[name].setdefault(point.symbol, {})[point.open_time] = point
+            for start in range(0, len(symbols), batch_size):
+                symbol_batch = symbols[start:start + batch_size]
+                rows = repo.aggregate_kline_rows(
+                    symbols=symbol_batch,
+                    exchange=exchange,
+                    period='5m',
+                    interval_ms=interval_ms,
+                    lower_bound=lower,
+                    upper_bound=upper,
+                )
+                for row in rows:
+                    point = _build_kline_point(type('Row', (), row)())
+                    if point.high_price is None or point.low_price is None or point.close_price is None:
+                        continue
+                    result[name].setdefault(point.symbol, {})[point.open_time] = point
         return result
 
     intervals = intervals or {}

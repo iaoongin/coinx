@@ -245,3 +245,44 @@ def test_market_structure_clickhouse_path_uses_server_side_aggregation(monkeypat
 
     assert result["1h"]["BTCUSDT"][1_700_000_000_000].close_price == 102.0
     assert repository.aggregate_calls[0]["interval_ms"] == 60 * 60 * 1000
+
+
+def test_market_structure_clickhouse_aggregation_batches_symbols_and_merges_results(monkeypatch):
+    class Repository:
+        def __init__(self):
+            self.aggregate_calls = []
+
+        def aggregate_kline_rows(self, **kwargs):
+            self.aggregate_calls.append(kwargs)
+            return [
+                {
+                    "symbol": symbol,
+                    "open_time": 1_700_000_000_000,
+                    "high_price": "105",
+                    "low_price": "95",
+                    "close_price": "102",
+                    "quote_volume": "1200",
+                }
+                for symbol in kwargs["symbols"]
+            ]
+
+    repository = Repository()
+    monkeypatch.setattr(market_structure_series, "is_clickhouse_read", lambda: True)
+    monkeypatch.setattr(market_structure_series, "get_clickhouse_repository", lambda: repository)
+    monkeypatch.setattr(market_structure_series, "CLICKHOUSE_AGGREGATION_SYMBOL_BATCH_SIZE", 2)
+
+    result = market_structure_series.load_market_structure_aggregated_kline_maps(
+        session=None,
+        exchange="binance",
+        symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"],
+        upper_bound=1_700_000_000_000,
+        intervals={"1h": 60 * 60 * 1000},
+        lookback_points=72,
+    )
+
+    assert [call["symbols"] for call in repository.aggregate_calls] == [
+        ["BTCUSDT", "ETHUSDT"],
+        ["SOLUSDT", "XRPUSDT"],
+        ["ADAUSDT"],
+    ]
+    assert sorted(result["1h"]) == ["ADAUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
