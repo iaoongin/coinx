@@ -1,5 +1,6 @@
 from flask import Blueprint, redirect, render_template, url_for
 
+from coinx.config import TIME_INTERVALS
 from coinx.utils import logger
 
 
@@ -9,7 +10,7 @@ pages_bp = Blueprint('pages', __name__)
 @pages_bp.route('/')
 def index():
     logger.info("访问多周期矩阵页面")
-    return render_template('index.html')
+    return render_template('index.html', time_intervals=TIME_INTERVALS)
 
 
 @pages_bp.route('/pwa-start')
@@ -26,7 +27,7 @@ def new_home():
 @pages_bp.route('/legacy-home')
 def legacy_home():
     logger.info("访问旧首页")
-    return render_template('legacy_home.html')
+    return render_template('legacy_home.html', time_intervals=TIME_INTERVALS)
 
 
 @pages_bp.route('/coins-config')
@@ -40,7 +41,7 @@ def coins_config():
 def coin_detail():
     """币种详情页面"""
     logger.info("访问币种详情页面")
-    return render_template('coin_detail.html')
+    return render_template('coin_detail.html', time_intervals=TIME_INTERVALS)
 
 
 @pages_bp.route('/market-rank')

@@ -875,7 +875,7 @@ def test_exchange_rolling_repair_batches_group_writes(monkeypatch):
     assert [item['affected'] for item in summary['results']] == [1, 1]
 
 
-def test_exchange_history_repair_batches_group_writes(monkeypatch):
+def test_exchange_history_repair_batches_group_writes(db_session, monkeypatch):
     _clear_rate_limit_states()
     calls = []
     upsert_calls = []
@@ -897,7 +897,7 @@ def test_exchange_history_repair_batches_group_writes(monkeypatch):
         full_scan=True,
         max_workers=1,
         coverage_hours=1,
-        db_session=None,
+        db_session=db_session,
     )
 
     assert summary['success_count'] == 2

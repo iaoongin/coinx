@@ -245,6 +245,7 @@
       </template>
     </main>
   </div>
+  <script>window.COINX_TIME_INTERVALS = {{ time_intervals | tojson }};</script>
   <script src="{{ url_for('static', filename='js/components/PeriodMatrix.js') }}"></script>
   <script>
     const { createApp, ref, computed, nextTick, onMounted, onBeforeUnmount } = Vue;

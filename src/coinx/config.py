@@ -66,6 +66,45 @@ def get_env(key, default=None, type_func=None):
     return default
 
 
+_TIME_INTERVAL_PATTERN = re.compile(r'^([1-9][0-9]*)([mhd])$')
+BASE_TIME_INTERVAL = '5m'
+BASE_TIME_INTERVAL_MS = 5 * 60 * 1000
+
+
+def interval_to_ms(interval):
+    """Convert a configured interval such as ``8h`` to milliseconds."""
+    normalized = str(interval).strip().lower()
+    match = _TIME_INTERVAL_PATTERN.fullmatch(normalized)
+    if not match:
+        raise ValueError(f'Invalid time interval: {interval}')
+
+    value = int(match.group(1))
+    unit_ms = {'m': 60 * 1000, 'h': 60 * 60 * 1000, 'd': 24 * 60 * 60 * 1000}
+    return value * unit_ms[match.group(2)]
+
+
+def build_time_interval_specs(intervals, base_interval=BASE_TIME_INTERVAL):
+    """Validate configured windows and return ``(name, milliseconds, points)``."""
+    base_ms = interval_to_ms(base_interval)
+    specs = []
+    seen = set()
+    for raw_interval in intervals or ():
+        interval = str(raw_interval).strip().lower()
+        duration_ms = interval_to_ms(interval)
+        if duration_ms < base_ms:
+            raise ValueError(f'Time interval must be at least {base_interval}: {interval}')
+        if duration_ms % base_ms:
+            raise ValueError(f'Time interval must be divisible by {base_interval}: {interval}')
+        if interval in seen:
+            continue
+        seen.add(interval)
+        specs.append((interval, duration_ms, duration_ms // base_ms))
+
+    if not specs:
+        raise ValueError('TIME_INTERVALS must contain at least one valid interval')
+    return tuple(specs)
+
+
 WEB_HOST = get_env('WEB_HOST', '0.0.0.0')
 WEB_PORT = get_env('WEB_PORT', 5500, int)
 WEB_DEBUG = get_env('WEB_DEBUG', False, bool)
@@ -87,11 +126,14 @@ SCHEDULER_ENABLED = get_env('SCHEDULER_ENABLED', True, bool)
 COLLECTION_SCHEDULER_ONLY = get_env('COLLECTION_SCHEDULER_ONLY', True, bool)
 
 UPDATE_INTERVAL = get_env('UPDATE_INTERVAL', 300, int)
-TIME_INTERVALS = get_env(
+TIME_INTERVAL_SPECS = build_time_interval_specs(get_env(
     'TIME_INTERVALS',
     '5m,15m,30m,1h,4h,12h,24h,48h,72h,168h',
     list
-)
+))
+TIME_INTERVALS = tuple(interval for interval, _duration_ms, _expected_points in TIME_INTERVAL_SPECS)
+MAX_TIME_INTERVAL_MS = max(duration_ms for _interval, duration_ms, _points in TIME_INTERVAL_SPECS)
+MAX_TIME_INTERVAL_HOURS = (MAX_TIME_INTERVAL_MS + 60 * 60 * 1000 - 1) // (60 * 60 * 1000)
 
 HOMEPAGE_SERIES_REPAIR_ENABLED = get_env('HOMEPAGE_SERIES_REPAIR_ENABLED', True, bool)
 HOMEPAGE_SERIES_REPAIR_PERIOD = get_env('HOMEPAGE_SERIES_REPAIR_PERIOD', '5m')
@@ -237,7 +279,10 @@ REPAIR_HISTORY_INTERVAL = get_env('REPAIR_HISTORY_INTERVAL', 3600, int)
 REPAIR_HISTORY_MAX_WORKERS = get_env('REPAIR_HISTORY_MAX_WORKERS', 2, int)
 REPAIR_HISTORY_WRITE_BATCH_SIZE = get_env('REPAIR_HISTORY_WRITE_BATCH_SIZE', 2000, int)
 REPAIR_HISTORY_SYMBOL_BATCH_SIZE = get_env('REPAIR_HISTORY_SYMBOL_BATCH_SIZE', 0, int)
-REPAIR_HISTORY_COVERAGE_HOURS = get_env('REPAIR_HISTORY_COVERAGE_HOURS', 168, int)
+REPAIR_HISTORY_COVERAGE_HOURS = max(
+    get_env('REPAIR_HISTORY_COVERAGE_HOURS', 168, int),
+    MAX_TIME_INTERVAL_HOURS,
+)
 
 # 定时任务运行记录保留配置
 TASK_RUN_HISTORY_RETENTION_DAYS = get_env('TASK_RUN_HISTORY_RETENTION_DAYS', 90, int)

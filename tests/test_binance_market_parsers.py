@@ -3,6 +3,7 @@ from coinx.collector.binance.series import (
     parse_klines,
     parse_taker_buy_sell_vol,
 )
+from coinx.collector.binance import market
 
 
 def test_parse_open_interest_hist_maps_common_fields():
@@ -67,3 +68,39 @@ def test_parse_taker_buy_sell_vol_uses_period_argument():
     assert records[0]["buy_sell_ratio"] == 1.25
     assert records[0]["buy_vol"] == 125.5
     assert records[0]["sell_vol"] == 100.4
+
+
+def test_open_interest_history_falls_back_to_base_period_for_configured_window(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    'symbol': 'BTCUSDT',
+                    'sumOpenInterest': '100',
+                    'sumOpenInterestValue': '100000',
+                    'timestamp': 1711526700000,
+                },
+                {
+                    'symbol': 'BTCUSDT',
+                    'sumOpenInterest': '99',
+                    'sumOpenInterestValue': '99000',
+                    'timestamp': 1711526400000,
+                },
+            ]
+
+    def fake_request(session, url, params, timeout):
+        calls.append((url, params, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr(market, 'get_session', lambda: object())
+    monkeypatch.setattr(market, 'request_with_binance_retry', fake_request)
+
+    result = market.get_open_interest_history('BTCUSDT', '8h', limit=2)
+
+    assert calls[0][1]['period'] == '5m'
+    assert result['interval'] == '8h'

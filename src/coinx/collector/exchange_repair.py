@@ -1213,7 +1213,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
     target_exchanges = exchanges or ENABLED_EXCHANGES
     adapters = get_exchange_adapters(target_exchanges)
     current_time_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    effective_coverage_hours = coverage_hours or REPAIR_HISTORY_COVERAGE_HOURS
+    # The config value already covers the largest configured homepage window.
+    # Keep an explicit caller override narrow for targeted repair jobs/tests.
+    effective_coverage_hours = int(coverage_hours or REPAIR_HISTORY_COVERAGE_HOURS)
     worker_count = max_workers if max_workers is not None else REPAIR_HISTORY_MAX_WORKERS
     started_at = time.perf_counter()
     precheck_started_at = time.perf_counter()

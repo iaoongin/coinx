@@ -458,6 +458,7 @@ def _clear_homepage_snapshot_cache():
 
 def _format_homepage_coins_payload(coins_data):
     formatted_data = []
+    interval_order = {interval: index for index, interval in enumerate(TIME_INTERVALS)}
     for coin in coins_data:
         included_exchanges = coin.get('included_exchanges')
         if included_exchanges is None:
@@ -511,14 +512,7 @@ def _format_homepage_coins_payload(coins_data):
                 }
             )
 
-        changes.sort(
-            key=lambda x: (
-                x['interval'].endswith('m') and int(x['interval'][:-1])
-                or x['interval'].endswith('h') and int(x['interval'][:-1]) * 60
-                or x['interval'].endswith('d') and int(x['interval'][:-1]) * 1440
-                or 0
-            )
-        )
+        changes.sort(key=lambda x: interval_order.get(x['interval'], len(interval_order)))
         formatted_coin['changes'] = changes
         formatted_data.append(formatted_coin)
 

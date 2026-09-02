@@ -74,9 +74,10 @@ def test_parse_okx_open_interest_array_maps_contract_quantity_and_usd_value():
     assert records[0]['sum_open_interest_value'] == 2562461129.46
 
 
-def test_parse_okx_taker_buy_sell_vol_calculates_ratio():
+def test_parse_okx_taker_buy_sell_vol_calculates_ratio(monkeypatch):
     payload = [['1711526400000', '150.0', '100.0']]
 
+    monkeypatch.setattr(okx_series, 'get_contract_value', lambda symbol, session=None, ttl_seconds=None: 0.01)
     records = parse_taker_buy_sell_vol(payload, symbol='BTCUSDT', period='5m')
 
     assert records[0]['event_time'] == 1711526400000
@@ -282,6 +283,13 @@ def test_okx_adapter_marks_homepage_series_as_precise_windows():
     assert adapter.taker_period_for_interval('24h') == '5m'
     assert adapter.taker_period_for_interval('48h') == '1H'
     assert adapter.taker_period_for_interval('168h') == '1H'
+
+
+def test_taker_period_falls_back_for_new_configured_windows():
+    assert get_exchange_adapter('binance').taker_period_for_interval('8h') == '5m'
+    assert get_exchange_adapter('okx').taker_period_for_interval('8h') == '5m'
+    assert get_exchange_adapter('bybit').taker_period_for_interval('8h') is None
+    assert get_exchange_adapter('gate').taker_period_for_interval('8h') is None
 
 
 def test_okx_supported_symbols_maps_live_usdt_swaps(monkeypatch):

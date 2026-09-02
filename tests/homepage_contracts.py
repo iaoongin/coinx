@@ -1,9 +1,10 @@
+from coinx.config import TIME_INTERVALS, TIME_INTERVAL_SPECS
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.repositories.homepage_series import FIVE_MINUTES_MS
 
 
-EXPECTED_INTERVALS = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']
-FULL_HISTORY_POINTS = 2017
+EXPECTED_INTERVALS = list(TIME_INTERVALS)
+FULL_HISTORY_POINTS = max(expected_points for _interval, _duration_ms, expected_points in TIME_INTERVAL_SPECS) + 1
 START_TIME_MS = 1_700_000_000_000
 
 

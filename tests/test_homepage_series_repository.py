@@ -17,6 +17,7 @@ from coinx.repositories.homepage_series import (
     _aggregate_homepage_series_maps,
     _load_exchange_homepage_maps,
     _load_homepage_exchange_maps_clickhouse,
+    _load_net_inflow_sql,
 )
 import pytest
 
@@ -168,6 +169,41 @@ def seed_series(
     session.commit()
 
 
+def test_mysql_net_inflow_sql_uses_configured_base_point_count(db_session, monkeypatch):
+    import coinx.repositories.homepage_series as homepage
+
+    eight_hours_ms = 8 * 60 * 60 * 1000
+    monkeypatch.setattr(homepage, 'TIME_INTERVALS', ('5m', '8h'))
+    monkeypatch.setattr(
+        homepage,
+        'TIME_INTERVAL_SPECS',
+        (
+            ('5m', FIVE_MINUTES_MS, 1),
+            ('8h', eight_hours_ms, 96),
+        ),
+    )
+    monkeypatch.setattr(homepage, 'MAX_TIME_INTERVAL_MS', eight_hours_ms)
+
+    start_time = 1_700_000_000_000
+    seed_series(db_session, 'BTCUSDT', start_time, 97, include_taker_vol=True)
+    db_session.query(MarketTakerBuySellVol).filter(
+        MarketTakerBuySellVol.symbol == 'BTCUSDT',
+        MarketTakerBuySellVol.period == '5m',
+        MarketTakerBuySellVol.event_time == start_time + FIVE_MINUTES_MS,
+    ).delete()
+    db_session.commit()
+
+    result = _load_net_inflow_sql(
+        db_session,
+        'binance',
+        ['BTCUSDT'],
+        upper_bound=start_time + 96 * FIVE_MINUTES_MS,
+    )
+
+    assert result['BTCUSDT']['health']['5m'] == 100.0
+    assert result['BTCUSDT']['health']['8h'] == 99.0
+
+
 def capture_log(messages):
     def _capture(message, *args, **kwargs):
         if args:
@@ -176,12 +212,12 @@ def capture_log(messages):
     return _capture
 
 
-def test_clickhouse_homepage_loader_keeps_168h_when_latest_lags_global_anchor(monkeypatch):
+def test_clickhouse_homepage_loader_keeps_max_window_when_latest_lags_global_anchor(monkeypatch):
     import coinx.repositories.homepage_series as homepage
 
     upper = 1_800_000_000_000
     latest = upper - FIVE_MINUTES_MS
-    target_168h = latest - 168 * 60 * 60 * 1000
+    target_window = latest - homepage.MAX_TIME_INTERVAL_MS
     calls = []
 
     class FakeClickHouseRepository:
@@ -194,7 +230,7 @@ def test_clickhouse_homepage_loader_keeps_168h_when_latest_lags_global_anchor(mo
                 return [
                     {
                         'symbol': 'BTCUSDT',
-                        'event_time': target_168h,
+                        'event_time': target_window,
                         'sum_open_interest': 100.0,
                         'sum_open_interest_value': 10_000.0,
                     },
@@ -209,7 +245,7 @@ def test_clickhouse_homepage_loader_keeps_168h_when_latest_lags_global_anchor(mo
                 return [
                     {
                         'symbol': 'BTCUSDT',
-                        'open_time': target_168h,
+                        'open_time': target_window,
                         'high_price': 101.0,
                         'low_price': 99.0,
                         'close_price': 100.0,
@@ -236,9 +272,9 @@ def test_clickhouse_homepage_loader_keeps_168h_when_latest_lags_global_anchor(mo
     )
 
     assert latest_map == {'BTCUSDT': latest}
-    assert target_168h in oi_map['BTCUSDT']
-    assert target_168h in kline_map['BTCUSDT']
-    assert all(lower == target_168h for _table, lower, _upper in calls)
+    assert target_window in oi_map['BTCUSDT']
+    assert target_window in kline_map['BTCUSDT']
+    assert all(lower == target_window for _table, lower, _upper in calls)
 
 
 def test_clickhouse_homepage_loader_uses_shared_anchor_for_fast_exchange(monkeypatch):
@@ -247,7 +283,7 @@ def test_clickhouse_homepage_loader_uses_shared_anchor_for_fast_exchange(monkeyp
     upper = 1_800_000_000_000
     fast_latest = upper
     shared_anchor = fast_latest - 3 * FIVE_MINUTES_MS
-    target_168h = shared_anchor - 168 * 60 * 60 * 1000
+    target_window = shared_anchor - homepage.MAX_TIME_INTERVAL_MS
     calls = []
 
     class FakeClickHouseRepository:
@@ -257,7 +293,7 @@ def test_clickhouse_homepage_loader_uses_shared_anchor_for_fast_exchange(monkeyp
                 return [
                     {
                         'symbol': 'BTCUSDT',
-                        'event_time': target_168h,
+                        'event_time': target_window,
                         'sum_open_interest': 100.0,
                         'sum_open_interest_value': 10_000.0,
                     },
@@ -272,7 +308,7 @@ def test_clickhouse_homepage_loader_uses_shared_anchor_for_fast_exchange(monkeyp
                 return [
                     {
                         'symbol': 'BTCUSDT',
-                        'open_time': target_168h,
+                        'open_time': target_window,
                         'close_price': 100.0,
                     },
                     {
@@ -295,9 +331,9 @@ def test_clickhouse_homepage_loader_uses_shared_anchor_for_fast_exchange(monkeyp
     )
 
     assert latest_map == {'BTCUSDT': fast_latest}
-    assert target_168h in oi_map['BTCUSDT']
-    assert target_168h in kline_map['BTCUSDT']
-    assert all(lower == target_168h for _table, lower in calls)
+    assert target_window in oi_map['BTCUSDT']
+    assert target_window in kline_map['BTCUSDT']
+    assert all(lower == target_window for _table, lower in calls)
 
 
 def test_clickhouse_homepage_loader_aligns_anchor_to_lagging_taker_series(monkeypatch):
@@ -306,7 +342,7 @@ def test_clickhouse_homepage_loader_aligns_anchor_to_lagging_taker_series(monkey
     upper = 1_800_000_000_000
     latest = upper - FIVE_MINUTES_MS
     taker_latest = latest - FIVE_MINUTES_MS
-    target_168h = taker_latest - 168 * 60 * 60 * 1000
+    target_window = taker_latest - homepage.MAX_TIME_INTERVAL_MS
 
     class FakeClickHouseRepository:
         def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None):
@@ -317,18 +353,18 @@ def test_clickhouse_homepage_loader_aligns_anchor_to_lagging_taker_series(monkey
         def market_rows(self, table, columns, **kwargs):
             if table == 'market_open_interest_hist':
                 return [
-                    {'symbol': 'BTCUSDT', 'event_time': target_168h, 'sum_open_interest': 100.0, 'sum_open_interest_value': 10_000.0},
+                    {'symbol': 'BTCUSDT', 'event_time': target_window, 'sum_open_interest': 100.0, 'sum_open_interest_value': 10_000.0},
                     {'symbol': 'BTCUSDT', 'event_time': taker_latest, 'sum_open_interest': 200.0, 'sum_open_interest_value': 20_000.0},
                     {'symbol': 'BTCUSDT', 'event_time': latest, 'sum_open_interest': 300.0, 'sum_open_interest_value': 30_000.0},
                 ]
             if table == 'market_klines':
                 return [
-                    {'symbol': 'BTCUSDT', 'open_time': target_168h, 'close_price': 100.0},
+                    {'symbol': 'BTCUSDT', 'open_time': target_window, 'close_price': 100.0},
                     {'symbol': 'BTCUSDT', 'open_time': taker_latest, 'close_price': 200.0},
                     {'symbol': 'BTCUSDT', 'open_time': latest, 'close_price': 300.0},
                 ]
             return [
-                {'symbol': 'BTCUSDT', 'event_time': target_168h, 'buy_vol': 10.0, 'sell_vol': 5.0},
+                {'symbol': 'BTCUSDT', 'event_time': target_window, 'buy_vol': 10.0, 'sell_vol': 5.0},
                 {'symbol': 'BTCUSDT', 'event_time': taker_latest, 'buy_vol': 20.0, 'sell_vol': 5.0},
             ]
 
@@ -354,8 +390,8 @@ def test_homepage_aggregation_uses_loader_anchor_for_all_metrics(monkeypatch):
 
     slow_latest = 1_800_000_000_000
     fast_latest = slow_latest + FIVE_MINUTES_MS
-    start = slow_latest - 168 * 60 * 60 * 1000
-    intervals = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']
+    start = slow_latest - homepage.MAX_TIME_INTERVAL_MS
+    intervals = list(homepage.TIME_INTERVALS)
 
     def point_maps():
         oi = {}
@@ -400,9 +436,9 @@ def test_homepage_aggregation_uses_slowest_common_exchange_anchor(monkeypatch):
 
     slow_latest = 1_800_000_000_000
     fast_latest = slow_latest + FIVE_MINUTES_MS
-    start = slow_latest - 168 * 60 * 60 * 1000
+    start = slow_latest - homepage.MAX_TIME_INTERVAL_MS
     times = range(start, fast_latest + FIVE_MINUTES_MS, FIVE_MINUTES_MS)
-    intervals = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']
+    intervals = list(homepage.TIME_INTERVALS)
 
     def exchange_map(latest, oi_value):
         oi = {}
@@ -447,7 +483,7 @@ def test_homepage_aggregation_uses_slowest_common_exchange_anchor(monkeypatch):
     assert coverage['BTCUSDT']['included_exchanges'] == ['binance', 'okx']
     assert coverage['BTCUSDT']['latest_time'] == slow_latest
     assert aggregate['BTCUSDT'][slow_latest].sum_open_interest == 30.0
-    assert slow_latest - 168 * 60 * 60 * 1000 in selected_kline['BTCUSDT']
+    assert slow_latest - homepage.MAX_TIME_INTERVAL_MS in selected_kline['BTCUSDT']
 
 
 def test_get_homepage_series_data_builds_coin_payload_from_5m_series(db_session, monkeypatch):
@@ -495,7 +531,7 @@ def test_get_homepage_series_data_uses_oi_kline_anchor_when_taker_vol_lags(db_se
     assert coin['current_price'] is None
 
 
-def test_get_homepage_series_data_keeps_168h_changes_when_taker_vol_lags_by_one_point(db_session):
+def test_get_homepage_series_data_keeps_max_window_changes_when_taker_vol_lags_by_one_point(db_session):
     import pytest
     pytest.skip('旧的单交易所部分可用语义已废弃')
     start_time = 1_700_000_000_000
@@ -615,7 +651,7 @@ def test_get_homepage_series_data_does_not_reject_when_taker_mapping_is_missing(
 
     class FakeAdapter:
         def taker_period_for_interval(self, interval):
-            if interval == '168h':
+            if interval == TIME_INTERVALS[-1]:
                 return None
             return '5m'
 
@@ -634,7 +670,7 @@ def test_get_homepage_series_data_does_not_reject_when_taker_mapping_is_missing(
     assert coin['included_exchanges'] == ['binance']
     assert coin['missing_exchanges'] == []
     assert coin['net_inflow']
-    assert '168h' in coin['net_inflow']
+    assert TIME_INTERVALS[-1] in coin['net_inflow']
     assert any('交易所聚合完成：' in message for message in info_logs)
 
 

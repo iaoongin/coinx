@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 HOMEPAGE_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
 DEFAULT_TAKER_PERIOD_BY_INTERVAL = {
     '5m': '5m',
@@ -35,6 +34,7 @@ class ExchangeSeriesAdapter:
     page_limits: dict = None
     series_periods: dict = None
     taker_period_by_interval: dict = None
+    taker_period_fallback: str = None
 
     def supports_time_window(self, series_type):
         return series_type in self.precise_window_series_types
@@ -106,7 +106,11 @@ class ExchangeSeriesAdapter:
     def taker_period_for_interval(self, interval):
         if not self.taker_period_by_interval:
             return None
-        return self.taker_period_by_interval.get(interval)
+        normalized = str(interval).strip().lower()
+        mapped_period = self.taker_period_by_interval.get(normalized)
+        if mapped_period:
+            return mapped_period
+        return self.taker_period_fallback
 
 
 def _build_binance_adapter():
@@ -119,6 +123,7 @@ def _build_binance_adapter():
         parse_series_payload=binance_series.parse_series_payload,
         precise_window_series_types=HOMEPAGE_SERIES_TYPES,
         taker_period_by_interval=DEFAULT_TAKER_PERIOD_BY_INTERVAL,
+        taker_period_fallback='5m',
     )
 
 
@@ -141,6 +146,7 @@ def _build_okx_adapter():
             'taker_buy_sell_vol': ('5m', '1H'),
         },
         taker_period_by_interval=OKX_TAKER_PERIOD_BY_INTERVAL,
+        taker_period_fallback='5m',
     )
 
 

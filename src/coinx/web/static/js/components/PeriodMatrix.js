@@ -1,6 +1,5 @@
 (function registerPeriodMatrix(global) {
   const { computed } = global.Vue;
-  const intervals = ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h'];
 
   const normalizeChanges = (coin) => {
     if (!Array.isArray(coin.changes)) return coin.changes || {};
@@ -61,10 +60,15 @@
     },
     setup(props) {
       const coin = computed(() => props.coin || {});
+      const intervals = computed(() => {
+        const configured = global.COINX_TIME_INTERVALS;
+        if (Array.isArray(configured) && configured.length) return configured;
+        return Object.keys(normalizeChanges(coin.value));
+      });
       const matrixRows = computed(() => {
         const current = coin.value;
         const changes = normalizeChanges(current);
-        return intervals.map((interval) => ({
+        return intervals.value.map((interval) => ({
           interval,
           ...(changes[interval] || {}),
           net_inflow: current.net_inflow?.[interval],

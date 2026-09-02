@@ -30,7 +30,8 @@ test.describe('币种详情测试', () => {
     await expect(matrix).toContainText('量%');
     await expect(matrix).toContainText('价值');
     await expect(matrix).toContainText('价值%');
-    await expect(matrix.locator('.window-cell')).toHaveCount(11);
+    const configuredIntervals = await page.evaluate(() => window.COINX_TIME_INTERVALS);
+    await expect(matrix.locator('.window-cell')).toHaveCount(1 + configuredIntervals.length);
     await expect(matrix.locator('.taker-tag')).toHaveCount(2);
   });
 
@@ -74,7 +75,8 @@ test.describe('币种详情测试', () => {
     expect(detailContract.headings).toEqual(homepageContract.headings);
     expect(detailContract.windows).toEqual(homepageContract.windows);
     expect(detailContract.metricStyles).toEqual(homepageContract.metricStyles);
-    expect(homepageContract.windows).toEqual(['窗口', '5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']);
+    const configuredIntervals = await page.evaluate(() => window.COINX_TIME_INTERVALS);
+    expect(homepageContract.windows).toEqual(['窗口', ...configuredIntervals]);
   });
 
   test('可通过搜索下拉框切换合约并记录最近浏览', async ({ page }) => {

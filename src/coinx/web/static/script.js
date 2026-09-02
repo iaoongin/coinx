@@ -143,7 +143,9 @@ function renderCoinsTable(coinsData) {
     row.appendChild(currentCell);
 
     // 各时间间隔的变化比例
-    const intervals = ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h"];
+    const intervals = Array.isArray(window.COINX_TIME_INTERVALS) && window.COINX_TIME_INTERVALS.length
+      ? window.COINX_TIME_INTERVALS
+      : ["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h"];
     const changes = normalizeChanges(coin.changes);
 
     intervals.forEach((interval) => {

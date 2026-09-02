@@ -115,7 +115,13 @@ def get_contract_value(symbol, session=None, ttl_seconds=_SUPPORTED_SYMBOLS_TTL_
     contract_values = _supported_symbols_cache.get('contract_values') or {}
     if symbol in contract_values:
         return contract_values[symbol]
-    get_supported_symbols(session=session, ttl_seconds=ttl_seconds)
+    try:
+        get_supported_symbols(session=session, ttl_seconds=ttl_seconds)
+    except Exception as exc:
+        # Parsing can still proceed with the documented neutral multiplier when
+        # the instrument metadata endpoint is temporarily unavailable.
+        logger.warning('OKX contract value lookup failed, using 1.0: symbol=%s error=%s', symbol, exc)
+        return 1.0
     return (_supported_symbols_cache.get('contract_values') or {}).get(symbol) or 1.0
 
 

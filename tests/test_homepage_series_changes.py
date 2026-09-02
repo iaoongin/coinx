@@ -23,7 +23,7 @@ def test_homepage_series_returns_full_interval_contract(db_session):
     monkeypatch.undo()
 
 
-def test_homepage_series_contract_fails_when_168h_source_window_is_broken(db_session):
+def test_homepage_series_contract_fails_when_source_window_is_broken(db_session):
     seed_complete_homepage_series(db_session)
 
     damaged_times = [START_TIME_MS + index * FIVE_MINUTES_MS for index in range(11)]

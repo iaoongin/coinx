@@ -2,12 +2,13 @@ from coinx.repositories.funding_rate import load_latest_funding_rates
 from coinx.repositories.homepage_series import get_homepage_series_snapshot
 from coinx.repositories.market_structure_score import get_market_structure_score_snapshot
 from coinx.database import get_session
+from coinx.config import TIME_INTERVALS
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.models import MarketFundingRate, MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
 from coinx.utils import logger
 
 
-INTERVAL_ORDER = ('5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h')
+INTERVAL_ORDER = TIME_INTERVALS
 RANGE_HOURS = {'1h': 1, '4h': 4, '24h': 24, '72h': 72, '7d': 168}
 
 

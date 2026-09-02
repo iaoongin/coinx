@@ -1,8 +1,18 @@
 import time
 import requests
-from coinx.config import BINANCE_BASE_URL
+from coinx.config import BASE_TIME_INTERVAL, BINANCE_BASE_URL
 from coinx.utils import logger
 from .client import get_session, request_with_binance_retry
+
+
+# Binance's open-interest endpoint accepts a fixed set of periods. Configured
+# homepage windows outside that set are aggregated from the base 5m series.
+BINANCE_OPEN_INTEREST_PERIODS = frozenset({'5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'})
+
+
+def _binance_open_interest_period(interval):
+    normalized = str(interval).strip().lower()
+    return normalized if normalized in BINANCE_OPEN_INTEREST_PERIODS else BASE_TIME_INTERVAL
 
 def get_futures_kline_latest(symbol, interval):
     """获取期货K线的最新一根，返回字典包含 quoteVolume 与 takerBuyQuoteVolume 等"""
@@ -226,15 +236,20 @@ def get_open_interest_history(symbol, interval, limit=2):
     """
     try:
         url = f"{BINANCE_BASE_URL}/futures/data/openInterestHist"
+        requested_interval = str(interval).strip().lower()
+        request_period = _binance_open_interest_period(requested_interval)
         params = {
             'symbol': symbol,
-            'period': interval,
+            'period': request_period,
             'limit': max(2, limit)  # 确保至少获取2个数据点
         }
         
         # 使用会话
         session = get_session()
-        logger.info(f"请求历史持仓量数据: {url}?symbol={symbol}&period={interval}&limit={limit}")
+        logger.info(
+            f"请求历史持仓量数据: {url}?symbol={symbol}&period={request_period}"
+            f"&requested_interval={requested_interval}&limit={limit}"
+        )
         response = request_with_binance_retry(session, url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -249,7 +264,7 @@ def get_open_interest_history(symbol, interval, limit=2):
             return {
                 'timestamp': current_item['timestamp'],
                 'symbol': symbol,
-                'interval': interval,
+                'interval': requested_interval,
                 'openInterest': float(current_item['sumOpenInterest']),
                 'openInterestValue': float(current_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in current_item else 0,
                 # 'previous_openInterest': float(previous_item['sumOpenInterest']),
@@ -263,7 +278,7 @@ def get_open_interest_history(symbol, interval, limit=2):
             return {
                 'timestamp': current_item['timestamp'],
                 'symbol': symbol,
-                'interval': interval,
+                'interval': requested_interval,
                 'openInterest': float(current_item['sumOpenInterest']),
                 'openInterestValue': float(current_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in current_item else 0,
                 # 'previous_openInterest': None,
@@ -273,7 +288,7 @@ def get_open_interest_history(symbol, interval, limit=2):
         
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"网络请求失败: {symbol}, {interval}, 错误: {e}")
+        logger.error(f"网络请求失败: {symbol}, {requested_interval}, 错误: {e}")
         return None
     except Exception as e:
         logger.error(f"获取历史持仓量数据失败: {symbol}, {interval}, 错误: {e}")

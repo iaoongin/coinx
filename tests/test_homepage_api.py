@@ -1,6 +1,7 @@
 from flask import Flask
 import werkzeug
 
+from coinx.config import TIME_INTERVALS
 from coinx.repositories.homepage_series import get_homepage_series_snapshot as repository_get_homepage_series_snapshot
 from homepage_contracts import assert_complete_interval_contract, seed_complete_homepage_series
 from coinx.web.routes.api_data import api_data_bp
@@ -331,7 +332,7 @@ def test_get_coins_treats_partial_net_inflow_as_complete_when_changes_are_full(m
                 'current_price': 10.0,
                 'current_price_formatted': '10.00',
             }
-            for interval in ['5m', '15m', '30m', '1h', '4h', '12h', '24h', '48h', '72h', '168h']
+            for interval in TIME_INTERVALS
         }
 
         return {
@@ -391,7 +392,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
             }
         }
         if state['repaired']:
-            base_changes['168h'] = {
+            base_changes[TIME_INTERVALS[-1]] = {
                 'ratio': 8.0,
                 'value_ratio': 9.0,
                 'open_interest': 120.0,
@@ -407,7 +408,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
 
         net_inflow = {'5m': 12.0}
         if state['repaired']:
-            net_inflow['168h'] = 128.0
+            net_inflow[TIME_INTERVALS[-1]] = 128.0
 
         return {
             'symbol': 'BTCUSDT',
@@ -428,7 +429,7 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
         }
 
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
-    monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda **kwargs: ['BTCUSDT', 'ETHUSDT'])
     monkeypatch.setattr('coinx.web.routes.api_data.should_refresh_homepage_series', lambda symbols: not state['repaired'])
     monkeypatch.setattr('coinx.web.routes.api_data.HOMEPAGE_SERIES_REPAIR_ENABLED', True)
 
@@ -480,8 +481,8 @@ def test_get_coins_triggers_background_repair_when_homepage_series_is_incomplete
     assert set(score_refresh['series_types']) == {'taker_buy_sell_vol', 'klines', 'open_interest_hist'}
     coin = payload['data'][0]
     assert coin['symbol'] == 'BTCUSDT'
-    assert all(change['interval'] != '168h' for change in coin['changes'])
-    assert '168h' not in coin['net_inflow']
+    assert all(change['interval'] != TIME_INTERVALS[-1] for change in coin['changes'])
+    assert TIME_INTERVALS[-1] not in coin['net_inflow']
 
 
 def test_get_coins_deduplicates_market_structure_refresh_symbols_against_homepage_refresh(monkeypatch):
@@ -489,7 +490,8 @@ def test_get_coins_deduplicates_market_structure_refresh_symbols_against_homepag
     score_refresh = {}
 
     monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT', 'ETHUSDT'])
-    monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data.get_market_structure_score_symbols', lambda **kwargs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data.should_refresh_homepage_series', lambda symbols: True)
     monkeypatch.setattr(
         'coinx.web.routes.api_data.get_homepage_series_snapshot',
         lambda symbols: {

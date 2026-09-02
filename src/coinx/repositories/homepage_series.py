@@ -10,9 +10,13 @@ from sqlalchemy import and_, func, or_, text
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapter, get_supported_exchange_ids
 from coinx.config import (
+    BASE_TIME_INTERVAL_MS,
     ENABLED_EXCHANGES,
     PRIMARY_PRICE_EXCHANGE,
     TIME_INTERVALS,
+    TIME_INTERVAL_SPECS,
+    MAX_TIME_INTERVAL_MS,
+    interval_to_ms,
     HOMEPAGE_WINDOW_HEALTH_THRESHOLD,
     CLICKHOUSE_HOMEPAGE_MAX_WORKERS,
 )
@@ -28,7 +32,7 @@ from coinx.collector.exchange_repair import latest_closed_5m_open_time
 from .funding_rate import load_latest_funding_rates
 
 
-FIVE_MINUTES_MS = 5 * 60 * 1000
+FIVE_MINUTES_MS = BASE_TIME_INTERVAL_MS
 HOMEPAGE_REQUIRED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
 
 
@@ -152,13 +156,7 @@ def format_funding_countdown(next_funding_time, now_ms=None):
 
 
 def _interval_to_ms(interval):
-    if interval.endswith('m'):
-        return int(interval[:-1]) * 60 * 1000
-    if interval.endswith('h'):
-        return int(interval[:-1]) * 60 * 60 * 1000
-    if interval.endswith('d'):
-        return int(interval[:-1]) * 24 * 60 * 60 * 1000
-    raise ValueError(f'不支持的时间周期: {interval}')
+    return interval_to_ms(interval)
 
 
 
@@ -168,18 +166,7 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
     import time as _time
     func_start = _time.time()
 
-    intervals = [
-        ('5m',   1),
-        ('15m',  3),
-        ('30m',  6),
-        ('1h',   12),
-        ('4h',   48),
-        ('12h',  144),
-        ('24h',  288),
-        ('48h',  576),
-        ('72h',  864),
-        ('168h', 2016),
-    ]
+    intervals = TIME_INTERVAL_SPECS
 
     result = _empty_net_inflow_map(symbols)
 
@@ -214,39 +201,20 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
     symbol_latest = {row.symbol: int(row.latest_time) for row in latest_rows}
 
     symbol_placeholders = ', '.join(f':sym_{i}' for i in range(len(symbol_latest)))
+    select_expressions = ['v.symbol']
+    for interval, _duration_ms, expected_points in intervals:
+        select_expressions.extend(
+            [
+                f"SUM(CASE WHEN v.event_time >= :base_{interval} THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_{interval}",
+                f"SUM(CASE WHEN v.event_time >= :base_{interval} THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_{interval}",
+                f"ROUND(SUM(CASE WHEN v.event_time >= :base_{interval} THEN 1 ELSE 0 END) * 100.0 / {expected_points}, 1) AS health_{interval}",
+            ]
+        )
+    select_sql = ',\n            '.join(select_expressions)
+
     sql = text(f"""
         SELECT
-            v.symbol,
-            SUM(CASE WHEN v.event_time >= :base_5m   THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_5m,
-            SUM(CASE WHEN v.event_time >= :base_15m  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_15m,
-            SUM(CASE WHEN v.event_time >= :base_30m  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_30m,
-            SUM(CASE WHEN v.event_time >= :base_1h   THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_1h,
-            SUM(CASE WHEN v.event_time >= :base_4h   THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_4h,
-            SUM(CASE WHEN v.event_time >= :base_12h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_12h,
-            SUM(CASE WHEN v.event_time >= :base_24h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_24h,
-            SUM(CASE WHEN v.event_time >= :base_48h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_48h,
-            SUM(CASE WHEN v.event_time >= :base_72h  THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_72h,
-            SUM(CASE WHEN v.event_time >= :base_168h THEN IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0) ELSE 0 END) AS net_inflow_168h,
-            SUM(CASE WHEN v.event_time >= :base_5m   THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_5m,
-            SUM(CASE WHEN v.event_time >= :base_15m  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_15m,
-            SUM(CASE WHEN v.event_time >= :base_30m  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_30m,
-            SUM(CASE WHEN v.event_time >= :base_1h   THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_1h,
-            SUM(CASE WHEN v.event_time >= :base_4h   THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_4h,
-            SUM(CASE WHEN v.event_time >= :base_12h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_12h,
-            SUM(CASE WHEN v.event_time >= :base_24h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_24h,
-            SUM(CASE WHEN v.event_time >= :base_48h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_48h,
-            SUM(CASE WHEN v.event_time >= :base_72h  THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_72h,
-            SUM(CASE WHEN v.event_time >= :base_168h THEN (IFNULL(v.buy_vol,0) - IFNULL(v.sell_vol,0)) * k.close_price ELSE 0 END) AS net_inflow_value_168h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_5m   THEN 1 ELSE 0 END) * 100.0 / 1,    1) AS health_5m,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_15m  THEN 1 ELSE 0 END) * 100.0 / 3,    1) AS health_15m,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_30m  THEN 1 ELSE 0 END) * 100.0 / 6,    1) AS health_30m,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_1h   THEN 1 ELSE 0 END) * 100.0 / 12,   1) AS health_1h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_4h   THEN 1 ELSE 0 END) * 100.0 / 48,   1) AS health_4h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_12h  THEN 1 ELSE 0 END) * 100.0 / 144,  1) AS health_12h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_24h  THEN 1 ELSE 0 END) * 100.0 / 288,  1) AS health_24h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_48h  THEN 1 ELSE 0 END) * 100.0 / 576,  1) AS health_48h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_72h  THEN 1 ELSE 0 END) * 100.0 / 864,  1) AS health_72h,
-            ROUND(SUM(CASE WHEN v.event_time >= :base_168h THEN 1 ELSE 0 END) * 100.0 / 2016, 1) AS health_168h
+            {select_sql}
         FROM market_taker_buy_sell_vol v
         JOIN market_klines k
           ON k.exchange = v.exchange AND k.symbol = v.symbol AND k.period = v.period AND k.open_time = v.event_time
@@ -261,12 +229,12 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
 
     unified_base = list(symbol_latest.values())[0]
     base_boundaries = {}
-    for interval, _ in intervals:
-        base_boundaries[f'base_{interval}'] = unified_base - int(_interval_to_ms(interval)) + FIVE_MINUTES_MS
+    for interval, duration_ms, _expected_points in intervals:
+        base_boundaries[f'base_{interval}'] = unified_base - duration_ms + FIVE_MINUTES_MS
 
     params = {
         'exchange': exchange,
-        'lower_bound': unified_base - int(_interval_to_ms('168h')) + FIVE_MINUTES_MS,
+        'lower_bound': unified_base - MAX_TIME_INTERVAL_MS + FIVE_MINUTES_MS,
         'upper_bound': int(upper_bound) if upper_bound is not None else int(__import__('time').time() * 1000),
         **{f'sym_{i}': s for i, s in enumerate(symbol_latest)},
     }
@@ -277,7 +245,7 @@ def _load_net_inflow_sql(session, exchange, symbols, upper_bound):
     for row in rows:
         symbol = row.symbol
         if symbol in result:
-            for interval, _ in intervals:
+            for interval, _duration_ms, _expected_points in intervals:
                 col = f'net_inflow_{interval}'
                 val_col = f'net_inflow_value_{interval}'
                 health_col = f'health_{interval}'
@@ -1120,12 +1088,9 @@ def _calculate_clickhouse_net_inflow(rows, kline_by_time, anchor_time):
     if anchor_time is None:
         return result
 
-    intervals = [
-        ('5m', 1), ('15m', 3), ('30m', 6), ('1h', 12), ('4h', 48),
-        ('12h', 144), ('24h', 288), ('48h', 576), ('72h', 864), ('168h', 2016),
-    ]
-    for interval, expected in intervals:
-        base = int(anchor_time) - _interval_to_ms(interval) + FIVE_MINUTES_MS
+    intervals = TIME_INTERVAL_SPECS
+    for interval, duration_ms, expected in intervals:
+        base = int(anchor_time) - duration_ms + FIVE_MINUTES_MS
         selected = [
             row for row in rows
             if base <= int(row['event_time']) <= int(anchor_time)
@@ -1274,14 +1239,14 @@ def _load_homepage_exchange_maps_clickhouse(
         return empty
 
     # Every exchange must load from the shared anchor. Otherwise a fast exchange
-    # loads from its own latest-168h boundary, then loses the target when the
+    # loads from its own latest-window boundary, then loses the target when the
     # aggregation anchor moves back to a slower exchange.
     window_anchors = [
         (shared_anchor_by_symbol or {}).get(symbol, candidate_latest.get(symbol))
         for symbol in symbols
         if candidate_latest.get(symbol) is not None
     ]
-    lower = max(0, min(window_anchors) - _interval_to_ms('168h'))
+    lower = max(0, min(window_anchors) - MAX_TIME_INTERVAL_MS)
     oi_rows = timed_query(
         'rows_open_interest',
         lambda: repo.market_rows(
