@@ -1,6 +1,17 @@
 const { test, expect } = require('./fixtures');
 const { button, heading, link, visit } = require('./contracts');
 
+async function scrollPastBackToTopThreshold(page) {
+  await page.evaluate(() => {
+    const spacer = document.createElement('div');
+    spacer.dataset.playwrightScrollSpacer = 'true';
+    spacer.style.height = '1000px';
+    document.body.appendChild(spacer);
+  });
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(320);
+}
+
 test.describe('首页测试', () => {
   test('页面加载', async ({ page }) => {
     await visit(page, '/');
@@ -32,6 +43,105 @@ test.describe('首页测试', () => {
     await expect(button(page, '刷新')).toBeVisible();
     await expect(page.locator('.coin-meta-line')).toBeVisible();
     await expect(page.locator('body')).not.toContainText('采集：');
+  });
+
+  test('首页悬浮操作在右下角融合排列', async ({ page }) => {
+    await visit(page, '/');
+
+    const configButton = page.getByRole('button', { name: '配置币种' });
+    const backToTop = page.locator('[data-back-to-top]');
+    await expect(page.locator('body')).toHaveClass(/homepage/);
+    await expect(configButton).toBeVisible();
+    await expect(backToTop).toBeHidden();
+
+    await scrollPastBackToTopThreshold(page);
+    await expect(backToTop).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+      const configRect = document.querySelector('.fab-button').getBoundingClientRect();
+      const backRect = document.querySelector('[data-back-to-top]').getBoundingClientRect();
+      return {
+        configWidth: configRect.width,
+        configHeight: configRect.height,
+        backWidth: backRect.width,
+        backHeight: backRect.height,
+        configBackground: window.getComputedStyle(document.querySelector('.fab-button')).backgroundColor,
+        backBackground: window.getComputedStyle(document.querySelector('[data-back-to-top]')).backgroundColor,
+        configIconWidth: document.querySelector('.fab-button svg').getBoundingClientRect().width,
+        configIconHeight: document.querySelector('.fab-button svg').getBoundingClientRect().height,
+        backIconWidth: document.querySelector('[data-back-to-top] svg').getBoundingClientRect().width,
+        backIconHeight: document.querySelector('[data-back-to-top] svg').getBoundingClientRect().height,
+        configRight: configRect.right,
+        backRight: backRect.right,
+        gap: configRect.top - backRect.bottom,
+        configPosition: window.getComputedStyle(document.querySelector('.fab-button')).position,
+        backPosition: window.getComputedStyle(document.querySelector('[data-back-to-top]')).position,
+      };
+    });
+
+    expect(metrics.configWidth).toBe(56);
+    expect(metrics.configHeight).toBe(56);
+    expect(metrics.backWidth).toBe(56);
+    expect(metrics.backHeight).toBe(56);
+    expect(metrics.backBackground).toBe(metrics.configBackground);
+    expect(metrics.configBackground).toBe('rgb(27, 32, 39)');
+    expect(metrics.configIconWidth).toBe(24);
+    expect(metrics.configIconHeight).toBe(24);
+    expect(metrics.backIconWidth).toBe(24);
+    expect(metrics.backIconHeight).toBe(24);
+    expect(metrics.configRight).toBeCloseTo(metrics.backRight, 5);
+    expect(metrics.gap).toBeCloseTo(12, 5);
+    expect(metrics.configPosition).toBe('fixed');
+    expect(metrics.backPosition).toBe('fixed');
+  });
+
+  test('首页配置按钮仍能打开币种配置弹窗', async ({ page }) => {
+    await visit(page, '/');
+
+    await page.getByRole('button', { name: '配置币种' }).click();
+    await expect(page.getByRole('dialog', { name: '币种配置' })).toBeVisible();
+  });
+
+  test('首页移动端悬浮操作保持右边距和间距', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await visit(page, '/');
+    await scrollPastBackToTopThreshold(page);
+
+    const metrics = await page.evaluate(() => {
+      const config = document.querySelector('.fab-button');
+      const back = document.querySelector('[data-back-to-top]');
+      const configRect = config.getBoundingClientRect();
+      const backRect = back.getBoundingClientRect();
+      return {
+        configWidth: configRect.width,
+        configHeight: configRect.height,
+        backWidth: backRect.width,
+        backHeight: backRect.height,
+        configRight: window.getComputedStyle(config).right,
+        backRight: window.getComputedStyle(back).right,
+        configBottom: window.getComputedStyle(config).bottom,
+        backBottom: window.getComputedStyle(back).bottom,
+        configIconWidth: config.querySelector('svg').getBoundingClientRect().width,
+        configIconHeight: config.querySelector('svg').getBoundingClientRect().height,
+        backIconWidth: back.querySelector('svg').getBoundingClientRect().width,
+        backIconHeight: back.querySelector('svg').getBoundingClientRect().height,
+        gap: configRect.top - backRect.bottom,
+      };
+    });
+
+    expect(metrics.configWidth).toBe(48);
+    expect(metrics.configHeight).toBe(48);
+    expect(metrics.backWidth).toBe(48);
+    expect(metrics.backHeight).toBe(48);
+    expect(metrics.configIconWidth).toBe(20);
+    expect(metrics.configIconHeight).toBe(20);
+    expect(metrics.backIconWidth).toBe(20);
+    expect(metrics.backIconHeight).toBe(20);
+    expect(metrics.configRight).toBe('20px');
+    expect(metrics.backRight).toBe('20px');
+    expect(metrics.configBottom).toBe('20px');
+    expect(metrics.backBottom).toBe('80px');
+    expect(metrics.gap).toBeCloseTo(12, 5);
   });
 
   test('搜索条件通过URL参数恢复并支持清除', async ({ page }) => {

@@ -553,6 +553,13 @@ const test = base.extend({
     await use(context);
   },
   page: async ({ page }, use) => {
+    if (process.env.WEB_AUTH_DISABLED === 'true') {
+      await page.goto('/');
+      await page.waitForLoadState('networkidle');
+      await use(page);
+      return;
+    }
+
     await page.goto('/login');
     await page.locator('#username').fill('admin');
     const webPassword = process.env.COINX_TEST_WEB_PASSWORD || process.env.WEB_PASSWORD;

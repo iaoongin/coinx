@@ -36,6 +36,26 @@
   transform: scale(0.95);
 }
 
+/* Keep the homepage actions together while leaving the Vue button in place. */
+body.homepage .fab-button {
+  left: auto;
+  right: 32px;
+}
+
+body.homepage .fab-primary {
+  background: #1b2027;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  color: #f3c95d;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+}
+
+body.homepage .fab-primary:hover {
+  background: #252b34;
+  border-color: #d4af37;
+  color: #ffe08a;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
 @media (max-width: 768px) {
   .fab-button {
     bottom: 20px;
@@ -47,5 +67,9 @@
   .fab-button svg {
     width: 20px;
     height: 20px;
+  }
+
+  body.homepage .fab-button {
+    right: 20px;
   }
 }

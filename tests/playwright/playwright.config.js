@@ -2,9 +2,10 @@ const { defineConfig, devices } = require('@playwright/test');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
-const testWebPassword = process.env.COINX_TEST_WEB_PASSWORD || process.env.WEB_PASSWORD;
+const authDisabled = process.env.WEB_AUTH_DISABLED === 'true';
+const testWebPassword = process.env.COINX_TEST_WEB_PASSWORD || process.env.WEB_PASSWORD || (authDisabled ? 'playwright-disabled-auth' : null);
 
-if (!testWebPassword) {
+if (!testWebPassword && !authDisabled) {
   throw new Error('COINX_TEST_WEB_PASSWORD or WEB_PASSWORD must be set for Playwright tests');
 }
 
@@ -37,6 +38,7 @@ module.exports = defineConfig({
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
       WEB_PASSWORD: testWebPassword,
+      WEB_AUTH_DISABLED: authDisabled ? 'true' : 'false',
       WEB_PORT: '5502',
       PYTHONPATH: 'src',
     },

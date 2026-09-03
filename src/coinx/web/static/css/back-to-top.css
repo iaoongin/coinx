@@ -1,0 +1,101 @@
+/* back-to-top.css - 全局回到顶端按钮 */
+
+.back-to-top {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  z-index: 1000;
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-gold);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--gold-primary);
+  box-shadow: var(--shadow-elevated);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.back-to-top svg {
+  width: 22px;
+  height: 22px;
+}
+
+.back-to-top:hover {
+  background: var(--bg-hover);
+  border-color: var(--gold-primary);
+  color: var(--gold-bright);
+  box-shadow: 0 8px 24px rgba(212, 175, 55, 0.25);
+  transform: translateY(-2px);
+}
+
+.back-to-top:active {
+  transform: translateY(0);
+}
+
+.back-to-top:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 3px;
+}
+
+.back-to-top[hidden] {
+  display: none;
+}
+
+body.homepage .back-to-top {
+  bottom: calc(32px + 56px + 12px);
+  width: 56px;
+  height: 56px;
+  background: #1b2027;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  color: #f3c95d;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+}
+
+body.homepage .back-to-top:hover {
+  background: #252b34;
+  border-color: #d4af37;
+  color: #ffe08a;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  transform: scale(1.1);
+}
+
+body.homepage .back-to-top svg {
+  width: 24px;
+  height: 24px;
+}
+
+@media (max-width: 768px) {
+  .back-to-top {
+    right: 20px;
+    bottom: 20px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .back-to-top svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  body.homepage .back-to-top {
+    bottom: calc(20px + 48px + 12px);
+    width: 48px;
+    height: 48px;
+  }
+
+  body.homepage .back-to-top svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .back-to-top {
+    transition: none;
+  }
+}

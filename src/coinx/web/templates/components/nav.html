@@ -1,5 +1,6 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <link rel="stylesheet" href="{{ url_for('static', filename='flatpickr-coinx.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/back-to-top.css') }}">
 
 <div class="nav-container">
   <a class="brand-lockup" href="/" aria-label="CoinX 首页">
@@ -83,6 +84,22 @@
     <span class="as-of-status" data-as-of-status aria-live="polite">实时数据</span>
   </div>
 </div>
+<button
+  class="back-to-top"
+  data-back-to-top
+  type="button"
+  aria-label="回到顶端"
+  title="回到顶端"
+  aria-hidden="true"
+  tabindex="-1"
+  hidden
+>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="m5 12 7-7 7 7"></path>
+    <path d="M12 19V5"></path>
+  </svg>
+</button>
+<script src="{{ url_for('static', filename='js/back-to-top.js') }}"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/zh.js"></script>
 <script src="{{ url_for('static', filename='js/as_of_control.js') }}"></script>

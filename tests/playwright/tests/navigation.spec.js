@@ -86,7 +86,69 @@ async function navToContentGap(page) {
   return metrics;
 }
 
+async function scrollPastBackToTopThreshold(page) {
+  await page.evaluate(() => {
+    const spacer = document.createElement('div');
+    spacer.dataset.playwrightScrollSpacer = 'true';
+    spacer.style.height = '1000px';
+    document.body.appendChild(spacer);
+  });
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(320);
+}
+
 test.describe('导航栏契约', () => {
+  test('回到顶端按钮按滚动位置显示并回滚', async ({ page }) => {
+    await visit(page, '/legacy-home');
+
+    const backToTop = page.locator('[data-back-to-top]');
+    await expect(backToTop).toBeHidden();
+
+    await scrollPastBackToTopThreshold(page);
+    await expect(backToTop).toBeVisible();
+    await expect(backToTop).toHaveAttribute('aria-label', '回到顶端');
+    await expect(backToTop).toHaveAttribute('aria-hidden', 'false');
+
+    await backToTop.focus();
+    await expect(backToTop).toBeFocused();
+    await backToTop.press('Enter');
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(backToTop).toBeHidden();
+  });
+
+  test('所有主导航业务页面都渲染回到顶端按钮', async ({ page }) => {
+    for (const path of pages) {
+      await visit(page, path);
+      await expect(page.locator('[data-back-to-top]'), `${path} should render back-to-top button`).toHaveCount(1);
+    }
+  });
+
+  test('回到顶端按钮在移动端保持固定尺寸和边距', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await visit(page, '/legacy-home');
+    await scrollPastBackToTopThreshold(page);
+    const backToTop = page.locator('[data-back-to-top]');
+    await expect(backToTop).toBeVisible();
+
+    const metrics = await backToTop.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const style = window.getComputedStyle(button);
+      return {
+        width: rect.width,
+        height: rect.height,
+        position: style.position,
+        right: style.right,
+        bottom: style.bottom,
+      };
+    });
+
+    expect(metrics.width).toBe(44);
+    expect(metrics.height).toBe(44);
+    expect(metrics.position).toBe('fixed');
+    expect(metrics.right).toBe('20px');
+    expect(metrics.bottom).toBe('20px');
+  });
+
   test('导航入口按市场、分析和管理下拉菜单归类', async ({ page }) => {
     await visit(page, '/');
 
