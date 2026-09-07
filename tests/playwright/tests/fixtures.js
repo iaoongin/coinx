@@ -370,6 +370,8 @@ const test = base.extend({
       BTCUSDT: true,
       ETHUSDT: true,
       SOLUSDT: false,
+      ...Object.fromEntries(Array.from({ length: 32 }, (_, index) => [`TRACKED${String(index + 1).padStart(2, '0')}USDT`, true])),
+      ...Object.fromEntries(Array.from({ length: 32 }, (_, index) => [`UNTRACKED${String(index + 1).padStart(2, '0')}USDT`, false])),
     };
     let marketRankSnapshot = mockMarketRankBase;
     let marketRankSnapshotTime = '2026-04-07T01:00:00';
@@ -553,7 +555,7 @@ const test = base.extend({
     await use(context);
   },
   page: async ({ page }, use) => {
-    if (process.env.WEB_AUTH_DISABLED === 'true') {
+    if (process.env.WEB_AUTH_DISABLED !== 'false') {
       await page.goto('/');
       await page.waitForLoadState('networkidle');
       await use(page);

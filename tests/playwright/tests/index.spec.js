@@ -50,7 +50,6 @@ test.describe('首页测试', () => {
 
     const configButton = page.getByRole('button', { name: '配置币种' });
     const backToTop = page.locator('[data-back-to-top]');
-    await expect(page.locator('body')).toHaveClass(/homepage/);
     await expect(configButton).toBeVisible();
     await expect(backToTop).toBeHidden();
 
@@ -100,6 +99,54 @@ test.describe('首页测试', () => {
 
     await page.getByRole('button', { name: '配置币种' }).click();
     await expect(page.getByRole('dialog', { name: '币种配置' })).toBeVisible();
+  });
+
+  test('首页币种配置弹窗在窄屏可滚动访问跟踪列表', async ({ page }) => {
+    await page.setViewportSize({ width: 667, height: 520 });
+    await visit(page, '/');
+    await page.getByRole('button', { name: '配置币种' }).click();
+
+    const dialog = page.getByRole('dialog', { name: '币种配置' });
+    const modalBody = page.locator('.coin-modal-body');
+    const panels = page.locator('.coin-transfer-panel');
+    await expect(panels).toHaveCount(2);
+    await expect(dialog).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.querySelector('.coin-modal').getBoundingClientRect().bottom)).toBeLessThanOrEqual(520);
+
+    const metrics = await page.evaluate(() => {
+      const modal = document.querySelector('.coin-modal');
+      const body = document.querySelector('.coin-modal-body');
+      return {
+        modalBottom: modal.getBoundingClientRect().bottom,
+        viewportHeight: window.innerHeight,
+        bodyClientHeight: body.clientHeight,
+        bodyScrollHeight: body.scrollHeight,
+      };
+    });
+
+    expect(metrics.modalBottom).toBeLessThanOrEqual(metrics.viewportHeight);
+    expect(metrics.bodyScrollHeight).toBeGreaterThan(metrics.bodyClientHeight);
+
+    await modalBody.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(panels.nth(1)).toBeInViewport();
+  });
+
+  test('首页币种配置弹窗的两个列表可独立滚动', async ({ page }) => {
+    await visit(page, '/');
+    await page.getByRole('button', { name: '配置币种' }).click();
+
+    const lists = page.locator('.coin-transfer-list');
+    await expect(lists).toHaveCount(2);
+    for (let index = 0; index < 2; index += 1) {
+      const list = lists.nth(index);
+      await expect.poll(() => list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+      await list.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    }
   });
 
   test('首页移动端悬浮操作保持右边距和间距', async ({ page }) => {

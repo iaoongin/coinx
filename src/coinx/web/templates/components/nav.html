@@ -1,5 +1,6 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <link rel="stylesheet" href="{{ url_for('static', filename='flatpickr-coinx.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fab-button.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/back-to-top.css') }}">
 
 <div class="nav-container">
@@ -85,7 +86,20 @@
   </div>
 </div>
 <button
-  class="back-to-top"
+  class="fab-button fab-primary"
+  data-global-settings
+  type="button"
+  aria-label="配置币种"
+  title="配置币种"
+  aria-haspopup="dialog"
+>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="3"></circle>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 1 9 4.68a1.65 1.65 0 0 1 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 1 1 1.51 1.65 1.65 0 0 1 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 1 19.4 9a1.65 1.65 0 0 1 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 1-1.51 1z"></path>
+  </svg>
+</button>
+<button
+  class="fab-button fab-primary back-to-top"
   data-back-to-top
   type="button"
   aria-label="回到顶端"
@@ -100,11 +114,40 @@
   </svg>
 </button>
 <script src="{{ url_for('static', filename='js/back-to-top.js') }}"></script>
+<script src="{{ url_for('static', filename='js/components/CoinConfigModal.js') }}"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/zh.js"></script>
 <script src="{{ url_for('static', filename='js/as_of_control.js') }}"></script>
 <script>
   (() => {
+    const settingsButton = document.querySelector('[data-global-settings]');
+    if (settingsButton) {
+      const openSettings = () => window.dispatchEvent(new CustomEvent('coinx:open-settings'));
+      document.addEventListener('click', (event) => {
+        if (event.target.closest?.('[data-global-settings]')) openSettings();
+      });
+
+      window.addEventListener('DOMContentLoaded', () => {
+        if (typeof Vue === 'undefined' || typeof CoinConfigModal === 'undefined') return;
+        const host = document.createElement('div');
+        host.id = 'global-settings-app';
+        document.body.appendChild(host);
+
+        const settingsApp = Vue.createApp({
+          setup() {
+            const visible = Vue.ref(false);
+            const open = () => { visible.value = true; };
+            const trackedUpdated = () => window.dispatchEvent(new CustomEvent('coinx:tracked-updated'));
+            window.addEventListener('coinx:open-settings', open);
+            return { visible, trackedUpdated };
+          },
+          template: '<coin-config-modal :visible="visible" @close="visible = false" @update:tracked="trackedUpdated"></coin-config-modal>',
+        });
+        settingsApp.component('CoinConfigModal', CoinConfigModal);
+        settingsApp.mount(host);
+      }, { once: true });
+    }
+
     const menus = [...document.querySelectorAll('.nav-menu')];
     const closeMenus = (except = null) => menus.forEach((menu) => {
       if (menu === except) return;

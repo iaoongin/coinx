@@ -16,6 +16,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+      overflow-y: auto;
       animation: coinModalFadeIn 0.2s ease;
     }
 
@@ -24,9 +27,10 @@
       border: 1px solid var(--border-default, rgba(212,175,55,0.12));
       border-radius: var(--card-radius-lg, 16px);
       box-shadow: var(--shadow-card, 0 4px 24px rgba(0,0,0,0.4));
-      width: 480px;
-      max-width: 90vw;
-      max-height: 70vh;
+      width: min(480px, 100%);
+      height: min(70vh, calc(100vh - 32px));
+      max-height: calc(100vh - 32px);
+      box-sizing: border-box;
       display: flex;
       flex-direction: column;
       animation: coinModalSlideUp 0.3s ease;
@@ -79,6 +83,7 @@
 
     .coin-modal-body {
       flex: 1;
+      min-height: 0;
       overflow: hidden;
       padding: 16px 20px;
       display: flex;
@@ -108,7 +113,7 @@
       display: grid;
       grid-template-columns: 1fr 44px 1fr;
       gap: 10px;
-      align-items: start;
+      align-items: stretch;
       flex: 1;
       min-height: 0;
     }
@@ -119,8 +124,7 @@
       border-radius: var(--card-radius, 12px);
       display: flex;
       flex-direction: column;
-      height: calc(70vh - 140px);
-      max-height: 420px;
+      min-height: 0;
     }
 
     .coin-transfer-header {
@@ -156,6 +160,7 @@
 
     .coin-transfer-list {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
       padding: 6px;
     }
@@ -246,6 +251,9 @@
     }
 
     @media (max-width: 768px) {
+      .coin-modal-mask {
+        align-items: flex-start;
+      }
       .coin-transfer {
         grid-template-columns: 1fr;
       }
@@ -254,8 +262,21 @@
         justify-content: center;
         padding-top: 0;
       }
+      .coin-modal {
+        height: auto;
+      }
+      .coin-modal-body {
+        overflow-y: auto;
+      }
+      .coin-transfer {
+        display: flex;
+        flex-direction: column;
+        flex: none;
+      }
       .coin-transfer-panel {
+        flex: 0 0 240px;
         height: 240px;
+        min-height: 240px;
       }
     }
   `;

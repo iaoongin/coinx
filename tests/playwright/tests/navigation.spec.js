@@ -98,6 +98,28 @@ async function scrollPastBackToTopThreshold(page) {
 }
 
 test.describe('导航栏契约', () => {
+  test('业务页面常驻配置按钮', async ({ page }) => {
+    for (const path of pages) {
+      await visit(page, path);
+
+      const globalSettings = page.locator('[data-global-settings]');
+      await expect(globalSettings).toHaveCount(1);
+      await expect(globalSettings).toBeVisible();
+      await expect(globalSettings).toHaveAttribute('type', 'button');
+      await expect(globalSettings).toHaveAttribute('aria-haspopup', 'dialog');
+    }
+  });
+
+  test('首页与合约详情页使用同一设置弹窗', async ({ page }) => {
+    for (const path of ['/', '/coin-detail?symbol=BTCUSDT']) {
+      await visit(page, path);
+      await page.getByRole('button', { name: '配置币种' }).click();
+      await expect(page.getByRole('dialog', { name: '币种配置' })).toBeVisible();
+      await page.getByRole('button', { name: '关闭' }).click();
+      await expect(page.getByRole('dialog', { name: '币种配置' })).toBeHidden();
+    }
+  });
+
   test('回到顶端按钮按滚动位置显示并回滚', async ({ page }) => {
     await visit(page, '/legacy-home');
 
@@ -123,6 +145,41 @@ test.describe('导航栏契约', () => {
     }
   });
 
+  test('所有业务页面复用同一套悬浮按钮样式', async ({ page }) => {
+    let reference = null;
+    for (const path of pages) {
+      await visit(page, path);
+      const metrics = await page.evaluate(() => {
+        const readStyle = (button) => {
+          const style = window.getComputedStyle(button);
+          const iconStyle = window.getComputedStyle(button.querySelector('svg'));
+          return {
+            width: style.width,
+            height: style.height,
+            right: style.right,
+            backgroundColor: style.backgroundColor,
+            color: style.color,
+            borderTopWidth: style.borderTopWidth,
+            borderTopColor: style.borderTopColor,
+            position: style.position,
+            iconWidth: iconStyle.width,
+            iconHeight: iconStyle.height,
+          };
+        };
+        const buttons = [
+          document.querySelector('[data-global-settings]'),
+          document.querySelector('[data-back-to-top]'),
+        ];
+        return buttons.map((button) => readStyle(button));
+      });
+
+      // Both buttons share the same visual contract; only the bottom offset differs.
+      if (!reference) reference = metrics[0];
+      expect(metrics[0], `${path} settings button should match the shared style`).toEqual(reference);
+      expect(metrics[1], `${path} back-to-top button should match the shared style`).toEqual(reference);
+    }
+  });
+
   test('回到顶端按钮在移动端保持固定尺寸和边距', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await visit(page, '/legacy-home');
@@ -142,11 +199,11 @@ test.describe('导航栏契约', () => {
       };
     });
 
-    expect(metrics.width).toBe(44);
-    expect(metrics.height).toBe(44);
+    expect(metrics.width).toBe(48);
+    expect(metrics.height).toBe(48);
     expect(metrics.position).toBe('fixed');
     expect(metrics.right).toBe('20px');
-    expect(metrics.bottom).toBe('20px');
+    expect(metrics.bottom).toBe('80px');
   });
 
   test('导航入口按市场、分析和管理下拉菜单归类', async ({ page }) => {

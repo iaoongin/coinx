@@ -2,7 +2,7 @@ const { defineConfig, devices } = require('@playwright/test');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
-const authDisabled = process.env.WEB_AUTH_DISABLED === 'true';
+const authDisabled = process.env.WEB_AUTH_DISABLED !== 'false';
 const testWebPassword = process.env.COINX_TEST_WEB_PASSWORD || process.env.WEB_PASSWORD || (authDisabled ? 'playwright-disabled-auth' : null);
 
 if (!testWebPassword && !authDisabled) {

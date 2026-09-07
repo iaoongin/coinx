@@ -13,7 +13,6 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <script src="https://unpkg.com/echarts@6.0.0/dist/echarts.min.js"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/period-matrix.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/fab-button.css') }}">
   <style>
     body {
       font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
@@ -409,7 +408,7 @@
     }
   </style>
 </head>
-<body class="homepage">
+<body>
   <div class="page-frame">
     {% include 'components/nav.html' %}
   <div id="app">
@@ -505,14 +504,7 @@
         <period-matrix :coin="coin"></period-matrix>
       </article>
     </section>
-    <!-- 币种配置悬浮按钮 -->
-    <button class="fab-button fab-primary" @click="showCoinConfig = true" title="配置币种" aria-label="配置币种">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="3"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-      </svg>
-    </button>
-    <coin-config-modal :visible="showCoinConfig" @close="showCoinConfig = false" @update:tracked="onTrackedUpdate"></coin-config-modal>
+    <!-- 首页按钮统一由公共导航提供。 -->
     <div v-if="fundingModalOpen" class="funding-modal-backdrop" @click.self="closeFundingModal">
       <section class="funding-modal" role="dialog" aria-modal="true" :aria-label="fundingModalSymbol + ' 近 24 小时资费走势'">
         <header class="funding-modal-header">
@@ -530,7 +522,6 @@
 
   <script>window.COINX_TIME_INTERVALS = {{ time_intervals | tojson }};</script>
   <script src="{{ url_for('static', filename='js/components/PeriodMatrix.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/components/CoinConfigModal.js') }}"></script>
   <script>
     const { createApp, ref, computed, watch, nextTick, onMounted, onUnmounted } = Vue;
 
@@ -553,7 +544,6 @@
         const REFRESH_TIMEOUT_MS = 15000;
         let countdownTimer = null;
         let lastAutoRefreshTarget = null;
-        const showCoinConfig = ref(false);
         const fundingModalOpen = ref(false);
         const fundingModalSymbol = ref('');
         const fundingChartState = ref('loading');
@@ -657,6 +647,8 @@
         const handleSearchFocusout = (event) => {
           if (!searchControl.value?.contains(event.relatedTarget)) searchFocused.value = false;
         };
+
+        const handleTrackedUpdated = () => loadData(true);
 
         watch(keyword, (value) => {
           const normalized = normalizeSearchTerm(value);
@@ -927,6 +919,7 @@
           restoreSearchState();
           loadData();
           document.addEventListener('click', handleSearchOutsideClick);
+          window.addEventListener('coinx:tracked-updated', handleTrackedUpdated);
           window.addEventListener('keydown', handleFundingKeydown);
           window.addEventListener('resize', handleFundingResize);
           if (window.visualViewport) window.visualViewport.addEventListener('resize', handleFundingResize);
@@ -934,6 +927,7 @@
         onUnmounted(() => {
           if (countdownTimer) clearInterval(countdownTimer);
           document.removeEventListener('click', handleSearchOutsideClick);
+          window.removeEventListener('coinx:tracked-updated', handleTrackedUpdated);
           window.removeEventListener('keydown', handleFundingKeydown);
           window.removeEventListener('resize', handleFundingResize);
           if (window.visualViewport) window.visualViewport.removeEventListener('resize', handleFundingResize);
@@ -972,13 +966,10 @@
           handleSearchFocusout,
           openFundingModal,
           closeFundingModal,
-          showCoinConfig,
-          onTrackedUpdate: () => loadData(true),
         };
       },
     });
     app.component('PeriodMatrix', PeriodMatrix);
-    app.component('CoinConfigModal', CoinConfigModal);
     app.mount('#app');
   </script>
 </body>
