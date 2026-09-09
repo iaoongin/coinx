@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import coinx.scheduler as scheduler_module
 
 
@@ -101,6 +99,50 @@ def test_initialize_job_run_history_recovers_interrupted_runs(monkeypatch):
     scheduler_module.initialize_job_run_history()
 
     assert calls == ['schema', 'recover']
+
+
+def test_start_scheduler_restores_paused_jobs_before_resuming(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scheduler_module, 'SCHEDULER_ENABLED', True)
+    monkeypatch.setattr(scheduler_module, '_get_persisted_paused_job_ids', lambda: calls.append('load') or {'job-a'})
+    monkeypatch.setattr(
+        scheduler_module,
+        '_restore_persisted_paused_jobs',
+        lambda job_ids: calls.append(('restore', job_ids)),
+    )
+    monkeypatch.setattr(
+        scheduler_module,
+        'scheduler',
+        type('FakeScheduler', (), {
+            'start': lambda self, paused=False: calls.append(('start', paused)),
+            'resume': lambda self: calls.append('resume'),
+        })(),
+    )
+
+    scheduler_module.start_scheduler()
+
+    assert calls == ['load', ('start', True), ('restore', {'job-a'}), 'resume']
+
+
+def test_restore_persisted_paused_jobs_reapplies_state(monkeypatch):
+    from types import SimpleNamespace
+
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+            self.next_run_time = object()
+            self.pause_calls = 0
+
+        def pause(self):
+            self.pause_calls += 1
+            self.next_run_time = None
+
+    job = FakeJob('paused-job')
+    monkeypatch.setattr(scheduler_module, 'scheduler', SimpleNamespace(get_job=lambda job_id: job if job_id == job.id else None))
+
+    scheduler_module._restore_persisted_paused_jobs({'paused-job'})
+
+    assert job.pause_calls == 1
 
 
 def test_trade_opportunity_notification_uses_scheduled_event(monkeypatch):

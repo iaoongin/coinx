@@ -4,6 +4,8 @@ from collections import Counter
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from sqlalchemy import select
 
 from .collector import (
     get_all_24hr_tickers,
@@ -32,6 +34,7 @@ from .config import (
     RSS_ENABLED,
     RSS_POLL_INTERVAL,
     TASK_RUN_HISTORY_RETENTION_DAYS,
+    DATABASE_URI,
 )
 from .repositories.funding_rate import collect_funding_rates
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
@@ -48,7 +51,8 @@ from .collector.timing import format_duration_ms
 from .utils import logger
 
 
-scheduler = BackgroundScheduler()
+scheduler_jobstore = SQLAlchemyJobStore(url=DATABASE_URI)
+scheduler = BackgroundScheduler(jobstores={'default': scheduler_jobstore})
 JOB_METADATA_LOCK = threading.Lock()
 JOB_METADATA = {}
 
@@ -67,6 +71,29 @@ def initialize_job_run_history():
             logger.warning('已标记中断的任务运行记录: count=%s', interrupted_count)
     except Exception:
         logger.exception('任务运行记录初始化失败，将继续启动服务')
+
+
+def _get_persisted_paused_job_ids():
+    """Read paused jobs before decorator registration can replace their state."""
+    scheduler_jobstore.jobs_t.create(bind=scheduler_jobstore.engine, checkfirst=True)
+    statement = select(scheduler_jobstore.jobs_t.c.id).where(
+        scheduler_jobstore.jobs_t.c.next_run_time.is_(None)
+    )
+    with scheduler_jobstore.engine.begin() as connection:
+        return {row[0] for row in connection.execute(statement)}
+
+
+def _restore_persisted_paused_jobs(paused_job_ids):
+    """Restore paused jobs after pending definitions have been loaded."""
+    for job_id in paused_job_ids:
+        try:
+            job = scheduler.get_job(job_id)
+            if job is None or job.next_run_time is None:
+                continue
+            job.pause()
+            logger.info('已恢复任务暂停状态: job_id=%s', job_id)
+        except Exception:
+            logger.exception('恢复任务暂停状态失败: job_id=%s', job_id)
 
 
 def _update_job_metadata(job_id, **fields):
@@ -729,7 +756,12 @@ def start_scheduler():
         return
     logger.info('开始启动调度器')
     try:
-        scheduler.start()
+        paused_job_ids = _get_persisted_paused_job_ids()
+        scheduler.start(paused=True)
+        try:
+            _restore_persisted_paused_jobs(paused_job_ids)
+        finally:
+            scheduler.resume()
         logger.info('调度器启动成功')
     except Exception as e:
         logger.error('调度器启动失败: %s', e)

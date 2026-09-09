@@ -41,7 +41,7 @@ class FakeJob:
 
     def resume(self):
         self.resumed = True
-        self.next_run_time = None
+        self.next_run_time = datetime.now() + timedelta(minutes=5)
 
 
 def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
@@ -121,7 +121,7 @@ def test_list_task_job_runs_validates_limit_and_job_id(monkeypatch):
 
 
 def test_control_task_job_runs_job(monkeypatch):
-    fake_job = FakeJob()
+    fake_job = FakeJob(next_run_time=datetime.now() + timedelta(minutes=5))
     wakeup_calls = []
     modify_calls = []
     monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
@@ -142,6 +142,55 @@ def test_control_task_job_runs_job(monkeypatch):
     assert payload['status'] == 'success'
     assert modify_calls
     assert wakeup_calls == ['wakeup']
+
+
+def test_control_task_job_pauses_and_resumes_scheduler_job(monkeypatch):
+    fake_job = FakeJob(next_run_time=datetime.now() + timedelta(minutes=5))
+    monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', True)
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [fake_job],
+        get_job=lambda job_id: fake_job if job_id == fake_job.id else None,
+    ))
+    monkeypatch.setattr('coinx.web.routes.api_data.get_all_job_runtime_metadata', lambda: {})
+    monkeypatch.setattr('coinx.web.routes.api_data.get_latest_job_runtime_metadata', lambda _job_ids: {})
+
+    client = create_test_client()
+    pause_response = client.post('/api/task-jobs/job-a/action', json={'action': 'pause'})
+    resume_response = client.post('/api/task-jobs/job-a/action', json={'action': 'resume'})
+
+    assert pause_response.status_code == 200
+    assert resume_response.status_code == 200
+    assert fake_job.paused is True
+    assert fake_job.resumed is True
+
+
+def test_control_task_job_runs_paused_job_without_resuming_it(monkeypatch):
+    fake_job = FakeJob(next_run_time=datetime.now() + timedelta(minutes=5))
+    fake_job.pause()
+    manual_calls = []
+    modify_calls = []
+    monkeypatch.setattr('coinx.web.routes.api_data.SCHEDULER_ENABLED', True)
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [fake_job],
+        get_job=lambda job_id: fake_job if job_id == fake_job.id else None,
+        modify_job=lambda job_id, **kwargs: modify_calls.append((job_id, kwargs)),
+        wakeup=lambda: modify_calls.append('wakeup'),
+    ))
+    monkeypatch.setattr('coinx.web.routes.api_data.get_all_job_runtime_metadata', lambda: {})
+    monkeypatch.setattr('coinx.web.routes.api_data.get_latest_job_runtime_metadata', lambda _job_ids: {})
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data._start_manual_task_job',
+        lambda job: manual_calls.append(job.id) or True,
+    )
+
+    response = create_test_client().post('/api/task-jobs/job-a/action', json={'action': 'run'})
+
+    assert response.status_code == 200
+    assert manual_calls == ['job-a']
+    assert modify_calls == []
+    assert fake_job.next_run_time is None
 
 
 def test_control_task_job_rejects_unsupported_action():

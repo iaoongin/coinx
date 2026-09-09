@@ -38,7 +38,11 @@ from coinx.repositories.homepage_series import (
     latest_closed_5m_open_time,
     should_refresh_homepage_series,
 )
-from coinx.repositories.job_runs import get_job_run_count, get_job_runs, get_latest_job_runtime_metadata
+from coinx.repositories.job_runs import (
+    get_job_run_count,
+    get_job_runs,
+    get_latest_job_runtime_metadata,
+)
 from coinx.repositories.market_structure_score import (
     get_market_structure_score_snapshot,
     get_market_structure_score_symbols,
@@ -1041,9 +1045,15 @@ def control_task_job(job_id):
     try:
         if action == 'run':
             if SCHEDULER_ENABLED:
-                scheduler.modify_job(job_id, next_run_time=datetime.now())
-                scheduler.wakeup()
-                message = f'任务已触发执行: {job_id}'
+                if scheduler.running and getattr(job, 'next_run_time', None) is None:
+                    if _start_manual_task_job(job):
+                        message = f'已手动执行暂停任务，任务保持暂停: {job_id}'
+                    else:
+                        return jsonify({'status': 'error', 'message': f'任务已在运行：{job_id}'}), 409
+                else:
+                    scheduler.modify_job(job_id, next_run_time=datetime.now())
+                    scheduler.wakeup()
+                    message = f'任务已触发执行: {job_id}'
             elif _start_manual_task_job(job):
                 message = f'任务已在后台手动执行: {job_id}'
             else:
