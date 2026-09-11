@@ -1,11 +1,15 @@
 from flask import Flask
+from importlib.metadata import version
 from types import SimpleNamespace
+import werkzeug
 
 from coinx.web.routes.api_data import api_data_bp
 from coinx.web.routes.api_funding_rate import api_funding_rate_bp
 
 
 def _client():
+    if not hasattr(werkzeug, '__version__'):
+        werkzeug.__version__ = version('werkzeug')
     app = Flask(__name__)
     app.register_blueprint(api_data_bp)
     app.register_blueprint(api_funding_rate_bp)

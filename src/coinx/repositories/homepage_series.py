@@ -1123,16 +1123,23 @@ def _load_clickhouse_exchange_candidate_latest(exchange, symbols, upper_bound=No
         return {}
 
     upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
+    # Use the request/replay cutoff, not wall-clock time, to bound discovery.
+    # A series outside the configured horizon must not pull the shared anchor
+    # (and every symbol's detail window) back into arbitrarily old history.
+    lower = max(0, upper - MAX_TIME_INTERVAL_MS)
     oi_latest = repo.latest_series_times(
         'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+        lower_bound=lower,
     )
     kline_latest = repo.latest_series_times(
         'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+        lower_bound=lower,
     )
     taker_latest = {}
     if not _has_unreliable_taker_source(exchange):
         taker_latest = repo.latest_series_times(
             'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+            lower_bound=lower,
         )
 
     candidate_latest = {}
@@ -1191,16 +1198,19 @@ def _load_homepage_exchange_maps_clickhouse(
 
     upper = int(upper_bound) if upper_bound is not None else int(time.time() * 1000)
     if candidate_latest_override is None:
+        latest_lower = max(0, upper - MAX_TIME_INTERVAL_MS)
         oi_latest = timed_query(
             'latest_open_interest',
             lambda: repo.latest_series_times(
                 'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+                lower_bound=latest_lower,
             ),
         )
         kline_latest = timed_query(
             'latest_kline',
             lambda: repo.latest_series_times(
                 'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
+                lower_bound=latest_lower,
             ),
         )
         taker_latest = {}
@@ -1209,6 +1219,7 @@ def _load_homepage_exchange_maps_clickhouse(
                 'latest_taker',
                 lambda: repo.latest_series_times(
                     'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
+                    lower_bound=latest_lower,
                 ),
             )
 

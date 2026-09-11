@@ -62,7 +62,7 @@ def test_clickhouse_homepage_loader_skips_ambiguous_rows_without_symbol(monkeypa
     import coinx.repositories.homepage_series as homepage
 
     class FakeClickHouseRepository:
-        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None):
+        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None, lower_bound=None):
             return {symbol: 1_700_000_000_000 for symbol in symbols}
 
         def market_rows(self, table, columns, **kwargs):
@@ -221,7 +221,7 @@ def test_clickhouse_homepage_loader_keeps_max_window_when_latest_lags_global_anc
     calls = []
 
     class FakeClickHouseRepository:
-        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None):
+        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None, lower_bound=None):
             return {'BTCUSDT': latest}
 
         def market_rows(self, table, columns, **kwargs):
@@ -345,7 +345,7 @@ def test_clickhouse_homepage_loader_aligns_anchor_to_lagging_taker_series(monkey
     target_window = taker_latest - homepage.MAX_TIME_INTERVAL_MS
 
     class FakeClickHouseRepository:
-        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None):
+        def latest_series_times(self, table, symbols, exchange, period, time_column, upper_bound=None, lower_bound=None):
             if table == 'market_taker_buy_sell_vol':
                 return {'BTCUSDT': taker_latest}
             return {'BTCUSDT': latest}

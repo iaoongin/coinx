@@ -319,6 +319,7 @@ class ClickHouseMarketReadRepository:
         period: str,
         time_column: str,
         upper_bound: Optional[int] = None,
+        lower_bound: Optional[int] = None,
     ) -> Dict[str, int]:
         table = _identifier(table)
         time_column = _identifier(time_column)
@@ -326,6 +327,8 @@ class ClickHouseMarketReadRepository:
         filters = [f"symbol IN ({symbol_filter})", f"period = {_quote(period)}"]
         if exchange is not None:
             filters.append(f"exchange = {_quote(exchange)}")
+        if lower_bound is not None:
+            filters.append(f"{time_column} >= {int(lower_bound)}")
         if upper_bound is not None:
             filters.append(f"{time_column} <= {int(upper_bound)}")
         rows = self.client.query_rows(
