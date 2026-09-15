@@ -19,9 +19,11 @@ from coinx.config import (
     interval_to_ms,
     HOMEPAGE_WINDOW_HEALTH_THRESHOLD,
     CLICKHOUSE_HOMEPAGE_MAX_WORKERS,
+    CLICKHOUSE_AGGREGATION_SYMBOL_BATCH_SIZE,
 )
 from coinx.database import get_session
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
+from coinx.read_clients import clickhouse_query_context
 from coinx.utils import logger
 from coinx.models import (
     MarketKline,
@@ -1127,19 +1129,27 @@ def _load_clickhouse_exchange_candidate_latest(exchange, symbols, upper_bound=No
     # A series outside the configured horizon must not pull the shared anchor
     # (and every symbol's detail window) back into arbitrarily old history.
     lower = max(0, upper - MAX_TIME_INTERVAL_MS)
-    oi_latest = repo.latest_series_times(
-        'market_open_interest_hist', symbols, exchange, '5m', 'event_time', upper_bound=upper,
-        lower_bound=lower,
+
+    def latest_times(stage, table, time_column):
+        with clickhouse_query_context(
+            operation='homepage', stage=stage, table=table, exchange=exchange,
+            symbol_count=len(symbols), lower_bound=lower, upper_bound=upper, period='5m',
+        ):
+            return repo.latest_series_times(
+                table, symbols, exchange, '5m', time_column,
+                upper_bound=upper, lower_bound=lower,
+            )
+
+    oi_latest = latest_times(
+        'latest_open_interest', 'market_open_interest_hist', 'event_time',
     )
-    kline_latest = repo.latest_series_times(
-        'market_klines', symbols, exchange, '5m', 'open_time', upper_bound=upper,
-        lower_bound=lower,
+    kline_latest = latest_times(
+        'latest_kline', 'market_klines', 'open_time',
     )
     taker_latest = {}
     if not _has_unreliable_taker_source(exchange):
-        taker_latest = repo.latest_series_times(
-            'market_taker_buy_sell_vol', symbols, exchange, '5m', 'event_time', upper_bound=upper,
-            lower_bound=lower,
+        taker_latest = latest_times(
+            'latest_taker', 'market_taker_buy_sell_vol', 'event_time',
         )
 
     candidate_latest = {}
@@ -1153,6 +1163,23 @@ def _load_clickhouse_exchange_candidate_latest(exchange, symbols, upper_bound=No
     return candidate_latest
 
 
+def _deduplicate_homepage_rows(rows, time_column):
+    """Collapse rows for compatibility when a FINAL query falls back.
+
+    Normal ReplacingMergeTree reads are deduplicated by ClickHouse FINAL.
+    This local pass protects compatibility with older plain MergeTree tables
+    when the client retries a query after an ILLEGAL_FINAL response.
+    """
+    latest = {}
+    for row in rows or []:
+        key = (row.get('symbol'), row.get(time_column))
+        version = row.get('updated_at')
+        current = latest.get(key)
+        if current is None or str(version or '') >= str(current.get('updated_at') or ''):
+            latest[key] = row
+    return list(latest.values())
+
+
 def _load_homepage_exchange_maps_clickhouse(
     exchange,
     symbols,
@@ -1162,7 +1189,7 @@ def _load_homepage_exchange_maps_clickhouse(
 ):
     """Load a full aligned window from ClickHouse for one exchange."""
     repo = get_clickhouse_repository()
-    symbols = list(symbols or [])
+    symbols = list(dict.fromkeys(symbols or []))
     empty = ({symbol: {} for symbol in symbols}, {symbol: {} for symbol in symbols}, _empty_net_inflow_map(symbols), {})
     if not symbols:
         return empty
@@ -1172,14 +1199,26 @@ def _load_homepage_exchange_maps_clickhouse(
     def timed_query(stage, callback):
         started = time.perf_counter()
         try:
-            result = callback()
+            with clickhouse_query_context(
+                operation='homepage', stage=stage, exchange=exchange,
+                table={
+                    'latest_open_interest': 'market_open_interest_hist',
+                    'latest_kline': 'market_klines',
+                    'latest_taker': 'market_taker_buy_sell_vol',
+                }.get(stage),
+                symbol_count=len(symbols), upper_bound=upper, period='5m',
+                lower_bound=max(0, upper - MAX_TIME_INTERVAL_MS) if stage.startswith('latest_') else lower,
+            ):
+                result = callback()
         except Exception as exc:
             logger.warning(
-                'ClickHouse homepage query failed: exchange=%s stage=%s duration_ms=%.1f error_type=%s',
+                'ClickHouse homepage query failed: exchange=%s stage=%s duration_ms=%.1f error_type=%s query_id=%s error=%s',
                 exchange,
                 stage,
                 (time.perf_counter() - started) * 1000,
                 type(exc).__name__,
+                getattr(exc, 'clickhouse_query_id', None),
+                str(exc),
             )
             raise
 
@@ -1249,45 +1288,87 @@ def _load_homepage_exchange_maps_clickhouse(
         )
         return empty
 
+    # The latest-time discovery is also the eligibility gate for detail reads.
+    # Symbols without a recent, aligned anchor cannot contribute to the
+    # homepage snapshot, so sending them through the expensive FINAL reads
+    # only adds latency and memory pressure. Keep the original symbol
+    # list for stable empty results, but restrict ClickHouse detail batches to
+    # candidates that can actually be aggregated.
+    candidate_symbols = [symbol for symbol in symbols if symbol in candidate_latest]
+    skipped_symbols = len(symbols) - len(candidate_symbols)
+    logger.info(
+        'ClickHouse homepage candidate filter: exchange=%s requested_symbols=%s candidate_symbols=%s skipped_symbols=%s',
+        exchange,
+        len(symbols),
+        len(candidate_symbols),
+        skipped_symbols,
+    )
+
     # Every exchange must load from the shared anchor. Otherwise a fast exchange
     # loads from its own latest-window boundary, then loses the target when the
     # aggregation anchor moves back to a slower exchange.
     window_anchors = [
         (shared_anchor_by_symbol or {}).get(symbol, candidate_latest.get(symbol))
-        for symbol in symbols
+        for symbol in candidate_symbols
         if candidate_latest.get(symbol) is not None
     ]
     lower = max(0, min(window_anchors) - MAX_TIME_INTERVAL_MS)
+    batch_size = max(1, int(CLICKHOUSE_AGGREGATION_SYMBOL_BATCH_SIZE or 32))
+
+    def load_rows(table, columns, time_column):
+        # Read bounded symbol batches sequentially. FINAL performs version
+        # collapse in ClickHouse for each bounded batch. The local dedupe
+        # remains as a compatibility fallback for old MergeTree tables where
+        # the client retries without FINAL.
+        rows = []
+        for start in range(0, len(candidate_symbols), batch_size):
+            symbol_batch = candidate_symbols[start:start + batch_size]
+            with clickhouse_query_context(
+                table=table, batch_index=start // batch_size + 1,
+                batch_count=(len(candidate_symbols) + batch_size - 1) // batch_size,
+                symbol_count=len(symbol_batch), symbols=symbol_batch,
+                lower_bound=lower, upper_bound=upper,
+            ):
+                raw_columns = columns if 'updated_at' in columns.split(',') else f'{columns}, updated_at'
+                batch_rows = repo.market_rows(
+                    table,
+                    raw_columns,
+                    symbols=symbol_batch,
+                    exchange=exchange, period='5m', time_column=time_column,
+                    lower_bound=lower, upper_bound=upper, order_by=f'symbol, {time_column}',
+                    # FINAL collapses ReplacingMergeTree versions in ClickHouse.
+                    # Keep deduplicate=False so we do not add a second
+                    # server-side argMax/GROUP BY aggregation on top of FINAL.
+                    final=True,
+                    deduplicate=False,
+                )
+                rows.extend(_deduplicate_homepage_rows(batch_rows, time_column))
+        return rows
+
     oi_rows = timed_query(
         'rows_open_interest',
-        lambda: repo.market_rows(
+        lambda: load_rows(
             'market_open_interest_hist',
             'symbol, event_time, sum_open_interest, sum_open_interest_value',
-            symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
-            lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
-            deduplicate=True,
+            'event_time',
         ),
     )
     kline_rows = timed_query(
         'rows_kline',
-        lambda: repo.market_rows(
+        lambda: load_rows(
             'market_klines',
             'symbol, open_time, high_price, low_price, close_price, quote_volume, taker_buy_quote_volume',
-            symbols=symbols, exchange=exchange, period='5m', time_column='open_time',
-            lower_bound=lower, upper_bound=upper, order_by='symbol, open_time',
-            deduplicate=True,
+            'open_time',
         ),
     )
     taker_rows = []
     if not _has_unreliable_taker_source(exchange):
         taker_rows = timed_query(
             'rows_taker',
-            lambda: repo.market_rows(
+            lambda: load_rows(
                 'market_taker_buy_sell_vol',
                 'symbol, event_time, buy_vol, sell_vol',
-                symbols=symbols, exchange=exchange, period='5m', time_column='event_time',
-                lower_bound=lower, upper_bound=upper, order_by='symbol, event_time',
-                deduplicate=True,
+                'event_time',
             ),
         )
 
@@ -1962,9 +2043,11 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
                 return exchange, candidate, None
             except Exception as exc:
                 logger.warning(
-                    'ClickHouse homepage anchor query failed: exchange=%s error_type=%s',
+                    'ClickHouse homepage anchor query failed: exchange=%s error_type=%s query_id=%s error=%s',
                     exchange,
                     type(exc).__name__,
+                    getattr(exc, 'clickhouse_query_id', None),
+                    str(exc),
                 )
                 return exchange, None, exc
 
@@ -1998,20 +2081,34 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
             len(shared_anchor_by_symbol),
         )
 
-        for exchange in enabled_exchanges:
-            if exchange not in supported_exchanges:
-                exchange_maps[exchange] = empty_map
-                exchange_adapters[exchange] = None
-                continue
+        detail_exchanges = [exchange for exchange in enabled_exchanges if exchange in supported_exchanges]
 
+        def load_detail_exchange(exchange):
             candidate_latest = candidate_latest_by_exchange.get(exchange)
-            exchange_maps[exchange] = _load_homepage_exchange_maps_clickhouse(
+            return exchange, _load_homepage_exchange_maps_clickhouse(
                 exchange,
                 symbols,
                 upper_bound=upper_bound,
                 shared_anchor_by_symbol=shared_anchor_by_symbol,
                 candidate_latest_override=candidate_latest,
             )
+
+        # Detail reads are bounded FINAL queries and can overlap up to the
+        # configured worker and ClickHouse query-concurrency limits.
+        detail_workers = min(
+            max(1, int(CLICKHOUSE_HOMEPAGE_MAX_WORKERS)),
+            max(1, len(detail_exchanges)),
+        )
+        with ThreadPoolExecutor(max_workers=detail_workers) as executor:
+            futures = [executor.submit(load_detail_exchange, exchange) for exchange in detail_exchanges]
+            for future in futures:
+                exchange, result = future.result()
+                exchange_maps[exchange] = result
+
+        for exchange in enabled_exchanges:
+            if exchange not in supported_exchanges:
+                exchange_maps[exchange] = empty_map
+                exchange_adapters[exchange] = None
 
         aggregate_oi_map, selected_kline_map, _, coverage_map = _aggregate_homepage_series_maps(
             None,
@@ -2020,10 +2117,14 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
             exchange_maps_override=exchange_maps,
             exchange_adapters_override=exchange_adapters,
         )
-        funding_rate_map = _load_latest_funding_rates_compat(
-            symbols,
-            as_of_ms=upper_bound,
-        )
+        with clickhouse_query_context(
+            operation='homepage', stage='latest_funding', table='market_funding_rate',
+            symbol_count=len(symbols), upper_bound=upper_bound,
+        ):
+            funding_rate_map = _load_latest_funding_rates_compat(
+                symbols,
+                as_of_ms=upper_bound,
+            )
         return aggregate_oi_map, selected_kline_map, coverage_map, funding_rate_map
 
     aggregate_oi_map, selected_kline_map, _, coverage_map = _aggregate_homepage_series_maps(
@@ -2312,3 +2413,4 @@ def should_refresh_homepage_series(symbols=None, now_ms=None, session=None):
     finally:
         if own_session and db is not None:
             db.close()
+

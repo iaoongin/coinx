@@ -34,9 +34,6 @@ _FUNDING_HISTORY_CACHE: Dict[Any, Any] = {}
 _LATEST_TICKER_CACHE: Dict[Any, Any] = {}
 _AVAILABLE_STRUCTURE_SYMBOLS_CACHE: Dict[Any, Any] = {}
 _CACHE_MAX_ENTRIES = 128
-# Keep large ClickHouse aggregations spillable. This is a per-query threshold,
-# not a request to raise the process/container memory limit.
-_EXTERNAL_GROUP_BY_BYTES = 256 * 1024 * 1024
 _QUERY_MAX_THREADS = max(1, int(CLICKHOUSE_QUERY_MAX_THREADS))
 
 
@@ -203,11 +200,7 @@ class ClickHouseMarketReadRepository:
                 sql += " WHERE " + " AND ".join(filters)
         sql += f" ORDER BY {order_by or time_column or 'symbol'}"
         if deduplicate and time_column is not None and table != "market_tickers":
-            sql += (
-                f" SETTINGS max_threads = {_QUERY_MAX_THREADS},"
-                f" max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES},"
-                f" max_bytes_before_external_sort = {_EXTERNAL_GROUP_BY_BYTES}"
-            )
+            sql += f" SETTINGS max_threads = {_QUERY_MAX_THREADS}"
         return [_normalize_row(row) for row in self.client.query_rows(sql)]
 
     def aggregate_kline_rows(
@@ -261,8 +254,7 @@ class ClickHouseMarketReadRepository:
             "GROUP BY symbol, bucket_time "
             f"HAVING count() = {expected_points} "
             f"AND max(open_time) - min(open_time) = {(expected_points - 1) * base_period_ms} "
-            "ORDER BY symbol, bucket_time "
-            f"SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
+            "ORDER BY symbol, bucket_time"
         )
         normalized = []
         for row in rows:
@@ -302,8 +294,7 @@ class ClickHouseMarketReadRepository:
         rows = self.client.query_rows(
             "SELECT symbol, sum(ifNull(tupleElement(latest_row, 1), 0)) AS quote_volume_24h "
             f"FROM ({deduplicated}) AS k "
-            "GROUP BY symbol "
-            f"SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
+            "GROUP BY symbol"
         )
         return {
             str(row['symbol']): float(row['quote_volume_24h'] or 0)
@@ -407,8 +398,7 @@ class ClickHouseMarketReadRepository:
                     ON oi.exchange = k.exchange AND oi.symbol = k.symbol
                 GROUP BY k.symbol
                 ORDER BY k.symbol
-                SETTINGS max_threads = {_QUERY_MAX_THREADS},
-                    max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}
+                SETTINGS max_threads = {_QUERY_MAX_THREADS}
                 """
             )
             normalized = [
@@ -749,7 +739,6 @@ class ClickHouseMarketReadRepository:
             f"WHERE mt.close_time = {int(close_time)} "
             "GROUP BY mt.symbol) AS latest_tickers "
             f"ORDER BY {order_column} {order_direction}, symbol ASC LIMIT {max(1, int(limit))}"
-            f" SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES}"
         )
         return [_normalize_row(row) for row in rows]
 
@@ -826,8 +815,6 @@ class ClickHouseMarketReadRepository:
             FROM top_symbols AS s
             LEFT JOIN metrics AS m ON m.symbol = s.symbol
             ORDER BY s.symbol
-            SETTINGS max_bytes_before_external_group_by = {_EXTERNAL_GROUP_BY_BYTES},
-                     max_bytes_before_external_sort = {_EXTERNAL_GROUP_BY_BYTES}
             """
         )
         return {

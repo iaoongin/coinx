@@ -51,7 +51,8 @@ def test_clickhouse_aggregation_returns_buckets_and_validates_complete_points():
     assert "argMax(tuple(high_price, low_price, close_price, quote_volume), updated_at) AS latest_row" in sql
     assert "FROM coinx.market_klines" in sql
     assert "FINAL" not in sql
-    assert "max_bytes_before_external_group_by" in sql
+    assert "max_bytes_before_external_group_by" not in sql
+    assert "max_bytes_before_external_sort" not in sql
 
 
 def test_clickhouse_quote_volume_is_aggregated_server_side():
@@ -99,7 +100,7 @@ def test_clickhouse_available_structure_symbols_is_server_side_and_cached():
     assert 'FROM coinx.market_klines' in sql
     assert 'FROM coinx.market_open_interest_hist' in sql
     assert 'PREWHERE exchange IN (\'binance\', \'okx\')' in sql
-    assert 'max_threads = 2' in sql
+    assert 'SETTINGS max_threads = ' in sql
 
 
 def test_clickhouse_market_rows_deduplicates_without_final():
@@ -124,8 +125,9 @@ def test_clickhouse_market_rows_deduplicates_without_final():
     assert "argMax(tuple(high_price, close_price, quote_volume), updated_at) AS _latest_row" in sql
     assert "GROUP BY exchange, symbol, period, open_time" in sql
     assert "PREWHERE symbol IN ('BTCUSDT')" in sql
-    assert "max_threads = 2" in sql
-    assert "max_bytes_before_external_group_by" in sql
+    assert "SETTINGS max_threads = " in sql
+    assert "max_bytes_before_external_group_by" not in sql
+    assert "max_bytes_before_external_sort" not in sql
 
 
 def test_clickhouse_market_rows_keeps_final_for_detail_reads():
@@ -208,7 +210,8 @@ def test_clickhouse_price_volume_metrics_limits_and_deduplicates_kline_scan():
     assert "argMax(tuple(k.open_price, k.close_price, k.quote_volume), k.updated_at) AS latest_row" in sql
     assert "FROM coinx.market_klines" in sql
     assert "FINAL" not in sql
-    assert "max_bytes_before_external_group_by" in sql
+    assert "max_bytes_before_external_group_by" not in sql
+    assert "max_bytes_before_external_sort" not in sql
 
 
 def test_market_structure_clickhouse_path_uses_server_side_aggregation(monkeypatch):

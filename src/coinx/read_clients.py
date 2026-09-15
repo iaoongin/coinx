@@ -10,6 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from threading import BoundedSemaphore
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -23,12 +27,43 @@ from coinx.config import (
 )
 
 logger = logging.getLogger(__name__)
+_CLICKHOUSE_QUERY_CONTEXT = ContextVar('clickhouse_query_context', default={})
 _CLICKHOUSE_QUERY_SEMAPHORE = BoundedSemaphore(max(1, int(CLICKHOUSE_MAX_CONCURRENT_QUERIES)))
 _CLICKHOUSE_QUERY_SETTINGS = {
     "max_threads": max(1, int(CLICKHOUSE_QUERY_MAX_THREADS)),
 }
 if int(CLICKHOUSE_MAX_MEMORY_USAGE_BYTES) > 0:
     _CLICKHOUSE_QUERY_SETTINGS["max_memory_usage"] = int(CLICKHOUSE_MAX_MEMORY_USAGE_BYTES)
+
+
+@contextmanager
+def clickhouse_query_context(**fields):
+    """Attach diagnostic fields to queries without sharing state across threads."""
+    token = _CLICKHOUSE_QUERY_CONTEXT.set({**_CLICKHOUSE_QUERY_CONTEXT.get(), **fields})
+    try:
+        yield
+    finally:
+        _CLICKHOUSE_QUERY_CONTEXT.reset(token)
+
+
+def _clickhouse_response_stats(response):
+    headers = getattr(response, 'headers', None) or {}
+    try:
+        summary = json.loads(headers.get('X-ClickHouse-Summary', '{}'))
+    except (TypeError, ValueError):
+        summary = {}
+    if not isinstance(summary, dict):
+        summary = {}
+    # Missing counters are unknown, not zero. In particular, a current memory
+    # counter must never be presented as peak memory or as server-wide RSS.
+    return {
+        'http_status': getattr(response, 'status_code', None),
+        'server_query_id': headers.get('X-ClickHouse-Query-Id'),
+        'exception_code': headers.get('X-ClickHouse-Exception-Code'),
+        **{key: summary.get(key) for key in (
+            'read_rows', 'read_bytes', 'elapsed_ns', 'memory_usage', 'peak_memory_usage',
+        )},
+    }
 
 
 class ReadOnlyQueryError(ValueError):
@@ -83,49 +118,77 @@ class ClickHouseReadClient:
 
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
         statement = assert_read_only(sql)
-        with _CLICKHOUSE_QUERY_SEMAPHORE:
-            response = self.session.post(
-                self.url,
-                params={
-                    "query": f"{statement} FORMAT JSONEachRow",
-                    "database": self.database,
-                    **_CLICKHOUSE_QUERY_SETTINGS,
-                },
-                auth=self.auth,
-                timeout=self.timeout,
-            )
-        if not response.ok:
-            detail = response.text.strip() or "ClickHouse returned no error details."
+        try:
+            return self._query_rows_once(statement)
+        except requests.HTTPError as exc:
             # Older installations may still have the two tables that are
             # being upgraded as plain MergeTree.  ClickHouse rejects FINAL
             # for those tables; retrying the same read without FINAL is safe
             # for that engine because it has no version rows to collapse.  Do
             # not broaden this fallback to any other server error.
-            if "ILLEGAL_FINAL" in detail and re.search(r"\bFINAL\b", statement, re.IGNORECASE):
+            if "ILLEGAL_FINAL" in str(exc) and re.search(r"\bFINAL\b", statement, re.IGNORECASE):
                 fallback_statement = re.sub(r"\s+FINAL\b", "", statement, flags=re.IGNORECASE)
-                logger.warning("ClickHouse table does not support FINAL; retrying read without FINAL")
-                with _CLICKHOUSE_QUERY_SEMAPHORE:
-                    response = self.session.post(
-                        self.url,
-                        params={
-                            "query": f"{fallback_statement} FORMAT JSONEachRow",
-                            "database": self.database,
-                            **_CLICKHOUSE_QUERY_SETTINGS,
-                        },
-                        auth=self.auth,
-                        timeout=self.timeout,
-                    )
-                if response.ok:
-                    return [json.loads(line) for line in response.text.splitlines() if line.strip()]
+                logger.warning(
+                    "ClickHouse table does not support FINAL; retrying read without FINAL: query_id=%s",
+                    getattr(exc, 'clickhouse_query_id', None),
+                )
+                return self._query_rows_once(
+                    fallback_statement, retry_of=getattr(exc, 'clickhouse_query_id', None),
+                )
+            raise
+
+    def _query_rows_once(self, statement, retry_of=None):
+        query_id = f'coinx_read_{uuid.uuid4().hex}'
+        context = {
+            **_CLICKHOUSE_QUERY_CONTEXT.get(),
+            'query_id': query_id,
+            'database': self.database,
+        }
+        if retry_of is not None:
+            context['retry_of'] = retry_of
+        response = None
+        started = time.perf_counter()
+        try:
+            with _CLICKHOUSE_QUERY_SEMAPHORE:
+                context['queue_wait_ms'] = round((time.perf_counter() - started) * 1000, 1)
+                started = time.perf_counter()
+                logger.info('ClickHouse query started: %s', json.dumps(context, ensure_ascii=False))
+                response = self.session.post(
+                    self.url,
+                    params={
+                        'query': f'{statement} FORMAT JSONEachRow',
+                        'database': self.database,
+                        'query_id': query_id,
+                        **_CLICKHOUSE_QUERY_SETTINGS,
+                    },
+                    auth=self.auth,
+                    timeout=self.timeout,
+                )
+            if not response.ok:
                 detail = response.text.strip() or "ClickHouse returned no error details."
-            raise requests.HTTPError(
-                f"ClickHouse HTTP {response.status_code}: {detail}", response=response
-            )
-        rows = []
-        for line in response.text.splitlines():
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+                raise requests.HTTPError(
+                    f'ClickHouse HTTP {response.status_code}: {detail} [query_id={query_id}]',
+                    response=response,
+                )
+            rows = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+        except Exception as exc:
+            # Preserve exception type and response for existing callers while
+            # allowing the enclosing homepage failure to identify this query.
+            exc.clickhouse_query_id = query_id
+            logger.error('ClickHouse query failed: %s', json.dumps({
+                **context,
+                **_clickhouse_response_stats(response),
+                'duration_ms': round((time.perf_counter() - started) * 1000, 1),
+                'error_type': type(exc).__name__,
+                'error': str(exc),
+            }, ensure_ascii=False))
+            raise
+        logger.info('ClickHouse query finished: %s', json.dumps({
+            **context,
+            **_clickhouse_response_stats(response),
+            'duration_ms': round((time.perf_counter() - started) * 1000, 1),
+            'result_count': len(rows),
+        }, ensure_ascii=False))
         return rows
 
     def query_scalar(self, sql: str) -> Any:
