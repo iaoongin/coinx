@@ -1,5 +1,6 @@
 import json
 import time
+from contextvars import copy_context
 from dataclasses import dataclass
 from decimal import Decimal
 from functools import lru_cache
@@ -36,6 +37,11 @@ from .funding_rate import load_latest_funding_rates
 
 FIVE_MINUTES_MS = BASE_TIME_INTERVAL_MS
 HOMEPAGE_REQUIRED_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
+
+
+def _submit_with_context(executor, function, *args, **kwargs):
+    """Propagate request-scoped ClickHouse deadlines into worker threads."""
+    return executor.submit(copy_context().run, function, *args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -1500,7 +1506,7 @@ def _aggregate_homepage_series_maps(
         else 4
     )
     with ThreadPoolExecutor(max_workers=min(max_workers, len(supported_list))) as executor:
-        futures = {executor.submit(load_exchange, exchange): exchange for exchange in supported_list}
+        futures = {_submit_with_context(executor, load_exchange, exchange): exchange for exchange in supported_list}
 
         for future in as_completed(futures):
             exchange, result, adapter, error = future.result()
@@ -2023,7 +2029,7 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
         warm_exchanges = [exchange for exchange in enabled_exchanges if exchange in supported_exchanges]
         with ThreadPoolExecutor(max_workers=min(4, max(1, len(warm_exchanges)))) as executor:
             futures = {
-                executor.submit(prepare_adapter, exchange): exchange
+                _submit_with_context(executor, prepare_adapter, exchange): exchange
                 for exchange in warm_exchanges
             }
             for future in as_completed(futures):
@@ -2056,7 +2062,7 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
         ]
         with ThreadPoolExecutor(max_workers=min(4, max(1, len(candidate_exchanges)))) as executor:
             futures = {
-                executor.submit(load_candidate_latest, exchange): exchange
+                _submit_with_context(executor, load_candidate_latest, exchange): exchange
                 for exchange in candidate_exchanges
             }
             for future in as_completed(futures):
@@ -2100,7 +2106,7 @@ def _load_homepage_series_maps(session, symbols, upper_bound=None):
             max(1, len(detail_exchanges)),
         )
         with ThreadPoolExecutor(max_workers=detail_workers) as executor:
-            futures = [executor.submit(load_detail_exchange, exchange) for exchange in detail_exchanges]
+            futures = [_submit_with_context(executor, load_detail_exchange, exchange) for exchange in detail_exchanges]
             for future in futures:
                 exchange, result = future.result()
                 exchange_maps[exchange] = result

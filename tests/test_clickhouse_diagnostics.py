@@ -6,7 +6,7 @@ from threading import Barrier
 import pytest
 import requests
 
-from coinx.read_clients import ClickHouseReadClient, clickhouse_query_context
+from coinx.read_clients import ClickHouseReadClient, clickhouse_query_context, clickhouse_query_deadline
 from coinx.repositories import homepage_series as homepage
 from coinx.repositories.market_read import ClickHouseMarketReadRepository
 
@@ -157,3 +157,13 @@ def test_parallel_query_contexts_do_not_mix(monkeypatch, caplog):
     for record in finishes:
         assert record['exchange'] == starts[record['query_id']]['exchange']
         assert record['stage'] == 'latest_kline'
+
+
+def test_query_deadline_stops_reads_before_request_timeout():
+    session = Session(Response())
+    with clickhouse_query_deadline(0.1):
+        import time
+        time.sleep(0.11)
+        with pytest.raises(TimeoutError, match='deadline exceeded'):
+            client(session).query_rows('SELECT 1')
+    assert session.calls == []

@@ -28,6 +28,7 @@ from coinx.config import (
 
 logger = logging.getLogger(__name__)
 _CLICKHOUSE_QUERY_CONTEXT = ContextVar('clickhouse_query_context', default={})
+_CLICKHOUSE_QUERY_DEADLINE = ContextVar('clickhouse_query_deadline', default=None)
 _CLICKHOUSE_QUERY_SEMAPHORE = BoundedSemaphore(max(1, int(CLICKHOUSE_MAX_CONCURRENT_QUERIES)))
 _CLICKHOUSE_QUERY_SETTINGS = {
     "max_threads": max(1, int(CLICKHOUSE_QUERY_MAX_THREADS)),
@@ -44,6 +45,27 @@ def clickhouse_query_context(**fields):
         yield
     finally:
         _CLICKHOUSE_QUERY_CONTEXT.reset(token)
+
+
+@contextmanager
+def clickhouse_query_deadline(timeout_seconds):
+    """Bound a group of ClickHouse reads by one monotonic deadline."""
+    timeout = max(0.1, float(timeout_seconds))
+    token = _CLICKHOUSE_QUERY_DEADLINE.set(time.monotonic() + timeout)
+    try:
+        yield
+    finally:
+        _CLICKHOUSE_QUERY_DEADLINE.reset(token)
+
+
+def _remaining_query_timeout():
+    deadline = _CLICKHOUSE_QUERY_DEADLINE.get()
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('ClickHouse homepage query deadline exceeded')
+    return remaining
 
 
 def _clickhouse_response_stats(response):
@@ -149,10 +171,15 @@ class ClickHouseReadClient:
         response = None
         started = time.perf_counter()
         try:
+            remaining = _remaining_query_timeout()
             with _CLICKHOUSE_QUERY_SEMAPHORE:
+                remaining = _remaining_query_timeout()
                 context['queue_wait_ms'] = round((time.perf_counter() - started) * 1000, 1)
                 started = time.perf_counter()
                 logger.info('ClickHouse query started: %s', json.dumps(context, ensure_ascii=False))
+                read_timeout = self.timeout[1]
+                if remaining is not None:
+                    read_timeout = min(float(read_timeout), max(0.1, remaining))
                 response = self.session.post(
                     self.url,
                     params={
@@ -162,7 +189,7 @@ class ClickHouseReadClient:
                         **_CLICKHOUSE_QUERY_SETTINGS,
                     },
                     auth=self.auth,
-                    timeout=self.timeout,
+                    timeout=(self.timeout[0], read_timeout),
                 )
             if not response.ok:
                 detail = response.text.strip() or "ClickHouse returned no error details."

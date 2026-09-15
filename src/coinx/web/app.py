@@ -1,6 +1,9 @@
 import os
 import sys
 
+import requests
+from werkzeug.exceptions import HTTPException
+
 from flask import Flask, jsonify, request, send_from_directory
 from flask_jwt_extended import JWTManager
 
@@ -50,6 +53,28 @@ def create_app():
     
     configure_app(app)
     JWTManager(app)
+
+    def _api_error_response(message, code, status):
+        if request.path.startswith('/api/'):
+            return jsonify({'status': 'error', 'code': code, 'message': message}), status
+        return message, status
+
+    @app.errorhandler(requests.exceptions.Timeout)
+    def handle_request_timeout(error):
+        logger.warning('请求处理超时: path=%s error=%s', request.path, error)
+        return _api_error_response('请求处理超时，请稍后重试', 'request_timeout', 504)
+
+    @app.errorhandler(TimeoutError)
+    def handle_timeout(error):
+        logger.warning('请求处理超时: path=%s error=%s', request.path, error)
+        return _api_error_response('请求处理超时，请稍后重试', 'request_timeout', 504)
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_exception(error):
+        if isinstance(error, HTTPException):
+            return error
+        logger.exception('未捕获的请求异常: path=%s error=%s', request.path, error)
+        return _api_error_response('服务内部错误，请稍后重试', 'internal_error', 500)
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(pages_bp)

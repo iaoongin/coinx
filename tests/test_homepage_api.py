@@ -601,3 +601,24 @@ def test_homepage_refresh_skips_duplicate_inflight_requests(monkeypatch):
 
     assert second_result['status'] == 'skipped'
     assert len(calls) == 1
+
+
+def test_get_coins_returns_explicit_timeout_response(monkeypatch):
+    module = __import__('coinx.web.routes.api_data', fromlist=['_clear_homepage_snapshot_cache'])
+    module._clear_homepage_snapshot_cache()
+    monkeypatch.setattr('coinx.web.routes.api_data.get_active_coins', lambda: ['BTCUSDT'])
+    monkeypatch.setattr('coinx.web.routes.api_data._get_homepage_cache_anchor', lambda: 999999)
+    monkeypatch.setattr(
+        'coinx.web.routes.api_data.get_homepage_series_snapshot',
+        lambda symbols: (_ for _ in ()).throw(TimeoutError('deadline exceeded')),
+    )
+
+    response = create_test_client().get('/api/coins?nocache=1')
+
+    assert response.status_code == 504
+    assert response.get_json() == {
+        'status': 'error',
+        'code': 'homepage_timeout',
+        'message': '首页数据查询超时（超过 25 秒），请稍后重试',
+    }
+    module._clear_homepage_snapshot_cache()

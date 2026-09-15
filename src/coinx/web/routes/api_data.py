@@ -1,6 +1,8 @@
 import threading
 import time
 import re
+
+import requests
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -27,6 +29,7 @@ from coinx.config import (
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
     REPAIR_ROLLING_POINTS,
     COLLECTION_SCHEDULER_ONLY,
+    CLICKHOUSE_HOMEPAGE_TIMEOUT_SECONDS,
     SCHEDULER_ENABLED,
     TIME_INTERVALS,
 )
@@ -53,6 +56,7 @@ from coinx.scheduler import (
     scheduler,
 )
 from coinx.utils import logger
+from coinx.read_clients import clickhouse_query_deadline
 from coinx.web.time_params import request_as_of_ms
 
 
@@ -672,7 +676,8 @@ def get_coins():
         snapshot_kwargs = {'symbols': active_coins}
         if as_of_ms is not None:
             snapshot_kwargs['now_ms'] = as_of_ms
-        snapshot = get_homepage_series_snapshot(**snapshot_kwargs)
+        with clickhouse_query_deadline(CLICKHOUSE_HOMEPAGE_TIMEOUT_SECONDS):
+            snapshot = get_homepage_series_snapshot(**snapshot_kwargs)
         snapshot_ms = (time.perf_counter() - snapshot_start) * 1000
 
         if active_coins and not _is_complete_homepage_payload(snapshot.get('data') or []):
@@ -721,6 +726,29 @@ def get_coins():
             f'锚点={cache_anchor}, 聚合耗时={snapshot_ms:.2f}ms, 总耗时={elapsed_ms:.2f}ms'
         )
         return jsonify(payload)
+    except (TimeoutError, requests.exceptions.Timeout) as e:
+        elapsed_ms = (time.perf_counter() - request_start) * 1000
+        logger.warning(
+            '首页数据查询超时: timeout_seconds=%s elapsed_ms=%.1f error_type=%s error=%s',
+            CLICKHOUSE_HOMEPAGE_TIMEOUT_SECONDS, elapsed_ms, type(e).__name__, e,
+        )
+        return jsonify({
+            'status': 'error',
+            'code': 'homepage_timeout',
+            'message': f'首页数据查询超时（超过 {CLICKHOUSE_HOMEPAGE_TIMEOUT_SECONDS} 秒），请稍后重试',
+        }), 504
+    except requests.exceptions.HTTPError as e:
+        if 'MEMORY_LIMIT_EXCEEDED' in str(e) or 'Code: 241' in str(e):
+            elapsed_ms = (time.perf_counter() - request_start) * 1000
+            logger.warning('首页数据查询触发 ClickHouse 内存限制: elapsed_ms=%.1f error=%s', elapsed_ms, e)
+            return jsonify({
+                'status': 'error',
+                'code': 'homepage_memory_limit',
+                'message': '首页数据查询触发 ClickHouse 内存限制，请稍后重试',
+            }), 503
+        logger.error(f'加载首页数据失败: {e}')
+        logger.exception(e)
+        return jsonify({'status': 'error', 'message': f'failed to load homepage data: {str(e)}'}), 500
     except ValueError as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
