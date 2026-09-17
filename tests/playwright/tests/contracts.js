@@ -29,7 +29,7 @@ function button(page, name) {
 }
 
 function link(page, name) {
-  return page.locator('.nav-container .nav a').filter({ hasText: new RegExp(`^${escapeRegExp(name)}$`) });
+  return page.getByRole('link', { name, exact: true });
 }
 
 function testId(page, id) {

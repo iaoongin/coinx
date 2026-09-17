@@ -28,7 +28,8 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'coinx.contract-detail.recent' in template
     assert r'/^[\p{L}\p{N}_-]{2,50}$/u.test(value)' in template
     assert 'loadSymbolOptions' in template
-    assert "fetch('/api/coins-config')" in template
+    assert "const requestJson = (url, options = {}) => window.CoinxApi.requestJson" in template
+    assert "requestJson('/api/coins-config')" in template
     assert 'switchSymbol' in template
     assert '搜索并切换合约' in template
     assert '.symbol-picker-toggle::after' in template

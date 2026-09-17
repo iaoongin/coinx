@@ -383,6 +383,20 @@
       margin-top: 14px;
     }
 
+    .homepage-error {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      margin-top: 14px;
+      border: 1px solid rgba(239, 101, 101, .35);
+      border-radius: 6px;
+      background: rgba(239, 101, 101, .06);
+      color: var(--negative);
+      font-size: 12px;
+    }
+
     @media (max-width: 760px) {
       .header-row,
       .toolbar {
@@ -481,9 +495,17 @@
     </section>
 
     <div v-if="loading && coins.length === 0" class="loading">正在加载首页数据...</div>
-    <div v-else-if="filteredCoins.length === 0" class="empty">暂无可展示数据</div>
+    <div v-if="!loading && loadError && coins.length === 0" class="empty homepage-load-error">
+      <div>[[ loadError ]]</div>
+      <button class="btn btn-primary" type="button" @click="loadData(true)">重试</button>
+    </div>
+    <div v-if="loadError && coins.length > 0" class="homepage-error" role="status">
+      <span>刷新失败，当前仍显示上一次数据：[[ loadError ]]</span>
+      <button class="btn" type="button" @click="loadData(true)" :disabled="loading">重试</button>
+    </div>
+    <div v-if="!loading && !loadError && filteredCoins.length === 0" class="empty">暂无可展示数据</div>
 
-    <section v-else class="coin-stack">
+    <section v-if="filteredCoins.length > 0" class="coin-stack">
       <article v-for="coin in filteredCoins" :key="coin.symbol" class="coin-panel">
         <div class="coin-head">
           <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-symbol">[[ shortSymbol(coin.symbol) ]]</a>
@@ -530,6 +552,7 @@
       setup() {
         const coins = ref([]);
         const loading = ref(false);
+        const loadError = ref('');
         const keyword = ref('');
         const searchHistory = ref([]);
         const searchFocused = ref(false);
@@ -759,14 +782,10 @@
         };
 
         const refreshHomepageSeries = async () => {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
-          try {
-            const response = await fetch('/api/update?force=true&wait=true', { signal: controller.signal });
-            return await response.json();
-          } finally {
-            clearTimeout(timer);
-          }
+          return window.CoinxApi.requestJson('/api/update?force=true&wait=true', {
+            coinxTimeoutMs: REFRESH_TIMEOUT_MS,
+            coinxSuppressGlobalError: true,
+          });
         };
 
         const updateCountdown = () => {
@@ -860,11 +879,10 @@
           await nextTick();
           fundingCloseButton.value?.focus();
           try {
-            const response = await fetch('/api/funding-rate/history/' + encodeURIComponent(symbol) + '?hours=24');
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
+            const result = await window.CoinxApi.requestJson('/api/funding-rate/history/' + encodeURIComponent(symbol) + '?hours=24', {
+              coinxSuppressGlobalError: true,
+            });
             if (requestId !== fundingChartRequestId || !fundingModalOpen.value) return;
-            if (result.status !== 'success') throw new Error(result.message || 'request failed');
             if (!Array.isArray(result.data) || result.data.length === 0) {
               fundingChartState.value = 'empty';
               return;
@@ -896,19 +914,21 @@
 
         const loadData = async (force = false) => {
           loading.value = true;
+          loadError.value = '';
           try {
             if (force) await refreshHomepageSeries();
-            const response = await fetch(force ? '/api/coins?nocache=1' : '/api/coins');
-            const result = await response.json();
-            if (result.status === 'success') {
-              coins.value = result.data || [];
-              lastUpdateTime.value = result.cache_update_time
-                ? new Date(result.cache_update_time).toLocaleString('zh-CN')
-                : '';
-              startCountdown();
-            }
+            const result = await window.CoinxApi.requestJson(force ? '/api/coins?nocache=1' : '/api/coins', {
+              coinxTimeoutMs: REFRESH_TIMEOUT_MS,
+              coinxSuppressGlobalError: true,
+            });
+            coins.value = result.data || [];
+            lastUpdateTime.value = result.cache_update_time
+              ? new Date(result.cache_update_time).toLocaleString('zh-CN')
+              : '';
+            startCountdown();
           } catch (error) {
             console.error('failed to load new home data', error);
+            loadError.value = window.CoinxApi?.message(error) || error?.message || '数据加载失败，请稍后重试';
           } finally {
             loading.value = false;
           }
@@ -937,6 +957,7 @@
         return {
           coins,
           loading,
+          loadError,
           keyword,
           searchHistory,
           searchFocused,

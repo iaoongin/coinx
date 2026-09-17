@@ -15,7 +15,7 @@ test.describe('币种详情测试', () => {
     await expect(page.locator('body')).toContainText('72.4');
     await expect(page.locator('body')).toContainText('binance');
     await expect(page.locator('body')).toContainText('bybit');
-    await expect(button(page, '返回')).toBeVisible();
+    await expect(button(page, '返回')).toHaveCount(0);
   });
 
   test('多周期变化沿用首页矩阵列序', async ({ page }) => {
@@ -107,7 +107,7 @@ test.describe('币种详情测试', () => {
     }));
     expect(matrixDimensions.scrollWidth).toBeGreaterThan(matrixDimensions.clientWidth);
     await expect(page.locator('.detail-header')).toHaveCSS('flex-direction', 'column');
-    await expect(page.locator('.actions .btn')).toHaveCount(1);
+    await expect(button(page, '返回')).toHaveCount(0);
     const chartHeights = await page.locator('.chart').evaluateAll(elements => elements.map(element => getComputedStyle(element).height));
     expect(chartHeights).toEqual(['260px', '260px', '260px', '260px']);
     await page.getByRole('button', { name: '搜索并切换合约' }).click();

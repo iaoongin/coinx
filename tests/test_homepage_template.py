@@ -4,11 +4,17 @@ from pathlib import Path
 def test_homepage_shows_taker_source_tags_for_single_source():
     template = Path('src/coinx/web/templates/index.html').read_text(encoding='utf-8')
     component = Path('src/coinx/web/static/js/components/PeriodMatrix.js').read_text(encoding='utf-8')
+    nav = Path('src/coinx/web/templates/components/nav.html').read_text(encoding='utf-8')
+    api_client = Path('src/coinx/web/static/js/api_client.js').read_text(encoding='utf-8')
 
     assert '<period-matrix :coin="coin"></period-matrix>' in template
     assert "filename='css/period-matrix.css'" in template
     assert "filename='js/components/PeriodMatrix.js'" in template
     assert "app.component('PeriodMatrix', PeriodMatrix)" in template
+    assert "filename='js/api_client.js'" in nav
+    assert 'window.CoinxApi.requestJson' in template
+    assert "window.addEventListener('coinx:api-error'" not in template
+    assert 'coinx:api-error' in api_client
     assert 'v-if="allTakerExchanges(coin).length"' in component
     assert 'v-for="item in allTakerExchanges(coin)"' in component
 
