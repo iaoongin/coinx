@@ -189,6 +189,12 @@
           </section>
         </div>
 
+        <section v-if="detail" class="section">
+          <div class="section-heading"><h2>多周期变化</h2><div class="section-heading-actions"><span class="section-updated">数据时间：[[ formatTime(detail.as_of) ]]</span><button class="btn section-refresh" type="button" @click="loadData" :disabled="loading">[[ loading ? '加载中' : '刷新' ]]</button></div></div>
+          <period-matrix :coin="matrixCoin"></period-matrix>
+        </section>
+        <section v-else class="section"><div class="section-heading"><h2>多周期变化</h2></div><div class="empty">正在加载多周期数据...</div></section>
+
         <section class="section">
           <div class="section-heading"><h2>交易机会</h2><div class="section-heading-actions"><span v-if="opportunityAsOf" class="section-updated">数据时间：[[ formatTime(opportunityAsOf) ]]</span><button class="btn section-refresh" type="button" @click="loadOpportunity" :disabled="opportunityLoading">[[ opportunityLoading ? '加载中' : '刷新' ]]</button></div></div>
           <div v-if="opportunityLoading" class="empty">正在加载交易机会...</div>
@@ -232,12 +238,6 @@
             <div class="chart-panel"><div class="chart-title">资金费率</div><div v-show="!seriesLoading && hasFundingSeries" ref="fundingChartEl" class="chart"></div><div v-if="seriesLoading || !hasFundingSeries" class="chart-state">[[ seriesLoading ? '加载趋势数据...' : '暂无资金费率历史' ]]</div></div>
           </div>
         </section>
-
-        <section v-if="detail" class="section">
-          <div class="section-heading"><h2>多周期变化</h2><div class="section-heading-actions"><span class="section-updated">数据时间：[[ formatTime(detail.as_of) ]]</span><button class="btn section-refresh" type="button" @click="loadData" :disabled="loading">[[ loading ? '加载中' : '刷新' ]]</button></div></div>
-          <period-matrix :coin="matrixCoin"></period-matrix>
-        </section>
-        <section v-else class="section"><div class="section-heading"><h2>多周期变化</h2></div><div class="empty">正在加载多周期数据...</div></section>
 
       </template>
     </main>

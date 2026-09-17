@@ -123,6 +123,8 @@ test.describe('币种详情测试', () => {
     const opportunityRequest = page.waitForRequest(request => request.url().includes('/trade-opportunity'));
     await visit(page, '/coin-detail?symbol=BTCUSDT');
     await opportunityRequest;
+    const sectionHeadings = await page.locator('main h2').allTextContents();
+    expect(sectionHeadings.indexOf('多周期变化')).toBeLessThan(sectionHeadings.indexOf('交易机会'));
     await expect(page.getByRole('heading', { name: '交易机会', exact: true })).toBeVisible();
     await expect(page.locator('.opportunity-plan').getByText('入场', { exact: true })).toBeVisible();
     await expect(page.getByText('目标1', { exact: true })).toBeVisible();

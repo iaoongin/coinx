@@ -11,6 +11,7 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert '<h2 class="overview-heading">基础信息</h2>' in template
     assert '<h2 class="overview-heading">交易所持仓分布</h2>' in template
     assert template.index('<h2 class="overview-heading">交易所持仓分布</h2>') < template.index('<h2>交易机会</h2>')
+    assert template.index('<h2>多周期变化</h2>') < template.index('<h2>交易机会</h2>')
     assert template.count('数据时间：') == 6
     assert 'formatTime(detail.as_of)' in template
     assert 'formatTime(opportunityAsOf)' in template
