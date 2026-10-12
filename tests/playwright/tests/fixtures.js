@@ -381,6 +381,21 @@ const test = base.extend({
       const url = new URL(request.url());
       const { pathname, searchParams } = url;
 
+      if (pathname === '/api/__coinx_probe_504') {
+        await route.fulfill(jsonResponse({ status: 'error', code: 'probe_gateway_timeout', message: 'probe gateway timeout' }, 504));
+        return;
+      }
+
+      if (pathname === '/api/__coinx_probe_delay') {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        try {
+          await route.fulfill(jsonResponse({ status: 'success', data: { probe: true } }));
+        } catch (_) {
+          // The client may have aborted the request before the delayed response is ready.
+        }
+        return;
+      }
+
       if (pathname === '/api/update') {
         await route.fulfill(jsonResponse({ status: 'success', message: 'homepage series refresh triggered' }));
         return;

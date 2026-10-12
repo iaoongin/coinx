@@ -25,11 +25,58 @@ test.describe('首页测试', () => {
     expect(vueLoaded).toBe(true);
   });
 
+  test('全局 fetch 处理成功响应、504 和客户端超时', async ({ page }) => {
+    await visit(page, '/');
+
+    const result = await page.evaluate(async () => {
+      const events = [];
+      const handleError = (event) => events.push({
+        kind: event.detail?.kind,
+        status: event.detail?.status,
+        code: event.detail?.code,
+      });
+      window.addEventListener('coinx:api-error', handleError);
+
+      const successResponse = await fetch('/api/coins');
+      const successPayload = await successResponse.json();
+      const timeoutResponse = await fetch('/api/__coinx_probe_504');
+      const timeoutBody = await timeoutResponse.text();
+      const clientTimeout = await window.CoinxApi.requestJson('/api/__coinx_probe_delay', {
+        coinxTimeoutMs: 20,
+      }).then(() => null).catch((error) => ({
+        kind: error.kind,
+        status: error.status,
+        message: error.message,
+      }));
+
+      window.removeEventListener('coinx:api-error', handleError);
+      return {
+        success: { status: successResponse.status, ok: successResponse.ok, payloadStatus: successPayload.status },
+        gatewayTimeout: { status: timeoutResponse.status, ok: timeoutResponse.ok, body: timeoutBody },
+        clientTimeout,
+        events,
+        toastCount: document.querySelectorAll('[data-coinx-api-toast]').length,
+      };
+    });
+
+    expect(result.success).toEqual({ status: 200, ok: true, payloadStatus: 'success' });
+    expect(result.gatewayTimeout.status).toBe(504);
+    expect(result.gatewayTimeout.ok).toBe(false);
+    expect(JSON.parse(result.gatewayTimeout.body).code).toBe('probe_gateway_timeout');
+    expect(result.clientTimeout.kind).toBe('timeout');
+    expect(result.clientTimeout.status).toBeNull();
+    expect(result.events).toEqual([
+      { kind: 'http', status: 504, code: 'probe_gateway_timeout' },
+      { kind: 'timeout', status: null, code: null },
+    ]);
+    expect(result.toastCount).toBe(1);
+  });
+
   test('首页渲染了币种数据', async ({ page }) => {
     await visit(page, '/');
     await expect(page.locator('body')).toContainText('BTC');
-    await expect(page.locator('body')).toContainText('BTC · 持仓价值 85.43M');
-    await expect(page.locator('body')).toContainText('85.43M');
+    await expect(page.locator('.coin-symbol')).toHaveText('BTC');
+    await expect(page.locator('.coin-meta-total')).toContainText('持仓价值 $85.43M');
     await expect(page.locator('body')).toContainText('$62.00M(72%)');
     await expect(page.locator('body')).toContainText('$23.43M(28%)');
     await expect(page.locator('body')).toContainText('$8.40M(剔除)');
