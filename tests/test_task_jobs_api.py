@@ -79,6 +79,52 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     assert payload['data']['jobs'][0]['runtime']['last_summary']['duration_breakdown_ms']['api_ms'] == 12.0
 
 
+def test_list_task_jobs_uses_natural_id_order(monkeypatch):
+    job_ids = [
+        'unknown-z',
+        'repair_market_history_job',
+        'market_rank_refresh_job',
+        'unknown-a',
+        'rss_monitor_job',
+        'task_10',
+        'task_2',
+    ]
+    fake_jobs = [FakeJob(job_id=job_id) for job_id in job_ids]
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=False,
+        get_jobs=lambda: fake_jobs,
+    ))
+    monkeypatch.setattr('coinx.web.routes.api_data.get_all_job_runtime_metadata', lambda: {})
+    monkeypatch.setattr('coinx.web.routes.api_data.get_latest_job_runtime_metadata', lambda _job_ids: {})
+
+    payload = create_test_client().get('/api/task-jobs').get_json()
+
+    assert [job['id'] for job in payload['data']['jobs']] == [
+        'market_rank_refresh_job',
+        'repair_market_history_job',
+        'rss_monitor_job',
+        'task_2',
+        'task_10',
+        'unknown-a',
+        'unknown-z',
+    ]
+
+
+def test_list_task_jobs_uses_chinese_label_for_funding_rate_job(monkeypatch):
+    fake_job = FakeJob(job_id='collect_funding_rates_job')
+    fake_job.name = 'scheduled_collect_funding_rates'
+    monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
+        running=False,
+        get_jobs=lambda: [fake_job],
+    ))
+    monkeypatch.setattr('coinx.web.routes.api_data.get_all_job_runtime_metadata', lambda: {})
+    monkeypatch.setattr('coinx.web.routes.api_data.get_latest_job_runtime_metadata', lambda _job_ids: {})
+
+    payload = create_test_client().get('/api/task-jobs').get_json()
+
+    assert payload['data']['jobs'][0]['display_name'] == '资金费率采集'
+
+
 def test_list_task_job_runs_returns_latest_records(monkeypatch):
     fake_job = FakeJob()
     monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(

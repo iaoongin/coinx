@@ -216,10 +216,6 @@ def _clickhouse_series_rows(exchange, series_type, records):
     version = datetime.now()
     rows = _build_values_list(model, exchange, records)
     columns = [column.name for column in model.__table__.columns if column.name != 'id']
-    # MarketFundingRate predates the CK version column in the ORM model.  CK
-    # still needs the explicit version field for ReplacingMergeTree updates.
-    if model is MarketFundingRate and 'updated_at' not in columns:
-        columns.append('updated_at')
     for row in rows:
         row['created_at'] = row.get('created_at') or version
         row['updated_at'] = version

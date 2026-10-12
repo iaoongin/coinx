@@ -33,6 +33,7 @@ from .config import (
     REPAIR_TRACKED_INTERVAL,
     RSS_ENABLED,
     RSS_POLL_INTERVAL,
+    MARKET_DATA_RETENTION_DAYS,
     TASK_RUN_HISTORY_RETENTION_DAYS,
     DATABASE_URI,
 )
@@ -45,6 +46,7 @@ from .repositories.job_runs import (
     finish_job_run,
     recover_interrupted_job_runs,
 )
+from .repositories.retention import cleanup_expired_market_data
 from .repositories.market_tickers import get_market_scope_symbols_from_tickers
 from .repositories.market_structure_score import get_market_structure_score_symbols
 from .collector.timing import format_duration_ms
@@ -729,9 +731,37 @@ def scheduled_coins_config_update():
         logger.exception(e)
 
 
-@scheduled_job('cron', hour=0, minute=20, id='cleanup_task_run_history_job')
+@scheduled_job('cron', hour=0, minute=20, id='cleanup_market_data_job')
+def scheduled_cleanup_market_data():
+    """Remove market records outside the market retention window."""
+    started_at = time.perf_counter()
+    _mark_job_started('cleanup_market_data_job')
+    try:
+        market_deleted = cleanup_expired_market_data(MARKET_DATA_RETENTION_DAYS)
+        _mark_job_finished(
+            'cleanup_market_data_job',
+            status='success',
+            summary={
+                'status': 'success',
+                'market_deleted_count': market_deleted,
+                'market_retention_days': MARKET_DATA_RETENTION_DAYS,
+            },
+            started_at=started_at,
+        )
+        logger.info(
+            '定时行情数据清理完成: market_deleted=%s market_retention_days=%s',
+            market_deleted,
+            MARKET_DATA_RETENTION_DAYS,
+        )
+    except Exception as e:
+        _mark_job_finished('cleanup_market_data_job', status='error', error=e, started_at=started_at)
+        logger.error('定时行情数据清理失败: %s', e)
+        logger.exception(e)
+
+
+@scheduled_job('cron', hour=0, minute=25, id='cleanup_task_run_history_job')
 def scheduled_cleanup_task_run_history():
-    """Remove persisted task execution records outside the retention window."""
+    """Remove task execution records outside the task-history retention window."""
     started_at = time.perf_counter()
     _mark_job_started('cleanup_task_run_history_job')
     try:
@@ -739,13 +769,21 @@ def scheduled_cleanup_task_run_history():
         _mark_job_finished(
             'cleanup_task_run_history_job',
             status='success',
-            summary={'status': 'success', 'deleted_count': deleted},
+            summary={
+                'status': 'success',
+                'deleted_count': deleted,
+                'task_history_retention_days': TASK_RUN_HISTORY_RETENTION_DAYS,
+            },
             started_at=started_at,
         )
-        logger.info('定时任务运行记录清理完成: deleted=%s retention_days=%s', deleted, TASK_RUN_HISTORY_RETENTION_DAYS)
+        logger.info(
+            '定时任务历史清理完成: deleted=%s task_history_retention_days=%s',
+            deleted,
+            TASK_RUN_HISTORY_RETENTION_DAYS,
+        )
     except Exception as e:
         _mark_job_finished('cleanup_task_run_history_job', status='error', error=e, started_at=started_at)
-        logger.error('定时任务运行记录清理失败: %s', e)
+        logger.error('定时任务历史清理失败: %s', e)
         logger.exception(e)
 
 

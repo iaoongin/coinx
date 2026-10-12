@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
     exchange VARCHAR(20) NOT NULL DEFAULT 'binance' COMMENT '交易所',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间'
-) PRIMARY KEY (symbol, period, event_time)
+) PRIMARY KEY (exchange, symbol, period, event_time)
 DISTRIBUTED BY HASH(symbol) BUCKETS 4
 PROPERTIES ("replication_num" = "1");
 

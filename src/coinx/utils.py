@@ -136,7 +136,6 @@ def save_all_coins_data(data):
                 rows,
                 batch_id=f'snapshots_{batch_id}',
             )
-        cleanup_old_data()
         logger.info('所有币种数据已保存到 ClickHouse，批次: %s，共 %d 条记录', batch_id, saved)
         return saved
     """保存所有币种数据到数据库"""
@@ -187,10 +186,6 @@ def save_all_coins_data(data):
             db_session.commit()
             logger.info(f"所有币种数据已保存到DB，批次: {batch_id}，共 {len(snapshots)} 条记录")
             
-            # 清理旧数据 (保留最近10个批次)
-            # 这一步可以选择性执行，或者由独立的清理任务执行
-            cleanup_old_data()
-
     except Exception as e:
         db_session.rollback()
         logger.error(f"保存所有币种数据失败: {e}")

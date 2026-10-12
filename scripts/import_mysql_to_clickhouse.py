@@ -65,7 +65,7 @@ TABLES = (
     {
         "name": "market_funding_rate",
         "insert_columns": "exchange, symbol, period, event_time, funding_rate, predicted_rate, next_funding_time, mark_price, created_at, updated_at",
-        "select_columns": "exchange, symbol, period, event_time, funding_rate, predicted_rate, next_funding_time, mark_price, toDateTime64(created_at, 3, 'Asia/Shanghai'), toDateTime64(created_at, 3, 'Asia/Shanghai')",
+        "select_columns": "exchange, symbol, period, event_time, funding_rate, predicted_rate, next_funding_time, mark_price, toDateTime64(created_at, 3, 'Asia/Shanghai'), toDateTime64(updated_at, 3, 'Asia/Shanghai')",
     },
     {
         "name": "market_snapshots",

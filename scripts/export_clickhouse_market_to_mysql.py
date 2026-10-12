@@ -46,7 +46,7 @@ UNIQUE_KEYS = {
     'market_klines': ('exchange', 'symbol', 'period', 'open_time'),
     'market_open_interest_hist': ('exchange', 'symbol', 'period', 'event_time'),
     'market_taker_buy_sell_vol': ('exchange', 'symbol', 'period', 'event_time'),
-    'market_funding_rate': ('symbol', 'period', 'event_time'),
+    'market_funding_rate': ('exchange', 'symbol', 'period', 'event_time'),
 }
 IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 

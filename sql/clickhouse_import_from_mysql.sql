@@ -70,7 +70,7 @@ SELECT
     exchange, symbol, period, event_time,
     funding_rate, predicted_rate, next_funding_time, mark_price,
     toDateTime64(created_at, 3, 'Asia/Shanghai'),
-    toDateTime64(created_at, 3, 'Asia/Shanghai')
+    toDateTime64(updated_at, 3, 'Asia/Shanghai')
 FROM mysql_source.market_funding_rate;
 
 INSERT INTO coinx.market_snapshots

@@ -85,6 +85,7 @@ def save_funding_rates(records, session=None):
         else:
             for record in records:
                 existing = db.query(MarketFundingRate).filter(
+                    MarketFundingRate.exchange == record.get('exchange', 'binance'),
                     MarketFundingRate.symbol == record['symbol'],
                     MarketFundingRate.period == record['period'],
                     MarketFundingRate.event_time == record['event_time']

@@ -383,6 +383,13 @@
       margin-top: 14px;
     }
 
+    .homepage-error {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
     @media (max-width: 760px) {
       .header-row,
       .toolbar {
@@ -480,10 +487,14 @@
       </div>
     </section>
 
+    <div v-if="homepageError" class="message error homepage-error" role="alert">
+      <span>[[ homepageError ]]</span>
+      <button class="btn" type="button" @click="loadData(true)" :disabled="loading">重试</button>
+    </div>
     <div v-if="loading && coins.length === 0" class="loading">正在加载首页数据...</div>
-    <div v-else-if="filteredCoins.length === 0" class="empty">暂无可展示数据</div>
+    <div v-else-if="!homepageError && filteredCoins.length === 0" class="empty">暂无可展示数据</div>
 
-    <section v-else class="coin-stack">
+    <section v-else-if="filteredCoins.length > 0" class="coin-stack">
       <article v-for="coin in filteredCoins" :key="coin.symbol" class="coin-panel">
         <div class="coin-head">
           <a :href="`/coin-detail?symbol=${coin.symbol}`" class="coin-symbol">[[ shortSymbol(coin.symbol) ]]</a>
@@ -530,6 +541,7 @@
       setup() {
         const coins = ref([]);
         const loading = ref(false);
+        const homepageError = ref('');
         const keyword = ref('');
         const searchHistory = ref([]);
         const searchFocused = ref(false);
@@ -758,12 +770,47 @@
           return parts.join(' · ');
         };
 
+        const formatHomepageError = (error) => {
+          if (!error) return '首页数据加载失败，请稍后重试';
+          if (error.code === 'homepage_timeout' || Number(error.status) === 504) {
+            return error.message || '首页数据查询超时，请稍后重试';
+          }
+          if (error.code === 'homepage_memory_limit' || Number(error.status) === 503) {
+            return error.message || '首页数据查询触发 ClickHouse 内存限制，请稍后重试';
+          }
+          if (error.name === 'AbortError') return '首页数据请求超时，请稍后重试';
+          return error.message || '首页数据加载失败，请稍后重试';
+        };
+
+        const fetchHomepageJson = async (url, options = {}) => {
+          const response = await fetch(url, options);
+          let result;
+          try {
+            result = await response.json();
+          } catch (error) {
+            const parseError = new Error(`首页接口返回无效响应（HTTP ${response.status}）`);
+            parseError.status = response.status;
+            throw parseError;
+          }
+          if (!response.ok) {
+            const apiError = new Error(result?.message || `首页接口请求失败（HTTP ${response.status}）`);
+            apiError.status = response.status;
+            apiError.code = result?.code;
+            throw apiError;
+          }
+          return result;
+        };
+
+        const handleGlobalHomepageError = (error, source = 'global') => {
+          console.error(`首页${source}异常:`, error);
+          homepageError.value = formatHomepageError(error);
+        };
+
         const refreshHomepageSeries = async () => {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
           try {
-            const response = await fetch('/api/update?force=true&wait=true', { signal: controller.signal });
-            return await response.json();
+            return await fetchHomepageJson('/api/update?force=true&wait=true', { signal: controller.signal });
           } finally {
             clearTimeout(timer);
           }
@@ -896,22 +943,48 @@
 
         const loadData = async (force = false) => {
           loading.value = true;
+          homepageError.value = '';
           try {
-            if (force) await refreshHomepageSeries();
-            const response = await fetch(force ? '/api/coins?nocache=1' : '/api/coins');
-            const result = await response.json();
-            if (result.status === 'success') {
-              coins.value = result.data || [];
-              lastUpdateTime.value = result.cache_update_time
-                ? new Date(result.cache_update_time).toLocaleString('zh-CN')
-                : '';
-              startCountdown();
+            if (force) {
+              const updateResult = await refreshHomepageSeries();
+              if (updateResult.status !== 'success' && updateResult.code !== 'COLLECTION_SCHEDULER_ONLY') {
+                const updateError = new Error(updateResult.message || '首页序列刷新失败');
+                updateError.status = 502;
+                updateError.code = updateResult.code;
+                throw updateError;
+              }
             }
+            const result = await fetchHomepageJson(force ? '/api/coins?nocache=1' : '/api/coins');
+            if (result.status !== 'success') {
+              const apiError = new Error(result.message || '首页数据加载失败');
+              apiError.status = 502;
+              apiError.code = result.code;
+              throw apiError;
+            }
+            coins.value = result.data || [];
+            lastUpdateTime.value = result.cache_update_time
+              ? new Date(result.cache_update_time).toLocaleString('zh-CN')
+              : '';
+            startCountdown();
           } catch (error) {
-            console.error('failed to load new home data', error);
+            handleGlobalHomepageError(error, '数据加载');
           } finally {
             loading.value = false;
           }
+        };
+
+        const handleWindowError = (event) => {
+          if (event?.error || event?.message) {
+            handleGlobalHomepageError(event.error || new Error(event.message), '页面');
+          }
+        };
+
+        const handleUnhandledRejection = (event) => {
+          handleGlobalHomepageError(event?.reason || new Error('未处理的异步异常'), '异步');
+        };
+
+        const handleVueGlobalError = (event) => {
+          handleGlobalHomepageError(event?.detail || new Error('Vue 未捕获的异常'), 'Vue');
         };
 
         onMounted(() => {
@@ -920,6 +993,9 @@
           loadData();
           document.addEventListener('click', handleSearchOutsideClick);
           window.addEventListener('coinx:tracked-updated', handleTrackedUpdated);
+          window.addEventListener('error', handleWindowError);
+          window.addEventListener('unhandledrejection', handleUnhandledRejection);
+          window.addEventListener('coinx:global-error', handleVueGlobalError);
           window.addEventListener('keydown', handleFundingKeydown);
           window.addEventListener('resize', handleFundingResize);
           if (window.visualViewport) window.visualViewport.addEventListener('resize', handleFundingResize);
@@ -928,6 +1004,9 @@
           if (countdownTimer) clearInterval(countdownTimer);
           document.removeEventListener('click', handleSearchOutsideClick);
           window.removeEventListener('coinx:tracked-updated', handleTrackedUpdated);
+          window.removeEventListener('error', handleWindowError);
+          window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+          window.removeEventListener('coinx:global-error', handleVueGlobalError);
           window.removeEventListener('keydown', handleFundingKeydown);
           window.removeEventListener('resize', handleFundingResize);
           if (window.visualViewport) window.visualViewport.removeEventListener('resize', handleFundingResize);
@@ -937,6 +1016,7 @@
         return {
           coins,
           loading,
+          homepageError,
           keyword,
           searchHistory,
           searchFocused,
@@ -969,6 +1049,10 @@
         };
       },
     });
+    app.config.errorHandler = (error, instance, info) => {
+      console.error('Vue 全局异常:', error, info);
+      window.dispatchEvent(new CustomEvent('coinx:global-error', { detail: error }));
+    };
     app.component('PeriodMatrix', PeriodMatrix);
     app.mount('#app');
   </script>

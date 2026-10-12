@@ -1,6 +1,6 @@
 -- 币种配置表
 CREATE TABLE IF NOT EXISTS coins (
-    symbol VARCHAR(20) PRIMARY KEY COMMENT '交易对符号，例如 BTCUSDT',
+    symbol VARCHAR(50) PRIMARY KEY COMMENT '交易对符号，例如 BTCUSDT',
     is_tracking BOOLEAN DEFAULT TRUE COMMENT '是否启用跟踪',
     base_asset VARCHAR(100) COMMENT '基础资产',
     quote_asset VARCHAR(100) COMMENT '计价资产',
@@ -9,11 +9,11 @@ CREATE TABLE IF NOT EXISTS coins (
     quantity_precision INT COMMENT '数量精度',
     base_asset_precision INT COMMENT '基础资产精度',
     quote_precision INT COMMENT '报价精度',
-    status VARCHAR(20) COMMENT '交易状态',
+    status VARCHAR(50) COMMENT '交易状态',
     onboard_date BIGINT COMMENT '上线时间',
     delivery_date BIGINT COMMENT '交割时间',
-    contract_type VARCHAR(20) COMMENT '合约类型',
-    underlying_type VARCHAR(20) COMMENT '标的类型',
+    contract_type VARCHAR(50) COMMENT '合约类型',
+    underlying_type VARCHAR(50) COMMENT '标的类型',
     liquidation_fee DECIMAL(10, 6) COMMENT '强平费率',
     maint_margin_percent DECIMAL(10, 4) COMMENT '维持保证金率',
     required_margin_percent DECIMAL(10, 4) COMMENT '所需保证金率',
@@ -128,8 +128,10 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
     mark_price DECIMAL(20, 8) COMMENT '标记价格',
     exchange VARCHAR(20) NOT NULL DEFAULT 'binance' COMMENT '交易所',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    UNIQUE KEY uk_symbol_period_time (symbol, period, event_time),
-    INDEX idx_symbol_time (symbol, event_time)
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_funding_exchange_symbol_period_time (exchange, symbol, period, event_time),
+    INDEX idx_funding_symbol_period (symbol, period),
+    INDEX idx_funding_symbol_time (symbol, event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资金费率历史';
 
 -- 通知渠道：Apprise URL 仅保存为应用层 Fernet 密文。
@@ -276,5 +278,6 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
     duration_ms INT NULL COMMENT '执行耗时（毫秒）',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
     KEY idx_scheduled_job_runs_job_started (job_id, started_at),
+    KEY idx_scheduled_job_runs_job_started_id (job_id, started_at, id),
     KEY idx_scheduled_job_runs_started_at (started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务执行记录';

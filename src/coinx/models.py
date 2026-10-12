@@ -179,9 +179,12 @@ class MarketFundingRate(Base):
 
     __tablename__ = 'market_funding_rate'
     __table_args__ = (
-        UniqueConstraint('symbol', 'period', 'event_time', name='uk_symbol_period_time'),
-        Index('idx_symbol_period', 'symbol', 'period'),
-        Index('idx_symbol_time', 'symbol', 'event_time'),
+        UniqueConstraint(
+            'exchange', 'symbol', 'period', 'event_time',
+            name='uk_funding_exchange_symbol_period_time',
+        ),
+        Index('idx_funding_symbol_period', 'symbol', 'period'),
+        Index('idx_funding_symbol_time', 'symbol', 'event_time'),
         {'comment': '资金费率历史'}
     )
 
@@ -195,6 +198,7 @@ class MarketFundingRate(Base):
     mark_price = Column(Numeric(20, 8), comment='标记价格')
     exchange = Column(String(20), nullable=False, default='binance', comment='交易所')
     created_at = Column(DateTime, server_default=func.now(), comment='创建时间')
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
     def __repr__(self):
         return f"<MarketFundingRate(symbol='{self.symbol}', predicted_rate={self.predicted_rate})>"

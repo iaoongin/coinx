@@ -83,9 +83,19 @@ TASK_JOB_LABELS = {
     'rss_monitor_job': 'RSS 订阅监控',
     'repair_market_rolling_job': '市场滚动补齐',
     'repair_market_history_job': '低频历史补齐',
+    'collect_funding_rates_job': '资金费率采集',
     'update_coins_config_job': '币种配置刷新',
-    'cleanup_task_run_history_job': '任务运行记录清理',
+    'cleanup_market_data_job': '行情数据清理',
+    'cleanup_task_run_history_job': '任务历史清理',
 }
+
+
+def _natural_job_id_key(job_id):
+    """Sort task IDs naturally, so task_2 comes before task_10."""
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in re.split(r'(\d+)', str(job_id).casefold())
+    )
 
 
 def _default_exchange_repair_workers(exchanges=None):
@@ -126,7 +136,10 @@ def _format_scheduler_job(job, runtime=None):
 
 
 def _list_scheduler_jobs():
-    scheduler_jobs = scheduler.get_jobs()
+    scheduler_jobs = sorted(
+        scheduler.get_jobs(),
+        key=lambda job: _natural_job_id_key(job.id),
+    )
     job_ids = [job.id for job in scheduler_jobs]
     try:
         persisted_runtime = get_latest_job_runtime_metadata(job_ids)
