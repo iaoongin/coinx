@@ -55,6 +55,23 @@ def test_job_run_lifecycle_persists_summary_and_error(db_session):
     assert runs[1]['last_summary'] == {'saved_count': 123}
 
 
+def test_job_run_serialization_exposes_detail_without_polluting_summary(db_session):
+    run_id = create_job_run('job-with-detail', started_at=1_000, session=db_session)
+    finish_job_run(
+        run_id,
+        status='error',
+        summary={'_error_detail': 'full diagnostic', 'count': 1},
+        error='short diagnostic',
+        session=db_session,
+    )
+
+    run = get_job_runs('job-with-detail', session=db_session)[0]
+
+    assert run['last_error'] == 'short diagnostic'
+    assert run['last_error_detail'] == 'full diagnostic'
+    assert run['last_summary'] == {'count': 1}
+
+
 def test_recover_interrupted_runs_marks_them_as_errors(db_session):
     run_id = create_job_run('repair_market_rolling_job', started_at=1_000, session=db_session)
 

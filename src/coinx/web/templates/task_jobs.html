@@ -211,6 +211,7 @@
     }
 
     .job-table td {
+      min-width: 0;
       padding: 10px 8px;
       vertical-align: top;
       font-size: 12px;
@@ -247,6 +248,81 @@
       font-size: 11px;
       color: var(--text-secondary);
       line-height: 1.4;
+    }
+
+    .error-cell,
+    .error-stack {
+      min-width: 0;
+    }
+
+    .error-stack {
+      width: 100%;
+      gap: 5px;
+    }
+
+    .error-summary {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      overflow: hidden;
+      color: #ffb4b4;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .error-detail-button {
+      height: 24px;
+      padding: 0 7px;
+      color: #ffb4b4;
+      border-color: rgba(255, 120, 120, 0.26);
+      background: rgba(255, 120, 120, 0.06);
+      font-size: 11px;
+    }
+
+    .error-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.68);
+    }
+
+    .error-modal {
+      width: min(900px, 100%);
+      max-height: min(720px, calc(100vh - 40px));
+      overflow: auto;
+      padding: 16px;
+      border: 1px solid rgba(255, 120, 120, 0.3);
+      border-radius: 8px;
+      background: var(--bg-primary);
+      box-shadow: var(--shadow-card);
+    }
+
+    .error-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .error-content {
+      max-height: 560px;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid rgba(255, 120, 120, 0.18);
+      border-radius: 6px;
+      background: rgba(255, 120, 120, 0.04);
+      color: #ffd1d1;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .job-actions {
@@ -303,6 +379,7 @@
 
     .history-table th,
     .history-table td {
+      min-width: 0;
       padding: 7px 8px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       text-align: left;
@@ -314,6 +391,25 @@
       color: var(--text-muted);
       font-family: var(--font-mono);
       font-weight: 500;
+    }
+
+    .history-summary-cell {
+      overflow: hidden;
+    }
+
+    .history-summary-text {
+      display: block;
+      width: 100%;
+      overflow: hidden;
+      color: var(--text-secondary);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-detail-button {
+      color: var(--text-secondary);
+      border-color: var(--border-default);
+      background: var(--bg-elevated);
     }
 
     .history-pagination {
@@ -527,8 +623,6 @@
         </div>
       </div>
 
-      <div :class="['message-box', flash.type]" style="margin-top:10px;">[[ flash.message ]]</div>
-
       <div class="table-shell" v-if="filteredJobs.length">
         <div class="table-wrap">
           <table class="job-table">
@@ -583,10 +677,12 @@
                     <span class="cell-mono" v-if="cooldownSkipMs(job) > 0">冷却剩余：[[ formatDuration(cooldownSkipMs(job)) ]]</span>
                   </div>
                 </td>
-                <td>
-                  <div class="cell-stack">
-                    <span class="cell-mono" :title="jobError(job)">[[ jobError(job) || '--' ]]</span>
+                <td class="error-cell">
+                  <div v-if="jobError(job)" class="cell-stack error-stack">
+                    <span class="cell-mono error-summary" :title="jobError(job)">[[ compactText(jobError(job)) ]]</span>
+                    <button v-if="isLongText(jobError(job))" class="btn error-detail-button" @click="openJobError(job)">详情</button>
                   </div>
+                  <span v-else class="cell-mono">--</span>
                 </td>
                 <td>
                   <div class="job-actions">
@@ -619,14 +715,29 @@
           <div v-if="historyLoading[historyModalJob.id]" class="cell-mono">加载中...</div>
           <div v-else-if="!activeJobHistory.length" class="cell-mono">暂无持久化执行记录</div>
           <table v-else class="history-table">
+            <colgroup>
+              <col style="width:11%;"><col style="width:19%;"><col style="width:19%;"><col style="width:31%;"><col style="width:20%;">
+            </colgroup>
             <thead><tr><th>状态</th><th>开始</th><th>结束 / 耗时</th><th>摘要</th><th>错误</th></tr></thead>
             <tbody>
               <tr v-for="run in activeJobHistory" :key="run.id">
                 <td><span :class="['badge', runStatusClass(run)]">[[ statusText(run.status) ]]</span></td>
                 <td class="cell-mono">[[ formatTime(run.last_started_at_ms) ]]</td>
                 <td class="cell-mono">[[ formatTime(run.last_finished_at_ms) ]]<br>[[ formatDuration(run.last_duration_ms) ]]</td>
-                <td class="cell-mono">[[ formatRunSummary(run) ]]</td>
-                <td class="cell-mono" :title="run.last_error">[[ run.last_error || '--' ]]</td>
+                <td class="history-summary-cell">
+                  <div v-if="formatRunSummary(run) !== '--'" class="cell-stack error-stack">
+                    <span class="cell-mono history-summary-text" :title="formatRunSummary(run)">[[ compactText(formatRunSummary(run), 180) ]]</span>
+                    <button v-if="isLongText(formatRunSummary(run), 180)" class="btn summary-detail-button" @click="openErrorDetail('历史摘要', formatRunSummary(run), true)">详情</button>
+                  </div>
+                  <span v-else class="cell-mono">--</span>
+                </td>
+                <td class="error-cell">
+                  <div v-if="run.last_error" class="cell-stack error-stack">
+                    <span class="cell-mono error-summary" :title="run.last_error">[[ compactText(run.last_error) ]]</span>
+                    <button v-if="run.last_error_detail || isLongText(run.last_error)" class="btn error-detail-button" @click="openErrorDetail('历史错误', run.last_error_detail || run.last_error, !!run.last_error_detail)">详情</button>
+                  </div>
+                  <span v-else class="cell-mono">--</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -635,6 +746,18 @@
             <span class="cell-mono">第 [[ activeHistoryPage ]] / [[ activeHistoryPageCount ]] 页，共 [[ activeJobHistoryMeta.total ]] 条</span>
             <button class="btn" @click="changeJobHistoryPage(1)" :disabled="activeJobHistoryMeta.offset + activeJobHistoryMeta.limit >= activeJobHistoryMeta.total">下一页</button>
           </div>
+        </section>
+      </div>
+      <div v-if="errorDetail" class="error-modal-backdrop" @click.self="closeErrorDetail">
+        <section class="error-modal" role="dialog" aria-modal="true" :aria-label="errorDetail.title">
+          <div class="error-modal-header">
+            <div>
+              <h2 style="margin:0;font-size:17px;">[[ errorDetail.title ]]</h2>
+              <p class="history-heading">[[ errorDetail.title === '历史摘要' ? '完整摘要信息' : (errorDetail.complete ? '完整错误信息' : '错误摘要（历史记录未保留完整详情）') ]]</p>
+            </div>
+            <button class="btn" @click="closeErrorDetail">关闭</button>
+          </div>
+          <pre class="error-content">[[ errorDetail.message ]]</pre>
         </section>
       </div>
     </div>
@@ -655,12 +778,12 @@
         const schedulerRunning = ref(false);
         const refreshing = ref(false);
         const autoRefresh = ref(true);
-        const flash = ref({ type: '', message: '' });
         const actionLoading = ref({});
         const historyModalJob = ref(null);
         const jobHistory = ref({});
         const jobHistoryMeta = ref({});
         const historyLoading = ref({});
+        const errorDetail = ref(null);
         let timer = null;
 
         const filteredJobs = computed(() => {
@@ -687,8 +810,12 @@
         const activeHistoryPage = computed(() => Math.floor(activeJobHistoryMeta.value.offset / activeJobHistoryMeta.value.limit) + 1);
         const activeHistoryPageCount = computed(() => Math.max(1, Math.ceil(activeJobHistoryMeta.value.total / activeJobHistoryMeta.value.limit)));
 
-        const showFlash = (message, type = '') => {
-          flash.value = { message, type };
+        const showToast = (message, type = 'info') => {
+          if (window.CoinxToast?.show) {
+            window.CoinxToast.show(message, type);
+          } else {
+            console.warn(message);
+          }
         };
 
         const isActionLoading = (jobId, action) => !!actionLoading.value[`${jobId}:${action}`];
@@ -766,6 +893,41 @@
           return failures.map((item) => `${item.subscription_name || `订阅 ${item.subscription_id}`}: ${item.error}`).join('; ');
         };
 
+        const compactText = (value, maxLength = 96) => {
+          const text = String(value || '');
+          return text.length <= maxLength ? text : `${text.slice(0, maxLength - 3)}...`;
+        };
+
+        const isLongText = (value, maxLength = 96) => String(value || '').length > maxLength;
+
+        const openErrorDetail = (title, message, complete = true) => {
+          errorDetail.value = {
+            title,
+            message: String(message || '--'),
+            complete,
+          };
+        };
+
+        const closeErrorDetail = () => {
+          errorDetail.value = null;
+        };
+
+        const openJobError = async (job) => {
+          openErrorDetail('任务错误', jobError(job), false);
+          try {
+            const response = await fetch(`/api/task-jobs/${encodeURIComponent(job.id)}/runs?limit=1&offset=0`, {
+              coinxSuppressGlobalError: true,
+            });
+            const result = await response.json();
+            const latestRun = result.data?.runs?.[0];
+            if (result.status === 'success' && latestRun?.last_error_detail) {
+              openErrorDetail('任务错误', latestRun.last_error_detail, true);
+            }
+          } catch (error) {
+            // The bounded summary is already visible; detail loading is best effort.
+          }
+        };
+
         const statusClass = (job) => statusKey(job);
 
         const statusLabel = (job) => {
@@ -795,7 +957,9 @@
           refreshing.value = true;
           loading.value = !silent;
           try {
-            const response = await fetch('/api/task-jobs');
+            const response = await fetch('/api/task-jobs', {
+              coinxSuppressGlobalError: true,
+            });
             const result = await response.json();
             if (result.status !== 'success') throw new Error(result.message || '加载任务失败');
             jobs.value = result.data?.jobs || [];
@@ -804,7 +968,7 @@
             schedulerRunning.value = !!result.data?.scheduler_running;
           } catch (error) {
             console.error(error);
-            showFlash(`加载任务失败: ${error.message}`, 'error');
+            showToast(`加载任务失败: ${error.message}`, 'error');
           } finally {
             loading.value = false;
             refreshing.value = false;
@@ -819,16 +983,17 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action }),
+              coinxSuppressGlobalError: true,
             });
             const result = await response.json();
             const actionLabels = { run: '执行', pause: '暂停', resume: '恢复' };
             const actionLabel = actionLabels[action] || action;
             if (result.status !== 'success') throw new Error(result.message || `任务${actionLabel}失败`);
             jobs.value = result.data?.jobs || jobs.value;
-            showFlash(result.message || `任务${actionLabel}成功`, 'success');
+            showToast(result.message || `任务${actionLabel}成功`, 'success');
           } catch (error) {
             console.error(error);
-            showFlash(`任务操作失败: ${error.message}`, 'error');
+            showToast(`任务操作失败: ${error.message}`, 'error');
           } finally {
             actionLoading.value = { ...actionLoading.value, [actionKey]: false };
           }
@@ -837,7 +1002,9 @@
         const loadJobHistory = async (jobId, offset = 0) => {
           historyLoading.value = { ...historyLoading.value, [jobId]: true };
           try {
-            const response = await fetch(`/api/task-jobs/${jobId}/runs?limit=5&offset=${offset}`);
+            const response = await fetch(`/api/task-jobs/${jobId}/runs?limit=5&offset=${offset}`, {
+              coinxSuppressGlobalError: true,
+            });
             const result = await response.json();
             if (result.status !== 'success') throw new Error(result.message || '加载任务执行记录失败');
             jobHistory.value = { ...jobHistory.value, [jobId]: result.data?.runs || [] };
@@ -851,7 +1018,7 @@
             };
           } catch (error) {
             console.error(error);
-            showFlash(`加载任务历史失败: ${error.message}`, 'error');
+            showToast(`加载任务历史失败: ${error.message}`, 'error');
           } finally {
             historyLoading.value = { ...historyLoading.value, [jobId]: false };
           }
@@ -907,12 +1074,12 @@
           schedulerRunning,
           refreshing,
           autoRefresh,
-          flash,
           actionLoading,
           historyModalJob,
           jobHistory,
           jobHistoryMeta,
           historyLoading,
+          errorDetail,
           filteredJobs,
           runningCount,
           pausedCount,
@@ -933,6 +1100,11 @@
           runStatusClass,
           formatRunSummary,
           jobError,
+          compactText,
+          isLongText,
+          openErrorDetail,
+          closeErrorDetail,
+          openJobError,
           loadJobs,
           runAction,
           changeJobHistoryPage,

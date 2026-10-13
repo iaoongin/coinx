@@ -184,6 +184,9 @@ def test_market_write_health_validates_engine_sorting_key_and_time_type(monkeypa
                         'market_funding_rate': ('exchange', 'symbol', 'period', 'event_time'),
                         'market_snapshots': ('symbol', 'snapshot_time', 'batch_id'),
                         'market_tickers': ('symbol', 'close_time'),
+                        'market_futures_smart_money_signal': (
+                            'exchange', 'time_range', 'symbol', 'period', 'snapshot_time',
+                        ),
                     }.items()
                 ]
             table = sql.rsplit(' ', 1)[-1].split('.', 1)[-1]
@@ -211,4 +214,4 @@ def test_market_write_health_validates_engine_sorting_key_and_time_type(monkeypa
     monkeypatch.setattr('coinx.write_backend.get_clickhouse_write_repository', lambda: bad)
     result = market_write_health()
     assert result['healthy'] is False
-    assert 'market_tickers' in result['schema_errors']
+    assert 'market_futures_smart_money_signal' in result['schema_errors']

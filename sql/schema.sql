@@ -38,6 +38,34 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     INDEX idx_symbol (symbol)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='市场数据快照表';
 
+-- 币安合约聪明钱 30m 全量列表快照
+CREATE TABLE IF NOT EXISTS market_futures_smart_money_signal (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    exchange VARCHAR(20) NOT NULL DEFAULT 'binance',
+    time_range VARCHAR(10) NOT NULL DEFAULT '30m',
+    symbol VARCHAR(40) NOT NULL,
+    period VARCHAR(10) NOT NULL DEFAULT '15m',
+    snapshot_time BIGINT NOT NULL,
+    side VARCHAR(10) DEFAULT NULL,
+    net_notional DECIMAL(38, 12) DEFAULT NULL,
+    long_notional DECIMAL(38, 12) DEFAULT NULL,
+    short_notional DECIMAL(38, 12) DEFAULT NULL,
+    long_traders INT DEFAULT NULL,
+    long_whales INT DEFAULT NULL,
+    short_traders INT DEFAULT NULL,
+    short_whales INT DEFAULT NULL,
+    long_qty DECIMAL(38, 12) DEFAULT NULL,
+    short_qty DECIMAL(38, 12) DEFAULT NULL,
+    long_avg_entry_price DECIMAL(38, 12) DEFAULT NULL,
+    short_avg_entry_price DECIMAL(38, 12) DEFAULT NULL,
+    raw_json JSON DEFAULT NULL,
+    collected_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uk_fsm_signal_scope (exchange, time_range, symbol, period, snapshot_time),
+    KEY idx_fsm_signal_symbol_time (symbol, time_range, period, snapshot_time),
+    KEY idx_fsm_signal_snapshot_time (snapshot_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='币安合约聪明钱 signal/list 全量列表快照';
+
 -- 行情快照原始数据表
 CREATE TABLE IF NOT EXISTS market_tickers (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

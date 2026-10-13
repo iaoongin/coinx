@@ -34,10 +34,19 @@ from .config import (
     RSS_ENABLED,
     RSS_POLL_INTERVAL,
     MARKET_DATA_RETENTION_DAYS,
+    SMART_MONEY_ENABLED,
+    SMART_MONEY_INTERVAL,
+    SMART_MONEY_RETENTION_DAYS,
+    SMART_MONEY_TIME_RANGES,
     TASK_RUN_HISTORY_RETENTION_DAYS,
     DATABASE_URI,
 )
 from .repositories.funding_rate import collect_funding_rates
+from .repositories.smart_money import (
+    align_snapshot_time,
+    collect_and_save_smart_money_signals,
+    get_smart_money_scope_symbols,
+)
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
 from .repositories.job_runs import (
     create_job_run,
@@ -46,7 +55,10 @@ from .repositories.job_runs import (
     finish_job_run,
     recover_interrupted_job_runs,
 )
-from .repositories.retention import cleanup_expired_market_data
+from .repositories.retention import (
+    cleanup_expired_market_data,
+    cleanup_expired_smart_money_data,
+)
 from .repositories.market_tickers import get_market_scope_symbols_from_tickers
 from .repositories.market_structure_score import get_market_structure_score_symbols
 from .collector.timing import format_duration_ms
@@ -57,6 +69,8 @@ scheduler_jobstore = SQLAlchemyJobStore(url=DATABASE_URI)
 scheduler = BackgroundScheduler(jobstores={'default': scheduler_jobstore})
 JOB_METADATA_LOCK = threading.Lock()
 JOB_METADATA = {}
+JOB_ERROR_MAX_LENGTH = 500
+JOB_ERROR_DETAIL_MAX_LENGTH = 20000
 
 
 def scheduled_job(*args, **kwargs):
@@ -106,6 +120,27 @@ def _update_job_metadata(job_id, **fields):
         return dict(metadata)
 
 
+def format_job_error(error, max_length=JOB_ERROR_MAX_LENGTH):
+    """Return a bounded, useful error message without embedding SQL payloads."""
+    if not error:
+        return None
+    original = getattr(error, 'orig', None)
+    message = f'{type(error).__name__}: {original}' if original else str(error)
+    if len(message) <= max_length:
+        return message
+    return f'{message[:max_length - 3]}...'
+
+
+def format_job_error_detail(error, max_length=JOB_ERROR_DETAIL_MAX_LENGTH):
+    """Keep an on-demand diagnostic detail without letting it grow unbounded."""
+    if not error:
+        return None
+    message = str(error)
+    if len(message) <= max_length:
+        return message
+    return f'{message[:max_length - 3]}...'
+
+
 def _mark_job_started(job_id):
     started_at_ms = int(time.time() * 1000)
     metadata = _update_job_metadata(
@@ -132,6 +167,12 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
     duration_ms = None
     if started_at is not None:
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    error_message = format_job_error(error)
+    error_detail = format_job_error_detail(error)
+    persisted_summary = dict(summary) if isinstance(summary, dict) else summary
+    if error_detail:
+        persisted_summary = dict(persisted_summary or {})
+        persisted_summary['_error_detail'] = error_detail
     metadata = _update_job_metadata(
         job_id,
         running=False,
@@ -139,7 +180,7 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         last_duration_ms=duration_ms,
         last_status=status,
         last_summary=summary,
-        last_error=str(error) if error else None,
+        last_error=error_message,
     )
     run_id = metadata.get('run_id')
     if run_id is not None:
@@ -147,8 +188,8 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
             finish_job_run(
                 run_id,
                 status=status,
-                summary=summary,
-                error=error,
+                summary=persisted_summary,
+                error=error_message,
                 completed_at=finished_at_ms,
                 duration_ms=duration_ms,
             )
@@ -604,6 +645,7 @@ if REPAIR_HISTORY_ENABLED:
             tracked_symbols = list(dict.fromkeys(get_active_coins()))
             top_symbols = []
             worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
+            smart_money_symbols = get_smart_money_scope_symbols()
             if FETCH_COINS_ENABLED:
                 all_tickers = get_all_24hr_tickers()
                 if all_tickers:
@@ -614,10 +656,21 @@ if REPAIR_HISTORY_ENABLED:
                         top_losers_limit=FETCH_COINS_TOP_LOSERS_COUNT,
                         top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
                     )
+                    market_symbols = list(dict.fromkeys(market_symbols + smart_money_symbols))
                     tracked_symbol_set = set(tracked_symbols)
                     top_symbols = [symbol for symbol in market_symbols if symbol not in tracked_symbol_set]
                 else:
-                    logger.warning('低频历史补齐获取行情排行失败，仅修补跟踪币种')
+                    market_symbols = list(dict.fromkeys(tracked_symbols + smart_money_symbols))
+                    tracked_symbol_set = set(tracked_symbols)
+                    top_symbols = [symbol for symbol in market_symbols if symbol not in tracked_symbol_set]
+                    logger.warning(
+                        '低频历史补齐获取行情排行失败，将修补跟踪币种和聪明钱范围: symbols=%d',
+                        len(market_symbols),
+                    )
+            else:
+                market_symbols = list(dict.fromkeys(tracked_symbols + smart_money_symbols))
+                tracked_symbol_set = set(tracked_symbols)
+                top_symbols = [symbol for symbol in market_symbols if symbol not in tracked_symbol_set]
             logger.info(
                 '历史修补阶段 1/2: 开始修补跟踪币种全类型: symbols=%d series_types=%s coverage_hours=%s max_workers=%s',
                 len(tracked_symbols),
@@ -710,6 +763,59 @@ if FUNDING_RATE_COLLECT_ENABLED:
             logger.error('资金费率采集失败: %s', e)
 
 
+if SMART_MONEY_ENABLED:
+    @scheduled_job(
+        'interval',
+        seconds=SMART_MONEY_INTERVAL,
+        id='collect_smart_money_signals_job',
+        max_instances=1,
+        coalesce=True,
+    )
+    def scheduled_collect_smart_money_signals():
+        """Persist the complete Binance Futures Smart Money lists."""
+        started_at = time.perf_counter()
+        _mark_job_started('collect_smart_money_signals_job')
+        try:
+            snapshot_time = align_snapshot_time()
+            summaries = [
+                collect_and_save_smart_money_signals(
+                    time_range=time_range,
+                    snapshot_time=snapshot_time,
+                )
+                for time_range in SMART_MONEY_TIME_RANGES
+            ]
+            summary = {
+                'status': 'success',
+                'time_ranges': [item.get('time_range') for item in summaries],
+                'list_rows': sum(item.get('list_rows', 0) for item in summaries),
+                'list_written': sum(item.get('list_written', 0) for item in summaries),
+                'snapshot_time': snapshot_time,
+                'summaries': summaries,
+            }
+            _mark_job_finished(
+                'collect_smart_money_signals_job',
+                status=summary.get('status', 'success'),
+                summary=summary,
+                started_at=started_at,
+            )
+            logger.info(
+                '聪明钱全量列表采集完成: ranges=%s rows=%s written=%s snapshot_time=%s',
+                summary.get('time_ranges'),
+                summary.get('list_rows'),
+                summary.get('list_written'),
+                summary.get('snapshot_time'),
+            )
+        except Exception as e:
+            _mark_job_finished(
+                'collect_smart_money_signals_job',
+                status='error',
+                error=e,
+                started_at=started_at,
+            )
+            error_message = format_job_error(e)
+            logger.error('聪明钱全量列表采集失败: %s', error_message)
+
+
 @scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')
 def scheduled_coins_config_update():
     """Refresh tracked coin configuration once per day."""
@@ -738,13 +844,16 @@ def scheduled_cleanup_market_data():
     _mark_job_started('cleanup_market_data_job')
     try:
         market_deleted = cleanup_expired_market_data(MARKET_DATA_RETENTION_DAYS)
+        smart_money_deleted = cleanup_expired_smart_money_data(SMART_MONEY_RETENTION_DAYS)
         _mark_job_finished(
             'cleanup_market_data_job',
             status='success',
             summary={
                 'status': 'success',
                 'market_deleted_count': market_deleted,
+                'smart_money_deleted_count': smart_money_deleted,
                 'market_retention_days': MARKET_DATA_RETENTION_DAYS,
+                'smart_money_retention_days': SMART_MONEY_RETENTION_DAYS,
             },
             started_at=started_at,
         )

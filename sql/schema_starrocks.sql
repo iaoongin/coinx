@@ -27,6 +27,31 @@ CREATE TABLE IF NOT EXISTS coins (
 DISTRIBUTED BY HASH(symbol) BUCKETS 1
 PROPERTIES ("replication_num" = "1");
 
+CREATE TABLE IF NOT EXISTS market_futures_smart_money_signal (
+    exchange VARCHAR(20) NOT NULL DEFAULT 'binance',
+    time_range VARCHAR(10) NOT NULL DEFAULT '30m',
+    symbol VARCHAR(40) NOT NULL,
+    period VARCHAR(10) NOT NULL DEFAULT '15m',
+    snapshot_time BIGINT NOT NULL,
+    side VARCHAR(10),
+    net_notional DECIMAL(38, 12),
+    long_notional DECIMAL(38, 12),
+    short_notional DECIMAL(38, 12),
+    long_traders INT,
+    long_whales INT,
+    short_traders INT,
+    short_whales INT,
+    long_qty DECIMAL(38, 12),
+    short_qty DECIMAL(38, 12),
+    long_avg_entry_price DECIMAL(38, 12),
+    short_avg_entry_price DECIMAL(38, 12),
+    raw_json JSON,
+    collected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) DUPLICATE KEY (exchange, time_range, symbol, period, snapshot_time)
+DISTRIBUTED BY HASH(symbol) BUCKETS 4
+PROPERTIES ("replication_num" = "1");
+
 -- 市场数据快照表（DUPLICATE KEY 模型，支持按 symbol 分布）
 CREATE TABLE IF NOT EXISTS market_snapshots (
     snapshot_time BIGINT NOT NULL COMMENT '快照时间戳，毫秒',

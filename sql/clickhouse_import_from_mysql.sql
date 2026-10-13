@@ -102,6 +102,24 @@ SELECT
     toDateTime64(created_at, 3, 'Asia/Shanghai')
 FROM mysql_source.market_tickers;
 
+INSERT INTO coinx.market_futures_smart_money_signal
+(
+    exchange, time_range, symbol, period, snapshot_time, side,
+    net_notional, long_notional, short_notional,
+    long_traders, long_whales, short_traders, short_whales,
+    long_qty, short_qty, long_avg_entry_price, short_avg_entry_price,
+    raw_json, collected_at, updated_at
+)
+SELECT
+    exchange, time_range, symbol, period, snapshot_time, side,
+    net_notional, long_notional, short_notional,
+    long_traders, long_whales, short_traders, short_whales,
+    long_qty, short_qty, long_avg_entry_price, short_avg_entry_price,
+    ifNull(toString(raw_json), '{}'),
+    toDateTime64(collected_at, 3, 'Asia/Shanghai'),
+    toDateTime64(updated_at, 3, 'Asia/Shanghai')
+FROM mysql_source.market_futures_smart_money_signal;
+
 -- 导入完成后校验行数。ReplacingMergeTree 表可使用 FINAL 校验去重后的逻辑行数。
 SELECT 'market_klines' AS table_name,
        (SELECT count() FROM mysql_source.market_klines) AS mysql_count,
@@ -126,3 +144,7 @@ SELECT 'market_snapshots' AS table_name,
 SELECT 'market_tickers' AS table_name,
        (SELECT count() FROM mysql_source.market_tickers) AS mysql_count,
        (SELECT count() FROM coinx.market_tickers) AS clickhouse_count;
+
+SELECT 'market_futures_smart_money_signal' AS table_name,
+       (SELECT count() FROM mysql_source.market_futures_smart_money_signal) AS mysql_count,
+       (SELECT count() FROM coinx.market_futures_smart_money_signal) AS clickhouse_count;

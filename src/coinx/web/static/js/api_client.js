@@ -79,6 +79,49 @@
     return error?.message || '请求失败，请稍后重试';
   };
 
+  const showToast = (message, type = 'error', duration = 5000) => {
+    const render = () => {
+      let toast = document.querySelector('[data-coinx-api-toast]');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.dataset.coinxApiToast = 'true';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.style.cssText = [
+          'position:fixed',
+          'z-index:3000',
+          'right:20px',
+          'bottom:20px',
+          'max-width:min(420px, calc(100vw - 40px))',
+          'padding:11px 14px',
+          'border:1px solid',
+          'border-radius:6px',
+          'background:var(--bg-elevated, #151c28)',
+          'box-shadow:0 12px 30px rgba(0,0,0,.28)',
+          'font:500 13px/1.45 "Noto Sans SC", sans-serif',
+        ].join(';');
+        document.body.appendChild(toast);
+      }
+      const palette = type === 'success'
+        ? ['rgba(89,192,130,.65)', 'var(--positive, #7ee2a8)']
+        : type === 'info'
+          ? ['rgba(103,232,249,.6)', '#a5f3fc']
+          : ['rgba(239,101,101,.65)', 'var(--negative, #ff8d8d)'];
+      toast.style.borderColor = palette[0];
+      toast.style.color = palette[1];
+      toast.dataset.type = type;
+      toast.textContent = String(message || '');
+      toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.hidden = true;
+      }, duration);
+    };
+
+    if (document.body) render();
+    else document.addEventListener('DOMContentLoaded', render, { once: true });
+  };
+
   const emitError = (error, suppressToast = false) => {
     const detail = error instanceof CoinxApiError
       ? error
@@ -92,39 +135,7 @@
     lastToastKey = key;
     lastToastAt = now;
 
-    const showToast = () => {
-      let toast = document.querySelector('[data-coinx-api-toast]');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.dataset.coinxApiToast = 'true';
-        toast.setAttribute('role', 'alert');
-        toast.setAttribute('aria-live', 'assertive');
-        toast.style.cssText = [
-          'position:fixed',
-          'z-index:3000',
-          'right:20px',
-          'bottom:20px',
-          'max-width:min(420px, calc(100vw - 40px))',
-          'padding:11px 14px',
-          'border:1px solid rgba(239,101,101,.65)',
-          'border-radius:6px',
-          'background:var(--bg-elevated, #151c28)',
-          'color:var(--negative, #ff8d8d)',
-          'box-shadow:0 12px 30px rgba(0,0,0,.28)',
-          'font:500 13px/1.45 "Noto Sans SC", sans-serif',
-        ].join(';');
-        document.body.appendChild(toast);
-      }
-      toast.textContent = displayMessage(detail);
-      toast.hidden = false;
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => {
-        toast.hidden = true;
-      }, 5000);
-    };
-
-    if (document.body) showToast();
-    else document.addEventListener('DOMContentLoaded', showToast, { once: true });
+    showToast(displayMessage(detail), 'error');
   };
 
   const parseResponsePayload = async (response) => {
@@ -295,5 +306,11 @@
     refreshToken: refreshAccessToken,
     message: displayMessage,
     Error: CoinxApiError,
+  });
+  window.CoinxToast = Object.freeze({
+    show: showToast,
+    success: (message, duration) => showToast(message, 'success', duration),
+    error: (message, duration) => showToast(message, 'error', duration),
+    info: (message, duration) => showToast(message, 'info', duration),
   });
 })();

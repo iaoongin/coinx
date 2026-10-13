@@ -3,6 +3,7 @@ import time
 
 from coinx.coin_manager import get_active_coins
 from coinx.config import HOMEPAGE_SERIES_REPAIR_ENABLED, SCHEDULER_ENABLED
+from coinx.database import init_db
 from coinx.scheduler import initialize_job_run_history, scheduler, start_scheduler
 from coinx.utils import logger
 
@@ -33,8 +34,20 @@ def start_startup_repair():
     return repair_thread
 
 
+def initialize_database_schema():
+    """Create missing SQLAlchemy tables without altering existing tables."""
+    try:
+        init_db()
+        logger.info('数据库表结构初始化检查完成')
+    except Exception as exc:
+        # Preserve the existing startup behavior when the database is
+        # temporarily unavailable; the affected task will report its error.
+        logger.warning('数据库表结构初始化失败，将在后续任务或人工迁移时重试: %s', exc)
+
+
 def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
     from coinx.write_backend import is_clickhouse_write, market_write_health
+    initialize_database_schema()
     if is_clickhouse_write():
         write_health = market_write_health()
         logger.info('ClickHouse market write preflight: %s', write_health)

@@ -94,6 +94,34 @@ PARTITION BY toYYYYMM(toDateTime(intDiv(snapshot_time, 1000), 'Asia/Shanghai'))
 ORDER BY (symbol, snapshot_time, batch_id)
 COMMENT '市场数据快照';
 
+CREATE TABLE IF NOT EXISTS coinx.market_futures_smart_money_signal
+(
+    exchange LowCardinality(String) COMMENT '交易所标识',
+    time_range LowCardinality(String) COMMENT '统计窗口，首期为 30m',
+    symbol LowCardinality(String) COMMENT '页面返回的合约标识',
+    period LowCardinality(String) COMMENT 'CoinX 采集周期',
+    snapshot_time UInt64 COMMENT '本地快照时间戳，毫秒',
+    side Nullable(String) COMMENT '主导方向',
+    net_notional Nullable(Decimal(38, 12)) COMMENT '净名义价值',
+    long_notional Nullable(Decimal(38, 12)) COMMENT '多头名义价值',
+    short_notional Nullable(Decimal(38, 12)) COMMENT '空头名义价值',
+    long_traders Nullable(UInt32) COMMENT '多头交易员数',
+    long_whales Nullable(UInt32) COMMENT '多头鲸鱼数',
+    short_traders Nullable(UInt32) COMMENT '空头交易员数',
+    short_whales Nullable(UInt32) COMMENT '空头鲸鱼数',
+    long_qty Nullable(Decimal(38, 12)) COMMENT '多头数量',
+    short_qty Nullable(Decimal(38, 12)) COMMENT '空头数量',
+    long_avg_entry_price Nullable(Decimal(38, 12)) COMMENT '多头平均开仓价',
+    short_avg_entry_price Nullable(Decimal(38, 12)) COMMENT '空头平均开仓价',
+    raw_json String DEFAULT '{}' COMMENT '完整原始列表行 JSON',
+    collected_at DateTime64(3, 'Asia/Shanghai') DEFAULT now64(3),
+    updated_at DateTime64(3, 'Asia/Shanghai') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(toDateTime(intDiv(snapshot_time, 1000), 'Asia/Shanghai'))
+ORDER BY (exchange, time_range, symbol, period, snapshot_time)
+COMMENT '币安合约聪明钱 signal/list 全量列表快照';
+
 CREATE TABLE IF NOT EXISTS coinx.market_tickers
 (
     close_time UInt64 COMMENT '24 小时统计窗口结束时间戳，毫秒',

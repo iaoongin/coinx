@@ -251,6 +251,18 @@ else:
     DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset={DB_CHARSET}"
 
 BINANCE_BASE_URL = get_env('BINANCE_BASE_URL', 'https://fapi.binance.com')
+# Binance website BAPI base URL; separate from the Futures REST API host above.
+BINANCE_WEB_BASE_URL = get_env('BINANCE_WEB_BASE_URL')
+if not BINANCE_WEB_BASE_URL:
+    # Preserve custom reverse-proxy prefixes such as
+    # https://proxy.example/fapi.binance.com when switching to the website BAPI.
+    BINANCE_WEB_BASE_URL = BINANCE_BASE_URL.replace(
+        '/fapi.binance.com',
+        '/www.binance.com',
+        1,
+    )
+    if BINANCE_WEB_BASE_URL == BINANCE_BASE_URL:
+        BINANCE_WEB_BASE_URL = 'https://www.binance.com'
 
 ENABLED_EXCHANGES = get_env('ENABLED_EXCHANGES', 'binance,okx,bybit,gate', list)
 PRIMARY_PRICE_EXCHANGE = get_env('PRIMARY_PRICE_EXCHANGE', 'binance')
@@ -289,6 +301,27 @@ REPAIR_HISTORY_COVERAGE_HOURS = max(
 # 定时任务运行记录保留配置
 TASK_RUN_HISTORY_RETENTION_DAYS = get_env('TASK_RUN_HISTORY_RETENTION_DAYS', 90, int)
 MARKET_DATA_RETENTION_DAYS = get_env('MARKET_DATA_RETENTION_DAYS', 30, int)
+
+# Binance Futures Smart Money list snapshot collection. Each scheduled run
+# persists the complete signal/list response for every configured window.
+SMART_MONEY_ENABLED = get_env('SMART_MONEY_ENABLED', True, bool)
+SMART_MONEY_INTERVAL = get_env('SMART_MONEY_INTERVAL', 900, int)
+SMART_MONEY_PERIOD = get_env('SMART_MONEY_PERIOD', '15m')
+SMART_MONEY_TIME_RANGES = get_env('SMART_MONEY_TIME_RANGES', '30m,ALL', list)
+if not SMART_MONEY_TIME_RANGES:
+    SMART_MONEY_TIME_RANGES = ['30m', 'ALL']
+SMART_MONEY_TIME_RANGES = list(dict.fromkeys(
+    str(time_range).strip() for time_range in SMART_MONEY_TIME_RANGES if str(time_range).strip()
+))
+if 'ALL' not in SMART_MONEY_TIME_RANGES:
+    SMART_MONEY_TIME_RANGES.append('ALL')
+# Include the latest ALL-window large-net-notional Smart Money symbols in
+# market-series collection.
+SMART_MONEY_SCOPE_MIN_NET_NOTIONAL = get_env(
+    'SMART_MONEY_SCOPE_MIN_NET_NOTIONAL', 10_000_000, float,
+)
+SMART_MONEY_REQUEST_TIMEOUT_SECONDS = get_env('SMART_MONEY_REQUEST_TIMEOUT_SECONDS', 20, int)
+SMART_MONEY_RETENTION_DAYS = get_env('SMART_MONEY_RETENTION_DAYS', 90, int)
 
 # 资金费率配置
 FUNDING_RATE_COLLECT_ENABLED = get_env('FUNDING_RATE_COLLECT_ENABLED', True, bool)

@@ -15,6 +15,7 @@ def test_homepage_shows_taker_source_tags_for_single_source():
     assert 'window.CoinxApi.requestJson' in template
     assert "window.addEventListener('coinx:api-error'" not in template
     assert 'coinx:api-error' in api_client
+    assert 'window.CoinxToast' in api_client
     assert 'v-if="allTakerExchanges(coin).length"' in component
     assert 'v-for="item in allTakerExchanges(coin)"' in component
 

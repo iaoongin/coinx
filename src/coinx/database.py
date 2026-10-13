@@ -9,6 +9,7 @@ MARKET_TABLE_NAMES = frozenset({
     'market_funding_rate',
     'market_tickers',
     'market_snapshots',
+    'market_futures_smart_money_signal',
 })
 
 

@@ -46,6 +46,7 @@ class FakeJob:
 
 def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     fake_job = FakeJob(next_run_time=datetime.now() + timedelta(minutes=5))
+    long_error = 'x' * 1000
     monkeypatch.setattr('coinx.web.routes.api_data.scheduler', SimpleNamespace(
         running=True,
         get_jobs=lambda: [fake_job],
@@ -58,7 +59,11 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
             'job-a': {
                 'running': False,
                 'last_status': 'success',
-                'last_summary': {'duration_breakdown_ms': {'api_ms': 12.0}},
+                'last_error': long_error,
+                'last_summary': {
+                    'duration_breakdown_ms': {'api_ms': 12.0},
+                    'summaries': [{'status': 'error', 'error': long_error}],
+                },
             }
         },
     )
@@ -77,6 +82,8 @@ def test_list_task_jobs_returns_scheduler_snapshot(monkeypatch):
     assert payload['data']['jobs'][0]['registered'] is True
     assert payload['data']['jobs'][0]['paused'] is False
     assert payload['data']['jobs'][0]['runtime']['last_summary']['duration_breakdown_ms']['api_ms'] == 12.0
+    assert len(payload['data']['jobs'][0]['runtime']['last_error']) == 500
+    assert len(payload['data']['jobs'][0]['runtime']['last_summary']['summaries'][0]['error']) == 500
 
 
 def test_list_task_jobs_uses_natural_id_order(monkeypatch):

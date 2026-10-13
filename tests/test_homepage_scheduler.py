@@ -101,6 +101,7 @@ def test_scheduled_repair_market_history_repairs_tracked_symbols_before_top_symb
         }
 
     monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT', 'QUSDT'])
+    monkeypatch.setattr('coinx.scheduler.get_smart_money_scope_symbols', lambda: ['BTCUSDT', 'SMARTUSDT'])
     monkeypatch.setattr('coinx.scheduler.FETCH_COINS_ENABLED', True)
     monkeypatch.setattr(
         'coinx.scheduler.get_all_24hr_tickers',
@@ -127,7 +128,7 @@ def test_scheduled_repair_market_history_repairs_tracked_symbols_before_top_symb
             'max_workers': 2,
         },
         {
-            'symbols': ['SOLUSDT', 'BNBUSDT', 'XRPUSDT'],
+            'symbols': ['SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'SMARTUSDT'],
             'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
             'max_workers': 2,
         },

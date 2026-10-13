@@ -59,6 +59,13 @@ MARKET_TABLE_COLUMNS: Dict[str, tuple[str, ...]] = {
         "high_price", "low_price", "volume", "quote_volume", "open_time",
         "first_id", "last_id", "count", "created_at", "updated_at",
     ),
+    "market_futures_smart_money_signal": (
+        "exchange", "time_range", "symbol", "period", "snapshot_time",
+        "side", "net_notional", "long_notional", "short_notional",
+        "long_traders", "long_whales", "short_traders", "short_whales",
+        "long_qty", "short_qty", "long_avg_entry_price",
+        "short_avg_entry_price", "raw_json", "collected_at", "updated_at",
+    ),
 }
 
 # These are the parts of the ClickHouse DDL that affect correctness.  The
@@ -89,6 +96,10 @@ MARKET_TABLE_SCHEMA: Dict[str, Dict[str, tuple[str, ...] | str]] = {
         "engine": "ReplacingMergeTree",
         "sorting_key": ("symbol", "close_time"),
         "time_type": "DateTime64(3",
+    },
+    "market_futures_smart_money_signal": {
+        "engine": "ReplacingMergeTree",
+        "sorting_key": ("exchange", "time_range", "symbol", "period", "snapshot_time"),
     },
 }
 

@@ -49,10 +49,14 @@ def test_market_structure_symbols_include_tracked_and_ranked_symbols(monkeypatch
         'coinx.repositories.market_structure_score.get_market_scope_symbols',
         lambda **kwargs: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'],
     )
+    monkeypatch.setattr(
+        'coinx.repositories.market_structure_score.get_smart_money_scope_symbols',
+        lambda **kwargs: ['SOLUSDT', 'SMARTUSDT'],
+    )
 
     symbols = get_market_structure_score_symbols(session=object(), top_volume_limit=100)
 
-    assert symbols == ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']
+    assert symbols == ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'SMARTUSDT']
 
 
 def test_market_structure_symbols_use_clickhouse_available_symbols(monkeypatch):
@@ -67,6 +71,10 @@ def test_market_structure_symbols_use_clickhouse_available_symbols(monkeypatch):
     monkeypatch.setattr('coinx.repositories.market_structure_score.is_clickhouse_read', lambda: True)
     monkeypatch.setattr('coinx.repositories.market_structure_score.get_clickhouse_repository', lambda: Repository())
     monkeypatch.setattr('coinx.repositories.market_structure_score.latest_closed_5m_open_time', lambda _: 1700000000000)
+    monkeypatch.setattr(
+        'coinx.repositories.market_structure_score.get_smart_money_scope_symbols',
+        lambda **kwargs: [],
+    )
 
     symbols = get_market_structure_score_symbols()
 

@@ -14,6 +14,10 @@ from coinx.collector.binance.market import (
     get_open_interest_history,
 )
 from coinx.collector.binance.indicators import get_exchange_distribution_real
+from coinx.collector.binance.smart_money import (
+    fetch_smart_money_signal_list,
+    parse_smart_money_signal_list,
+)
 from coinx.collector.binance.service import (
     get_all_coins_list,
     update_all_data,

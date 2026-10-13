@@ -33,8 +33,11 @@
     </div>
 
     <div class="nav-menu">
-      <button class="nav-menu-trigger{% if request.path.startswith('/trade-opportunities') or request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') %} active{% endif %}" type="button" aria-controls="nav-menu-analysis" aria-expanded="false" aria-haspopup="true">分析</button>
+      <button class="nav-menu-trigger{% if request.path.startswith('/trade-opportunities') or request.path.startswith('/market-structure-score') or request.path.startswith('/coin-detail') or request.path.startswith('/hedge-calculator') or request.path.startswith('/smart-money') %} active{% endif %}" type="button" aria-controls="nav-menu-analysis" aria-expanded="false" aria-haspopup="true">分析</button>
       <div id="nav-menu-analysis" class="nav-menu-list" aria-label="分析">
+      <a class="nav-menu-item{% if request.path.startswith('/smart-money') %} active{% endif %}" href="/smart-money"{% if request.path.startswith('/smart-money') %} aria-current="page"{% endif %}>
+        聪明钱
+      </a>
       <a class="nav-menu-item{% if request.path.startswith('/trade-opportunities') %} active{% endif %}" href="/trade-opportunities"{% if request.path.startswith('/trade-opportunities') %} aria-current="page"{% endif %}>
         交易机会
       </a>

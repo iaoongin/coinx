@@ -1,6 +1,43 @@
 import coinx.scheduler as scheduler_module
 
 
+def test_format_job_error_prefers_original_error_and_bounds_message():
+    error = RuntimeError('SELECT ' + ('payload ' * 300))
+    error.orig = ValueError('duplicate entry')
+
+    formatted = scheduler_module.format_job_error(error)
+
+    assert formatted == 'RuntimeError: duplicate entry'
+    assert len(formatted) <= scheduler_module.JOB_ERROR_MAX_LENGTH
+
+
+def test_format_job_error_truncates_plain_error():
+    formatted = scheduler_module.format_job_error('x' * 1000)
+
+    assert len(formatted) == scheduler_module.JOB_ERROR_MAX_LENGTH
+    assert formatted.endswith('...')
+
+
+def test_job_finished_keeps_bounded_summary_and_on_demand_detail(monkeypatch):
+    completed = []
+    monkeypatch.setattr(scheduler_module, 'JOB_METADATA', {})
+    monkeypatch.setattr(scheduler_module, 'create_job_run', lambda *_args, **_kwargs: 8)
+    monkeypatch.setattr(
+        scheduler_module,
+        'finish_job_run',
+        lambda run_id, **kwargs: completed.append((run_id, kwargs)) or True,
+    )
+
+    error = RuntimeError('database detail ' + ('x' * 1000))
+    scheduler_module._mark_job_started('job-a')
+    scheduler_module._mark_job_finished('job-a', status='error', error=error, started_at=0)
+
+    kwargs = completed[0][1]
+    assert len(kwargs['error']) == scheduler_module.JOB_ERROR_MAX_LENGTH
+    assert len(kwargs['summary']['_error_detail']) <= scheduler_module.JOB_ERROR_DETAIL_MAX_LENGTH
+    assert kwargs['summary']['_error_detail'].startswith('database detail')
+
+
 def test_merge_repair_summaries_keeps_counts_without_task_details():
     summary = scheduler_module._merge_repair_summaries([
         {

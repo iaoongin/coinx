@@ -5,6 +5,7 @@ import time
 from coinx.database import get_session
 from coinx.models import (
     MarketFundingRate,
+    MarketFuturesSmartMoneySignal,
     MarketKline,
     MarketOpenInterestHist,
     MarketSnapshot,
@@ -20,6 +21,7 @@ MYSQL_RETENTION_TARGETS = (
     (MarketKline, MarketKline.close_time),
     (MarketTakerBuySellVol, MarketTakerBuySellVol.event_time),
     (MarketFundingRate, MarketFundingRate.event_time),
+    (MarketFuturesSmartMoneySignal, MarketFuturesSmartMoneySignal.snapshot_time),
 )
 
 CLICKHOUSE_RETENTION_TARGETS = (
@@ -29,6 +31,7 @@ CLICKHOUSE_RETENTION_TARGETS = (
     ('market_klines', 'close_time'),
     ('market_taker_buy_sell_vol', 'event_time'),
     ('market_funding_rate', 'event_time'),
+    ('market_futures_smart_money_signal', 'snapshot_time'),
 )
 
 DELETE_BATCH_SIZE = 10_000
@@ -106,3 +109,39 @@ def cleanup_expired_market_data(retention_days, session=None):
     if is_clickhouse_write():
         return _cleanup_clickhouse(retention_days)
     return _cleanup_mysql_market_data(retention_days, session=session)
+
+
+def cleanup_expired_smart_money_data(retention_days, session=None):
+    """Remove expired Smart Money list snapshots without touching other market data."""
+    from coinx.write_backend import is_clickhouse_write
+
+    cutoff_ms = retention_cutoff_ms(retention_days)
+    if is_clickhouse_write():
+        from coinx.read_backend import get_clickhouse_repository
+        from coinx.write_backend import get_clickhouse_write_repository, market_write_lock
+
+        table = get_clickhouse_repository()._table(
+            'market_futures_smart_money_signal', final=False,
+        )
+        with market_write_lock('market_futures_smart_money_signal', 'retention_cleanup'):
+            get_clickhouse_write_repository().client.execute(
+                f'ALTER TABLE {table} DELETE WHERE snapshot_time < {cutoff_ms}'
+            )
+        return {'market_futures_smart_money_signal': 'mutation_submitted'}
+
+    own_session = session is None
+    db = session or get_session()
+    try:
+        deleted = _delete_mysql_model_rows(
+            db,
+            MarketFuturesSmartMoneySignal,
+            MarketFuturesSmartMoneySignal.snapshot_time,
+            cutoff_ms,
+        )
+        return {'market_futures_smart_money_signal': deleted}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if own_session:
+            db.close()

@@ -13,7 +13,7 @@ from coinx.utils import logger
 
 
 _global_session = None
-RETRYABLE_HTTP_STATUS_CODES = {403, 408, 409, 425, 429, 500, 502, 503, 504}
+RETRYABLE_HTTP_STATUS_CODES = {403, 418, 408, 409, 425, 429, 500, 502, 503, 504}
 BINANCE_REPAIR_COOLDOWN_SECONDS = 2.0
 _binance_rate_limits = RateLimitRegistry()
 
@@ -150,7 +150,7 @@ def request_with_binance_retry(session, url, params=None, timeout=10, max_retrie
             if response is not None and response.status_code not in RETRYABLE_HTTP_STATUS_CODES:
                 raise exc
 
-            if response is not None and response.status_code in (403, 429):
+            if response is not None and response.status_code in (403, 418, 429):
                 retry_after_seconds = parse_retry_after_seconds(response.headers.get('Retry-After'))
                 cooldown_seconds = retry_after_seconds if retry_after_seconds is not None else BINANCE_REPAIR_COOLDOWN_SECONDS
                 _binance_rate_limits.mark_cooldown('binance', rate_limit_group, cooldown_seconds)

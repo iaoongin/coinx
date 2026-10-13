@@ -71,6 +71,13 @@ def trade_opportunities():
     return render_template('trade_opportunities.html')
 
 
+@pages_bp.route('/smart-money')
+def smart_money():
+    """Binance Futures Smart Money 30m snapshot page."""
+    logger.info('访问合约聪明钱页面')
+    return render_template('smart_money.html')
+
+
 @pages_bp.route('/funding-rate')
 def funding_rate():
     """资金费率页面"""

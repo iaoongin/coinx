@@ -20,6 +20,7 @@ from coinx.config import (
 from coinx.database import get_session
 from coinx.repositories.market_tickers import get_market_scope_symbols, get_market_ticker_symbols
 from coinx.repositories.funding_rate import load_latest_funding_rates
+from coinx.repositories.smart_money import get_smart_money_scope_symbols
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.repositories.market_structure_series import load_market_structure_exchange_maps
 from coinx.utils import logger
@@ -98,6 +99,7 @@ def get_market_structure_score_symbols(
         for value in (top_volume_limit, top_gainers_limit, top_losers_limit)
     )
     if dynamic_scope and session is None and is_clickhouse_read():
+        smart_money_symbols = get_smart_money_scope_symbols()
         anchor = latest_closed_5m_open_time(int(time.time() * 1000))
         available = get_clickhouse_repository().available_market_structure_symbols(
             exchanges=_normalize_exchange_list(ENABLED_EXCHANGES),
@@ -105,7 +107,7 @@ def get_market_structure_score_symbols(
         )
         seen = set()
         result = []
-        for symbol in list(tracked_symbols or []) + available:
+        for symbol in list(tracked_symbols or []) + smart_money_symbols + available:
             if symbol and symbol not in seen:
                 seen.add(symbol)
                 result.append(symbol)
@@ -115,6 +117,7 @@ def get_market_structure_score_symbols(
     top_gainers_limit = FETCH_COINS_TOP_GAINERS_COUNT if top_gainers_limit is None else top_gainers_limit
     top_losers_limit = FETCH_COINS_TOP_LOSERS_COUNT if top_losers_limit is None else top_losers_limit
     if session is None and is_clickhouse_read():
+        smart_money_symbols = get_smart_money_scope_symbols()
         ranked = []
         ranked.extend(get_market_ticker_symbols(
             rank_type='price_change', direction='up', limit=top_gainers_limit,
@@ -127,7 +130,7 @@ def get_market_structure_score_symbols(
         ))
         seen = set()
         result = []
-        for symbol in list(tracked_symbols or []) + ranked:
+        for symbol in list(tracked_symbols or []) + smart_money_symbols + ranked:
             if symbol and symbol not in seen:
                 seen.add(symbol)
                 result.append(symbol)
@@ -137,13 +140,21 @@ def get_market_structure_score_symbols(
     db = session or get_session()
 
     try:
-        return get_market_scope_symbols(
+        ranked_symbols = get_market_scope_symbols(
             tracked_symbols=tracked_symbols,
             top_gainers_limit=top_gainers_limit,
             top_losers_limit=top_losers_limit,
             top_volume_limit=top_volume_limit,
             session=db,
         )
+        smart_money_symbols = get_smart_money_scope_symbols(session=db)
+        seen = set()
+        result = []
+        for symbol in ranked_symbols + smart_money_symbols:
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                result.append(symbol)
+        return result
     finally:
         if own_session:
             db.close()

@@ -204,6 +204,45 @@ class MarketFundingRate(Base):
         return f"<MarketFundingRate(symbol='{self.symbol}', predicted_rate={self.predicted_rate})>"
 
 
+class MarketFuturesSmartMoneySignal(Base):
+    """Full Binance Futures Smart Money ``signal/list`` snapshot rows."""
+
+    __tablename__ = 'market_futures_smart_money_signal'
+    __table_args__ = (
+        UniqueConstraint(
+            'exchange', 'time_range', 'symbol', 'period', 'snapshot_time',
+            name='uk_fsm_signal_scope',
+        ),
+        Index(
+            'idx_fsm_signal_symbol_time',
+            'symbol', 'time_range', 'period', 'snapshot_time',
+        ),
+        Index('idx_fsm_signal_snapshot_time', 'snapshot_time'),
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    exchange = Column(String(20), nullable=False, default='binance')
+    time_range = Column(String(10), nullable=False, default='30m')
+    symbol = Column(String(40), nullable=False)
+    period = Column(String(10), nullable=False, default='15m')
+    snapshot_time = Column(BigInteger, nullable=False)
+    side = Column(String(10))
+    net_notional = Column(DECIMAL(38, 12))
+    long_notional = Column(DECIMAL(38, 12))
+    short_notional = Column(DECIMAL(38, 12))
+    long_traders = Column(Integer)
+    long_whales = Column(Integer)
+    short_traders = Column(Integer)
+    short_whales = Column(Integer)
+    long_qty = Column(DECIMAL(38, 12))
+    short_qty = Column(DECIMAL(38, 12))
+    long_avg_entry_price = Column(DECIMAL(38, 12))
+    short_avg_entry_price = Column(DECIMAL(38, 12))
+    raw_json = Column(JSON)
+    collected_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class NotificationChannel(Base):
     __tablename__ = 'notification_channels'
 

@@ -115,6 +115,23 @@ SELECT close_time, symbol, price_change,
        created_at
 FROM mysql_catalog.coinx.market_tickers;
 
+-- 3.8 币安合约聪明钱 30m 全量列表快照
+INSERT INTO default_catalog.coinx.market_futures_smart_money_signal
+(
+    exchange, time_range, symbol, period, snapshot_time, side,
+    net_notional, long_notional, short_notional,
+    long_traders, long_whales, short_traders, short_whales,
+    long_qty, short_qty, long_avg_entry_price, short_avg_entry_price,
+    raw_json, collected_at, updated_at
+)
+SELECT
+    exchange, time_range, symbol, period, snapshot_time, side,
+    net_notional, long_notional, short_notional,
+    long_traders, long_whales, short_traders, short_whales,
+    long_qty, short_qty, long_avg_entry_price, short_avg_entry_price,
+    raw_json, collected_at, updated_at
+FROM mysql_catalog.coinx.market_futures_smart_money_signal;
+
 -- ============================================================================
 -- 验证：源 vs 目标 行数对比
 -- ============================================================================
@@ -159,4 +176,10 @@ SELECT 'market_tickers',
        (SELECT COUNT(*) FROM default_catalog.coinx.market_tickers),
        (SELECT COUNT(*) FROM mysql_catalog.coinx.market_tickers) -
        (SELECT COUNT(*) FROM default_catalog.coinx.market_tickers)
+UNION ALL
+SELECT 'market_futures_smart_money_signal',
+       (SELECT COUNT(*) FROM mysql_catalog.coinx.market_futures_smart_money_signal),
+       (SELECT COUNT(*) FROM default_catalog.coinx.market_futures_smart_money_signal),
+       (SELECT COUNT(*) FROM mysql_catalog.coinx.market_futures_smart_money_signal) -
+       (SELECT COUNT(*) FROM default_catalog.coinx.market_futures_smart_money_signal)
 ORDER BY tbl;

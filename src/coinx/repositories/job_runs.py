@@ -70,13 +70,18 @@ def finish_job_run(run_id, status, summary=None, error=None, completed_at=None, 
 
 
 def _serialize_run(run):
+    summary = run.summary_json
+    error_detail = summary.get('_error_detail') if isinstance(summary, dict) else None
+    if isinstance(summary, dict) and '_error_detail' in summary:
+        summary = {key: value for key, value in summary.items() if key != '_error_detail'}
     return {
         'id': run.id,
         'job_id': run.job_id,
         'status': run.status,
         'last_status': run.status,
-        'last_summary': run.summary_json,
+        'last_summary': summary,
         'last_error': run.error_message,
+        'last_error_detail': error_detail,
         'last_started_at_ms': run.started_at,
         'last_finished_at_ms': run.completed_at,
         'last_duration_ms': run.duration_ms,

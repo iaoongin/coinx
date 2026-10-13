@@ -52,6 +52,7 @@ from coinx.repositories.market_structure_score import (
 )
 from coinx.repositories.trade_opportunities import get_trade_opportunity_snapshot
 from coinx.scheduler import (
+    format_job_error,
     get_all_job_runtime_metadata,
     scheduler,
 )
@@ -84,6 +85,7 @@ TASK_JOB_LABELS = {
     'repair_market_rolling_job': '市场滚动补齐',
     'repair_market_history_job': '低频历史补齐',
     'collect_funding_rates_job': '资金费率采集',
+    'collect_smart_money_signals_job': '合约聪明钱采集',
     'update_coins_config_job': '币种配置刷新',
     'cleanup_market_data_job': '行情数据清理',
     'cleanup_task_run_history_job': '任务历史清理',
@@ -114,6 +116,24 @@ def _collection_scheduler_only_response(operation):
 
 def _format_scheduler_job(job, runtime=None):
     runtime = runtime or {}
+    runtime = dict(runtime)
+    # Full diagnostics are returned only by the on-demand run-history API.
+    # Keeping them out of the 10-second task-list refresh prevents payload and
+    # browser-memory growth when a database error contains a large SQL query.
+    runtime.pop('last_error_detail', None)
+    runtime['last_error'] = format_job_error(runtime.get('last_error'))
+    summary = runtime.get('last_summary')
+    if isinstance(summary, dict) and isinstance(summary.get('summaries'), list):
+        summary = dict(summary)
+        summary['summaries'] = [
+            {
+                **item,
+                'error': format_job_error(item.get('error')),
+            }
+            if isinstance(item, dict) else item
+            for item in summary['summaries']
+        ]
+        runtime['last_summary'] = summary
     scheduler_running = bool(scheduler.running)
     next_run_time = getattr(job, 'next_run_time', None)
     paused = scheduler_running and next_run_time is None

@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#101114">
+  <title>合约聪明钱 - CoinX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  {% include 'components/pwa_head.html' %}
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    html { color-scheme: dark; }
+    body {
+      margin: 0;
+      background: var(--bg-primary, #101114);
+      color: var(--text-primary, #f4f4f5);
+      font-family: "Noto Sans SC", sans-serif;
+    }
+    .page-frame { max-width: 1500px; margin: 0 auto; }
+    .page-frame .nav-container { width: 100%; }
+    .shell {
+      padding: 22px 24px 28px;
+      border: 1px solid var(--border-default, #2d3038);
+      border-radius: 10px;
+      background: var(--bg-card, #17191f);
+      box-shadow: var(--shadow-card, 0 12px 32px rgba(0, 0, 0, .22));
+    }
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .page-header h1 { margin: 0; font-size: 23px; line-height: 1.25; }
+    .page-header h1 span { color: var(--gold-primary, #d4af37); }
+    .page-header p { margin: 7px 0 0; color: var(--text-secondary, #a1a1aa); font-size: 12px; }
+    .header-meta { color: var(--text-muted, #71717a); font-family: var(--font-mono, monospace); font-size: 11px; text-align: right; white-space: nowrap; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--border-subtle, #292c33);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .02);
+    }
+    .stat-label { color: var(--text-muted, #71717a); font-size: 11px; }
+    .stat-value { margin-top: 5px; color: var(--text-primary, #f4f4f5); font-family: var(--font-mono, monospace); font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stat-value.positive { color: #4ade80; }
+    .stat-value.negative { color: #f87171; }
+    .controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-bottom: 12px;
+      padding: 10px;
+      border: 1px solid var(--border-subtle, #292c33);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .018);
+    }
+    .control-group { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    .control-label { color: var(--text-muted, #71717a); font-size: 11px; white-space: nowrap; }
+    .search-input, .select-input {
+      height: 30px;
+      box-sizing: border-box;
+      border: 1px solid var(--border-default, #2d3038);
+      border-radius: 6px;
+      outline: none;
+      background: var(--bg-secondary, #16181d);
+      color: var(--text-primary, #f4f4f5);
+      font-size: 12px;
+    }
+    .search-input { width: 165px; padding: 0 9px; }
+    .net-notional-input { width: 115px; }
+    .price-spread-input { width: 92px; }
+    .select-input { min-width: 110px; padding: 0 7px; }
+    .search-input:focus, .select-input:focus { border-color: var(--gold-primary, #d4af37); box-shadow: 0 0 0 3px rgba(212, 175, 55, .1); }
+    .segmented { display: inline-flex; gap: 3px; padding: 3px; border-radius: 7px; background: rgba(255, 255, 255, .04); }
+    .segment, .btn {
+      height: 30px;
+      box-sizing: border-box;
+      border: 1px solid var(--border-default, #2d3038);
+      border-radius: 6px;
+      background: var(--bg-elevated, #1d2027);
+      color: var(--text-secondary, #a1a1aa);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .segment { padding: 0 9px; border-color: transparent; background: transparent; }
+    .segment:hover, .btn:hover { color: var(--text-primary, #f4f4f5); border-color: var(--border-strong, #575b66); }
+    .segment.active { border-color: rgba(212, 175, 55, .45); background: rgba(212, 175, 55, .12); color: var(--gold-bright, #f7d96a); }
+    .btn { padding: 0 11px; }
+    .btn-primary { border-color: var(--gold-primary, #d4af37); background: var(--gold-primary, #d4af37); color: #080808; }
+    .btn-primary:hover { background: var(--gold-hover, #e6c34f); color: #080808; }
+    .table-meta { display: flex; justify-content: space-between; gap: 10px; margin: 10px 0 8px; color: var(--text-muted, #71717a); font-size: 11px; }
+    .table-shell { overflow-x: auto; border: 1px solid var(--border-default, #2d3038); border-radius: 8px; background: var(--bg-secondary, #16181d); }
+    .signal-table { width: 100%; min-width: 1360px; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+    .signal-table th, .signal-table td { padding: 9px 8px; border-bottom: 1px solid var(--border-subtle, #292c33); text-align: right; white-space: nowrap; }
+    .signal-table th { background: var(--bg-elevated, #1d2027); color: var(--text-muted, #a1a1aa); font-size: 11px; font-weight: 600; }
+    .signal-table td { color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: 12px; }
+    .signal-table th:first-child, .signal-table td:first-child { text-align: left; }
+    .signal-table tbody tr:hover { background: var(--bg-hover, #20232a); }
+    .symbol { color: var(--text-primary, #f4f4f5); font-weight: 700; }
+    .direction { display: inline-flex; min-width: 38px; justify-content: center; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+    .direction.buy { border: 1px solid rgba(74, 222, 128, .35); background: rgba(34, 197, 94, .12); color: #86efac; }
+    .direction.sell { border: 1px solid rgba(248, 113, 113, .35); background: rgba(239, 68, 68, .12); color: #fca5a5; }
+    .metric-positive { color: #4ade80 !important; }
+    .metric-negative { color: #f87171 !important; }
+    .sub-metric { color: var(--text-muted, #71717a); font-size: 10px; }
+    .price-delta { margin-left: 2px; }
+    .notional-pnl { margin-left: 2px; }
+    .trend-cell { padding-left: 4px !important; padding-right: 4px !important; }
+    .trend-chart { display: block; width: 100%; min-width: 110px; height: 30px; }
+    .trend-line { fill: none; stroke: var(--gold-primary, #d4af37); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .detail-button { height: 25px; padding: 0 8px; }
+    .empty, .error-box { padding: 42px 16px; color: var(--text-muted, #71717a); text-align: center; font-size: 12px; }
+    .error-box { color: #fca5a5; }
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: 11px; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 18px; background: rgba(0, 0, 0, .7); }
+    .modal { width: min(620px, 100%); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid var(--border-default, #2d3038); border-radius: 9px; background: var(--bg-card, #17191f); box-shadow: var(--shadow-card, 0 12px 32px rgba(0, 0, 0, .3)); }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle, #292c33); }
+    .modal-header h2 { margin: 0; font-size: 16px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 14px 16px 16px; border: 1px solid var(--border-subtle, #292c33); background: var(--border-subtle, #292c33); }
+    .detail-item { min-width: 0; padding: 9px 10px; background: var(--bg-secondary, #16181d); }
+    .detail-label { display: block; color: var(--text-muted, #71717a); font-size: 10px; }
+    .detail-value { display: block; margin-top: 4px; overflow-wrap: anywhere; color: var(--text-primary, #f4f4f5); font-family: var(--font-mono, monospace); font-size: 12px; }
+    @media (max-width: 760px) {
+      .shell { padding: 16px 12px 22px; }
+      .page-header { flex-direction: column; }
+      .header-meta { text-align: left; white-space: normal; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .controls { align-items: flex-start; flex-direction: column; }
+      .control-group { width: 100%; flex-wrap: wrap; }
+      .search-input { width: min(100%, 260px); }
+      .detail-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="page-frame">
+    {% include 'components/nav.html' %}
+    <main class="shell">
+      <header class="page-header">
+        <div>
+          <h1>合约聪明钱 <span>[[ timeRange ]]</span></h1>
+          <p>币安合约网页 BAPI 的全量聪明钱快照，按 15 分钟采集并持久化。</p>
+        </div>
+        <div class="header-meta">
+          <div>数据源：Binance Futures</div>
+          <div v-if="snapshotTime">快照：[[ formatTime(snapshotTime) ]]</div>
+        </div>
+      </header>
+
+      <section class="stats-grid" aria-label="聪明钱统计">
+        <div class="stat"><div class="stat-label">当前结果数</div><div class="stat-value">[[ totalCount ]]</div></div>
+        <div class="stat"><div class="stat-label">净名义价值合计</div><div :title="formatExact(stats.net_notional)" class="stat-value">[[ formatMetric(stats.net_notional) ]]</div></div>
+        <div class="stat"><div class="stat-label">多头名义价值</div><div :title="formatExact(stats.long_notional)" class="stat-value positive">[[ formatMetric(stats.long_notional) ]]</div></div>
+        <div class="stat"><div class="stat-label">空头名义价值</div><div :title="formatExact(stats.short_notional)" class="stat-value negative">[[ formatMetric(stats.short_notional) ]]</div></div>
+      </section>
+
+      <section class="controls" aria-label="聪明钱筛选">
+        <div class="control-group">
+          <span class="control-label">币种</span>
+          <input v-model="keyword" @keyup.enter="searchImmediately" class="search-input" type="search" placeholder="搜索 BTCUSDT" aria-label="搜索币种">
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-time-range">周期</label>
+          <select id="smart-money-time-range" v-model="timeRange" @change="changeTimeRange" class="select-input">
+            <option value="ALL">ALL</option>
+            <option value="30m">30m</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <span class="control-label">方向</span>
+          <div class="segmented">
+            <button v-for="item in sideOptions" :key="item.value" :class="['segment', { active: side === item.value }]" @click="side = item.value; load(1)">[[ item.label ]]</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-net-notional">净名义</label>
+          <select id="smart-money-net-notional" v-model="netNotionalPreset" @change="changeNetNotionalFilter" class="select-input">
+            <option value="1000000">&gt; 1M</option>
+            <option value="10000000">&gt; 10M</option>
+            <option value="50000000">&gt; 50M</option>
+            <option value="100000000">&gt; 100M</option>
+            <option value="custom">自定义</option>
+          </select>
+          <input v-if="netNotionalPreset === 'custom'" v-model="customMinNetNotional" @change="applyNetNotionalFilter" @keyup.enter="applyNetNotionalFilter" class="search-input net-notional-input" type="number" min="0" step="100000" placeholder="最小值" aria-label="自定义净名义最小值">
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-price-spread">均价距当前价</label>
+          <select id="smart-money-price-spread" v-model="priceSpreadPreset" @change="changePriceSpreadFilter" class="select-input">
+            <option value="">不限</option>
+            <option value="5">&lt; 5%</option>
+            <option value="10">&lt; 10%</option>
+            <option value="20">&lt; 20%</option>
+            <option value="50">&lt; 50%</option>
+            <option value="custom">自定义</option>
+          </select>
+          <input v-if="priceSpreadPreset === 'custom'" v-model="customMaxPriceSpread" @change="applyPriceSpreadFilter" @keyup.enter="applyPriceSpreadFilter" class="search-input price-spread-input" type="number" min="0" step="0.1" placeholder="最大百分比" aria-label="自定义均价距当前价最大百分比">
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-sort">排序</label>
+          <select id="smart-money-sort" v-model="sortBy" @change="load(1)" class="select-input">
+            <option value="long_short_ratio">多空名义比</option>
+            <option value="net_notional">净名义价值</option>
+            <option value="long_notional">多头名义价值</option>
+            <option value="short_notional">空头名义价值</option>
+            <option value="long_whales">多头鲸鱼数</option>
+            <option value="short_whales">空头鲸鱼数</option>
+            <option value="symbol">币种</option>
+          </select>
+          <select v-model="sortOrder" @change="load(1)" class="select-input" aria-label="排序方向">
+            <option value="desc">从高到低</option>
+            <option value="asc">从低到高</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-snapshot">快照</label>
+          <select id="smart-money-snapshot" v-model="snapshotSelection" @change="load(1)" class="select-input">
+            <option value="">最新快照</option>
+            <option v-for="item in snapshots" :key="item" :value="String(item)">[[ formatTime(item) ]]</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" @click="load(page)" :disabled="loading">[[ loading ? '加载中...' : '刷新' ]]</button>
+      </section>
+
+      <div class="table-meta">
+        <span>[[ snapshotTime ? `快照时间 ${formatTime(snapshotTime)}` : '暂无已采集快照' ]]</span>
+        <span v-if="totalCount">第 [[ page ]] / [[ pageCount ]] 页，每页 [[ pageSize ]] 条</span>
+      </div>
+
+      <div v-if="errorMessage" class="error-box">
+        <div>[[ errorMessage ]]</div>
+        <button class="btn" style="margin-top:10px;" @click="load(page)">重试</button>
+      </div>
+      <div v-else-if="loading" class="empty">正在加载聪明钱快照...</div>
+      <div v-else-if="!rows.length" class="empty">暂无聪明钱数据，请确认采集任务已经成功执行。</div>
+      <div v-else class="table-shell">
+        <table class="signal-table">
+          <colgroup>
+            <col style="width:8%"><col style="width:5%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:7%">
+            <col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:11%"><col style="width:9%"><col style="width:9%"><col style="width:4%">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>币种</th><th>方向</th><th>多空名义比</th><th>多头名义</th><th>空头名义</th><th>净名义</th>
+              <th>多头鲸鱼 / 交易员</th><th>空头鲸鱼 / 交易员</th><th>当前标记价</th><th>7天走势</th><th>多头均价</th><th>空头均价</th><th>详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in rows" :key="row.symbol">
+              <td><span class="symbol">[[ row.symbol ]]</span></td>
+              <td><span :class="['direction', sideClass(row.side)]">[[ sideLabel(row.side) ]]</span></td>
+              <td :title="formatExact(row.long_short_ratio)">[[ formatRatio(row.long_short_ratio) ]]</td>
+              <td :title="formatExact(row.long_notional)" class="metric-positive">
+                [[ formatMetric(row.long_notional) ]]
+                <span v-if="formatPnl(row, 'long')" class="sub-metric notional-pnl">(<span :class="pnlClass(row, 'long')">[[ formatPnl(row, 'long') ]]</span>)</span>
+              </td>
+              <td :title="formatExact(row.short_notional)" class="metric-negative">
+                [[ formatMetric(row.short_notional) ]]
+                <span v-if="formatPnl(row, 'short')" class="sub-metric notional-pnl">(<span :class="pnlClass(row, 'short')">[[ formatPnl(row, 'short') ]]</span>)</span>
+              </td>
+              <td :title="formatExact(row.net_notional)">[[ formatMetric(row.net_notional) ]]</td>
+              <td>[[ row.long_whales ?? '--' ]] <span class="sub-metric">/ [[ row.long_traders ?? '--' ]]</span></td>
+              <td>[[ row.short_whales ?? '--' ]] <span class="sub-metric">/ [[ row.short_traders ?? '--' ]]</span></td>
+              <td>[[ formatPrice(row.mark_price) ]]</td>
+              <td class="trend-cell" :title="trendTitle(row.price_trend)">
+                <svg v-if="sparklinePoints(row.price_trend)" class="trend-chart" viewBox="0 0 120 30" preserveAspectRatio="none" aria-label="7天价格走势">
+                  <polyline class="trend-line" :points="sparklinePoints(row.price_trend)"></polyline>
+                </svg>
+                <span v-else class="sub-metric">--</span>
+              </td>
+              <td>
+                [[ formatPrice(row.long_avg_entry_price) ]]
+                <span v-if="formatProfitPercent(row.long_avg_entry_price, row.mark_price, 'long')" :class="['sub-metric', 'price-delta', profitPercentClass(row.long_avg_entry_price, row.mark_price, 'long')]">([[ formatProfitPercent(row.long_avg_entry_price, row.mark_price, 'long') ]])</span>
+              </td>
+              <td>
+                [[ formatPrice(row.short_avg_entry_price) ]]
+                <span v-if="formatProfitPercent(row.short_avg_entry_price, row.mark_price, 'short')" :class="['sub-metric', 'price-delta', profitPercentClass(row.short_avg_entry_price, row.mark_price, 'short')]">([[ formatProfitPercent(row.short_avg_entry_price, row.mark_price, 'short') ]])</span>
+              </td>
+              <td><button class="btn detail-button" @click="openDetail(row)" title="查看完整指标">查看</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="totalCount > pageSize" class="pagination">
+        <button class="btn" @click="load(page - 1)" :disabled="page <= 1 || loading">上一页</button>
+        <span>第 [[ page ]] / [[ pageCount ]] 页</span>
+        <button class="btn" @click="load(page + 1)" :disabled="page >= pageCount || loading">下一页</button>
+      </div>
+    </main>
+
+    <div v-if="selectedRow" class="modal-backdrop" @click.self="selectedRow = null">
+      <section class="modal" role="dialog" aria-modal="true" aria-label="聪明钱指标详情">
+        <div class="modal-header">
+          <h2>[[ selectedRow.symbol ]] 聪明钱详情</h2>
+          <button class="btn" @click="selectedRow = null">关闭</button>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-item"><span class="detail-label">主导方向</span><span class="detail-value">[[ sideLabel(selectedRow.side) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">快照时间</span><span class="detail-value">[[ formatTime(selectedRow.snapshot_time) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">净名义价值</span><span :title="formatExact(selectedRow.net_notional)" class="detail-value">[[ formatMetric(selectedRow.net_notional) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">多头数量 / 均价</span><span :title="`${formatExact(selectedRow.long_qty)} / ${formatPrice(selectedRow.long_avg_entry_price)}`" class="detail-value">[[ formatMetric(selectedRow.long_qty) ]] / [[ formatPrice(selectedRow.long_avg_entry_price) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">空头数量 / 均价</span><span :title="`${formatExact(selectedRow.short_qty)} / ${formatPrice(selectedRow.short_avg_entry_price)}`" class="detail-value">[[ formatMetric(selectedRow.short_qty) ]] / [[ formatPrice(selectedRow.short_avg_entry_price) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">多头名义价值</span><span :title="formatExact(selectedRow.long_notional)" class="detail-value">[[ formatMetric(selectedRow.long_notional) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">空头名义价值</span><span :title="formatExact(selectedRow.short_notional)" class="detail-value">[[ formatMetric(selectedRow.short_notional) ]]</span></div>
+          <div class="detail-item"><span class="detail-label">多头鲸鱼 / 交易员</span><span class="detail-value">[[ selectedRow.long_whales ?? '--' ]] / [[ selectedRow.long_traders ?? '--' ]]</span></div>
+          <div class="detail-item"><span class="detail-label">空头鲸鱼 / 交易员</span><span class="detail-value">[[ selectedRow.short_whales ?? '--' ]] / [[ selectedRow.short_traders ?? '--' ]]</span></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
+
+    createApp({
+      delimiters: ['[[', ']]'],
+      setup() {
+        const rows = ref([]);
+        const snapshots = ref([]);
+        const snapshotTime = ref(null);
+        const snapshotSelection = ref('');
+        const keyword = ref('');
+        const timeRange = ref('ALL');
+        const side = ref('');
+        const netNotionalPreset = ref('10000000');
+        const customMinNetNotional = ref('10000000');
+        const priceSpreadPreset = ref('5');
+        const customMaxPriceSpread = ref('5');
+        const sortBy = ref('long_short_ratio');
+        const sortOrder = ref('desc');
+        const page = ref(1);
+        const pageSize = 10;
+        const totalCount = ref(0);
+        const stats = ref({ net_notional: 0, long_notional: 0, short_notional: 0 });
+        const loading = ref(false);
+        const errorMessage = ref('');
+        const selectedRow = ref(null);
+        const sideOptions = [
+          { value: '', label: '全部' },
+          { value: 'BUY', label: '偏多' },
+          { value: 'SELL', label: '偏空' },
+        ];
+        let searchTimer = null;
+        let latestRequestId = 0;
+
+        const pageCount = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize)));
+        const formatTime = (timestamp) => timestamp ? new Date(Number(timestamp)).toLocaleString('zh-CN') : '--';
+        const formatMetric = (value) => {
+          if (value === null || value === undefined || value === '') return '--';
+          const number = Number(value);
+          if (!Number.isFinite(number)) return String(value);
+          const abs = Math.abs(number);
+          const sign = number < 0 ? '-' : '';
+          const compact = (scaled, suffix) => {
+            const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+            const formatted = digits === 0
+              ? String(Math.round(scaled))
+              : scaled.toFixed(digits).replace(/\.?0+$/, '');
+            return `${sign}${formatted}${suffix}`;
+          };
+          if (abs >= 1e9) return compact(abs / 1e9, 'B');
+          if (abs >= 1e6) return compact(abs / 1e6, 'M');
+          if (abs >= 1e3) return compact(abs / 1e3, 'K');
+          return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(number);
+        };
+        const formatExact = (value) => {
+          if (value === null || value === undefined || value === '') return '--';
+          const number = Number(value);
+          return Number.isFinite(number)
+            ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 12 }).format(number)
+            : String(value);
+        };
+        const formatPrice = (value) => {
+          if (value === null || value === undefined || value === '') return '--';
+          const number = Number(value);
+          if (!Number.isFinite(number)) return String(value);
+          return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 }).format(number);
+        };
+        const trendValues = (trend) => (Array.isArray(trend) ? trend : [])
+          .map((point) => Number(point?.value))
+          .filter((value) => Number.isFinite(value));
+        const sparklinePoints = (trend) => {
+          const values = trendValues(trend);
+          if (values.length < 2) return '';
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+          const range = max - min || Math.max(Math.abs(max) * 0.001, 1);
+          const width = 120;
+          const height = 30;
+          const padding = 2;
+          return values.map((value, index) => {
+            const x = padding + (index / (values.length - 1)) * (width - padding * 2);
+            const y = height - padding - ((value - min) / range) * (height - padding * 2);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          }).join(' ');
+        };
+        const trendTitle = (trend) => {
+          const values = trendValues(trend);
+          if (values.length < 2) return '7天走势：暂无完整数据';
+          const change = (values[values.length - 1] - values[0]) / values[0] * 100;
+          const sign = change > 0 ? '+' : '';
+          return `7天走势（1小时聚合）：${sign}${change.toFixed(2)}%`;
+        };
+        const pnlValue = (row, positionSide) => {
+          const markNumber = Number(row?.mark_price);
+          const averageNumber = Number(positionSide === 'short' ? row?.short_avg_entry_price : row?.long_avg_entry_price);
+          const quantityNumber = Number(positionSide === 'short' ? row?.short_qty : row?.long_qty);
+          if (!Number.isFinite(markNumber) || !Number.isFinite(averageNumber) || !Number.isFinite(quantityNumber)) return null;
+          return positionSide === 'short'
+            ? (averageNumber - markNumber) * Math.abs(quantityNumber)
+            : (markNumber - averageNumber) * Math.abs(quantityNumber);
+        };
+        const formatPnl = (row, positionSide) => {
+          const value = pnlValue(row, positionSide);
+          if (value === null) return '';
+          const formatted = formatMetric(Math.abs(value));
+          return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
+        };
+        const pnlClass = (row, positionSide) => {
+          const value = pnlValue(row, positionSide);
+          return value > 0 ? 'metric-positive' : value < 0 ? 'metric-negative' : '';
+        };
+        const profitPercent = (averagePrice, markPrice, positionSide) => {
+          const averageNumber = Number(averagePrice);
+          const markNumber = Number(markPrice);
+          if (!Number.isFinite(averageNumber) || !Number.isFinite(markNumber) || averageNumber === 0) return null;
+          return positionSide === 'short'
+            ? (averageNumber - markNumber) / averageNumber * 100
+            : (markNumber - averageNumber) / averageNumber * 100;
+        };
+        const formatProfitPercent = (averagePrice, markPrice, positionSide) => {
+          const percentage = profitPercent(averagePrice, markPrice, positionSide);
+          if (percentage === null) return '';
+          const sign = percentage > 0 ? '+' : '';
+          return `${sign}${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(percentage)}%`;
+        };
+        const profitPercentClass = (averagePrice, markPrice, positionSide) => {
+          const percentage = profitPercent(averagePrice, markPrice, positionSide);
+          return percentage > 0 ? 'metric-positive' : percentage < 0 ? 'metric-negative' : '';
+        };
+        const formatRatio = (value) => {
+          if (value === null || value === undefined || value === '') return '--';
+          const number = Number(value);
+          if (!Number.isFinite(number)) return String(value);
+          return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(number);
+        };
+        const metricClass = (value) => Number(value) > 0 ? 'metric-positive' : Number(value) < 0 ? 'metric-negative' : '';
+        const sideClass = (value) => String(value || '').toUpperCase() === 'BUY' ? 'buy' : String(value || '').toUpperCase() === 'SELL' ? 'sell' : '';
+        const sideLabel = (value) => String(value || '').toUpperCase() === 'BUY' ? '偏多' : String(value || '').toUpperCase() === 'SELL' ? '偏空' : '--';
+
+        const load = async (targetPage = 1) => {
+          const requestId = ++latestRequestId;
+          const nextPage = Math.min(Math.max(Number(targetPage) || 1, 1), pageCount.value || 1);
+          loading.value = true;
+          errorMessage.value = '';
+          const params = new URLSearchParams({
+            keyword: keyword.value.trim(),
+            time_range: timeRange.value,
+            side: side.value,
+            min_net_notional: netNotionalPreset.value === 'custom'
+              ? customMinNetNotional.value.trim()
+              : netNotionalPreset.value,
+            max_mark_price_spread_percent: priceSpreadPreset.value === 'custom'
+              ? customMaxPriceSpread.value.trim()
+              : priceSpreadPreset.value,
+            sort_by: sortBy.value,
+            sort_order: sortOrder.value,
+            page: String(nextPage),
+            page_size: String(pageSize),
+          });
+          if (snapshotSelection.value) params.set('snapshot_time', snapshotSelection.value);
+          try {
+            const response = await fetch(`/api/smart-money?${params.toString()}`);
+            const result = await response.json();
+            if (result.status !== 'success') throw new Error(result.message || '加载聪明钱失败');
+            if (requestId !== latestRequestId) return;
+            rows.value = result.data || [];
+            snapshots.value = result.snapshots || [];
+            snapshotTime.value = result.snapshot_time;
+            totalCount.value = Number(result.total_count || 0);
+            stats.value = result.stats || { net_notional: 0, long_notional: 0, short_notional: 0 };
+            page.value = nextPage;
+          } catch (error) {
+            if (requestId !== latestRequestId) return;
+            rows.value = [];
+            errorMessage.value = error.message || '加载聪明钱失败';
+          } finally {
+            if (requestId === latestRequestId) loading.value = false;
+          }
+        };
+
+        const searchImmediately = () => {
+          if (searchTimer) clearTimeout(searchTimer);
+          searchTimer = null;
+          load(1);
+        };
+
+        const changeTimeRange = () => {
+          snapshotSelection.value = '';
+          load(1);
+        };
+
+        const changeNetNotionalFilter = () => {
+          load(1);
+        };
+
+        const applyNetNotionalFilter = () => {
+          if (customMinNetNotional.value.trim() === '') return;
+          load(1);
+        };
+
+        const changePriceSpreadFilter = () => {
+          load(1);
+        };
+
+        const applyPriceSpreadFilter = () => {
+          if (customMaxPriceSpread.value.trim() === '') return;
+          load(1);
+        };
+
+        watch(keyword, () => {
+          if (searchTimer) clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => {
+            searchTimer = null;
+            load(1);
+          }, 300);
+        });
+
+        const openDetail = (row) => { selectedRow.value = row; };
+
+        onMounted(() => {
+          load(1);
+        });
+        onUnmounted(() => {
+          if (searchTimer) clearTimeout(searchTimer);
+        });
+
+        return {
+          rows, snapshots, snapshotTime, snapshotSelection, keyword, timeRange, side,
+          netNotionalPreset, customMinNetNotional, sortBy, sortOrder,
+          priceSpreadPreset, customMaxPriceSpread,
+          page, pageSize, totalCount, stats, loading, errorMessage, selectedRow, sideOptions,
+          pageCount, formatTime, formatMetric, formatExact, formatPrice, sparklinePoints, trendTitle, formatPnl, pnlClass, formatProfitPercent, profitPercentClass, formatRatio, metricClass, sideClass, sideLabel,
+          load, searchImmediately, changeTimeRange, changeNetNotionalFilter, applyNetNotionalFilter,
+          changePriceSpreadFilter, applyPriceSpreadFilter, openDetail,
+        };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>
