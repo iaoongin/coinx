@@ -143,3 +143,60 @@ def test_scheduled_repair_market_history_repairs_tracked_symbols_before_top_symb
         if '历史修补阶段 2/2' in message and 'top 榜币种' in message
     )
     assert tracked_start_index < top_start_index
+
+
+def test_scheduled_repair_market_history_batches_tracked_and_top_symbols(monkeypatch):
+    calls = []
+
+    def fake_history(symbols=None, series_types=None, **kwargs):
+        calls.append({
+            'symbols': symbols,
+            'series_types': series_types,
+            'full_scan': kwargs.get('full_scan'),
+            'max_workers': kwargs.get('max_workers'),
+        })
+        return {
+            'status': 'success',
+            'symbols': list(symbols or []),
+            'results': [],
+            'success_count': len(symbols or []),
+            'failure_count': 0,
+            'skipped_count': 0,
+            'duration_ms': 25.0,
+        }
+
+    monkeypatch.setattr('coinx.scheduler.get_active_coins', lambda: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'])
+    monkeypatch.setattr('coinx.scheduler.get_smart_money_scope_symbols', lambda: ['BNBUSDT', 'XRPUSDT', 'ADAUSDT'])
+    monkeypatch.setattr('coinx.scheduler.FETCH_COINS_ENABLED', False)
+    monkeypatch.setattr('coinx.scheduler.ENABLED_EXCHANGES', ['binance', 'okx'])
+    monkeypatch.setattr('coinx.scheduler.REPAIR_HISTORY_SYMBOL_BATCH_SIZE', 2)
+    monkeypatch.setattr('coinx.scheduler.run_history_repair_job', fake_history)
+
+    scheduled_repair_market_history()
+
+    assert calls == [
+        {
+            'symbols': ['BTCUSDT', 'ETHUSDT'],
+            'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            'full_scan': True,
+            'max_workers': 2,
+        },
+        {
+            'symbols': ['SOLUSDT'],
+            'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            'full_scan': True,
+            'max_workers': 2,
+        },
+        {
+            'symbols': ['BNBUSDT', 'XRPUSDT'],
+            'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            'full_scan': True,
+            'max_workers': 2,
+        },
+        {
+            'symbols': ['ADAUSDT'],
+            'series_types': list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+            'full_scan': True,
+            'max_workers': 2,
+        },
+    ]

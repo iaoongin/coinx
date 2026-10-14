@@ -29,6 +29,7 @@ from .config import (
     UPDATE_INTERVAL,
     REPAIR_HISTORY_ENABLED,
     REPAIR_HISTORY_INTERVAL,
+    REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
     REPAIR_ROLLING_POINTS,
     REPAIR_TRACKED_INTERVAL,
     RSS_ENABLED,
@@ -486,6 +487,44 @@ def _merge_repair_summaries(stage_summaries):
     return merged
 
 
+def _iter_history_symbol_batches(symbols):
+    """Yield bounded symbol batches so each repair batch can release its records."""
+    normalized_symbols = list(symbols or [])
+    batch_size = int(REPAIR_HISTORY_SYMBOL_BATCH_SIZE or 0)
+    if batch_size <= 0 or len(normalized_symbols) <= batch_size:
+        if normalized_symbols:
+            yield normalized_symbols
+        return
+    for start in range(0, len(normalized_symbols), batch_size):
+        yield normalized_symbols[start:start + batch_size]
+
+
+def _run_history_repair_batches(symbols, series_types, max_workers, stage):
+    summaries = []
+    batches = list(_iter_history_symbol_batches(symbols))
+    total_batches = len(batches)
+    for batch_index, batch_symbols in enumerate(batches, start=1):
+        logger.info(
+            '历史修补批次: 阶段=%s 批次=%d/%d symbols=%d batch_size=%d',
+            stage,
+            batch_index,
+            total_batches,
+            len(batch_symbols),
+            REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
+        )
+        batch_summary = run_history_repair_job(
+            symbols=batch_symbols,
+            series_types=series_types,
+            full_scan=True,
+            max_workers=max_workers,
+        )
+        batch_summary['stage'] = stage
+        batch_summary['batch_index'] = batch_index
+        batch_summary['batch_count'] = total_batches
+        summaries.append(batch_summary)
+    return summaries
+
+
 @scheduled_job(
     'interval',
     seconds=UPDATE_INTERVAL,
@@ -679,12 +718,15 @@ if REPAIR_HISTORY_ENABLED:
                 worker_count,
             )
             if tracked_symbols:
-                tracked_summary = run_history_repair_job(
-                    symbols=tracked_symbols,
-                    series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                    max_workers=worker_count,
+                tracked_batch_summaries = _run_history_repair_batches(
+                    tracked_symbols,
+                    list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                    worker_count,
+                    'tracked',
                 )
+                tracked_summary = _merge_repair_summaries(tracked_batch_summaries)
             else:
+                tracked_batch_summaries = []
                 tracked_summary = {'status': 'success', 'message': 'no tracked symbols', 'symbols': []}
             tracked_summary['stage'] = 'tracked'
             logger.info(
@@ -703,12 +745,15 @@ if REPAIR_HISTORY_ENABLED:
                 worker_count,
             )
             if top_symbols:
-                top_summary = run_history_repair_job(
-                    symbols=top_symbols,
-                    series_types=list(HOMEPAGE_REQUIRED_SERIES_TYPES),
-                    max_workers=worker_count,
+                top_batch_summaries = _run_history_repair_batches(
+                    top_symbols,
+                    list(HOMEPAGE_REQUIRED_SERIES_TYPES),
+                    worker_count,
+                    'top',
                 )
+                top_summary = _merge_repair_summaries(top_batch_summaries)
             else:
+                top_batch_summaries = []
                 top_summary = {'status': 'success', 'message': 'no top symbols', 'symbols': []}
             top_summary['stage'] = 'top'
             logger.info(
@@ -719,7 +764,7 @@ if REPAIR_HISTORY_ENABLED:
                 top_summary.get('skipped_count', 0),
                 format_duration_ms(top_summary.get('duration_ms', 0.0)),
             )
-            summary = _merge_repair_summaries([tracked_summary, top_summary])
+            summary = _merge_repair_summaries(tracked_batch_summaries + top_batch_summaries)
             _mark_job_finished('repair_market_history_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
             logger.info(
                 '低频历史补齐任务完成: status=%s symbols=%d success=%d failure=%d skipped=%d duration=%s',
