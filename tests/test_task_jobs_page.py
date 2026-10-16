@@ -27,7 +27,10 @@ def test_task_jobs_page_renders():
     assert '下一页'.encode('utf-8') in response.data
     assert '/runs?limit=5&offset='.encode('utf-8') in response.data
     assert 'history-modal'.encode('utf-8') in response.data
-    assert '关键节点（实时刷新）'.encode('utf-8') in response.data
+    assert 'formatRunDetail'.encode('utf-8') in response.data
+    assert 'summary-content'.encode('utf-8') in response.data
+    assert 'summary-modal'.encode('utf-8') in response.data
+    assert 'history-summary-line'.encode('utf-8') in response.data
     assert 'window.CoinxToast'.encode('utf-8') in response.data
     assert 'coinxSuppressGlobalError'.encode('utf-8') in response.data
     assert ':class="[\'message-box\', flash.type]"'.encode('utf-8') not in response.data

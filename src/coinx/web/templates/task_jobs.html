@@ -301,6 +301,10 @@
       box-shadow: var(--shadow-card);
     }
 
+    .summary-modal {
+      border-color: var(--border-default);
+    }
+
     .error-modal-header {
       display: flex;
       align-items: center;
@@ -323,6 +327,12 @@
       line-height: 1.5;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+    }
+
+    .summary-content {
+      border-color: var(--border-default);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
     }
 
     .job-actions {
@@ -400,39 +410,27 @@
     .history-summary-text {
       display: block;
       width: 100%;
+      min-width: 0;
       overflow: hidden;
       color: var(--text-secondary);
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .history-progress {
-      margin-top: 7px;
-      padding-top: 6px;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    .history-summary-line {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      width: 100%;
+      gap: 7px;
     }
 
-    .history-progress-title {
-      color: var(--text-muted);
-      font-size: 10px;
+    .history-summary-line .history-summary-text {
+      flex: 1 1 auto;
     }
 
-    .history-progress-list {
-      display: grid;
-      gap: 3px;
-      margin: 4px 0 0;
-      padding: 0;
-      list-style: none;
-      color: var(--text-secondary);
-    }
-
-    .history-progress-list li {
-      overflow-wrap: anywhere;
-    }
-
-    .history-progress-time {
-      margin-right: 5px;
-      color: var(--text-muted);
+    .history-summary-line .summary-detail-button {
+      flex: 0 0 auto;
     }
 
     .summary-detail-button {
@@ -754,19 +752,11 @@
                 <td class="cell-mono">[[ formatTime(run.last_started_at_ms) ]]</td>
                 <td class="cell-mono">[[ formatTime(run.last_finished_at_ms) ]]<br>[[ formatDuration(run.last_duration_ms) ]]</td>
                 <td class="history-summary-cell">
-                  <div v-if="formatRunSummary(run) !== '--'" class="cell-stack error-stack">
+                  <div v-if="formatRunSummary(run) !== '--'" class="history-summary-line">
                     <span class="cell-mono history-summary-text" :title="formatRunSummary(run)">[[ compactText(formatRunSummary(run), 180) ]]</span>
-                    <button v-if="isLongText(formatRunSummary(run), 180)" class="btn summary-detail-button" @click="openErrorDetail('历史摘要', formatRunSummary(run), true)">详情</button>
+                    <button v-if="progressEvents(run).length || isLongText(formatRunSummary(run), 180)" class="btn summary-detail-button" @click="openErrorDetail('历史摘要', formatRunDetail(run), true)">详情</button>
                   </div>
-                  <div v-if="progressEvents(run).length" class="history-progress">
-                    <div class="history-progress-title">关键节点（实时刷新）</div>
-                    <ol class="history-progress-list">
-                      <li v-for="event in progressEvents(run)" :key="`${run.id}-${event.timestamp_ms}-${event.stage}`">
-                        <span class="cell-mono history-progress-time">[[ formatTime(event.timestamp_ms) ]]</span>[[ formatProgressEvent(event) ]]
-                      </li>
-                    </ol>
-                  </div>
-                  <span v-if="formatRunSummary(run) === '--' && !progressEvents(run).length" class="cell-mono">--</span>
+                  <span v-else class="cell-mono">--</span>
                 </td>
                 <td class="error-cell">
                   <div v-if="run.last_error" class="cell-stack error-stack">
@@ -786,7 +776,7 @@
         </section>
       </div>
       <div v-if="errorDetail" class="error-modal-backdrop" @click.self="closeErrorDetail">
-        <section class="error-modal" role="dialog" aria-modal="true" :aria-label="errorDetail.title">
+        <section :class="['error-modal', { 'summary-modal': errorDetail.title === '历史摘要' }]" role="dialog" aria-modal="true" :aria-label="errorDetail.title">
           <div class="error-modal-header">
             <div>
               <h2 style="margin:0;font-size:17px;">[[ errorDetail.title ]]</h2>
@@ -794,7 +784,7 @@
             </div>
             <button class="btn" @click="closeErrorDetail">关闭</button>
           </div>
-          <pre class="error-content">[[ errorDetail.message ]]</pre>
+          <pre :class="['error-content', { 'summary-content': errorDetail.title === '历史摘要' }]">[[ errorDetail.message ]]</pre>
         </section>
       </div>
     </div>
@@ -998,6 +988,18 @@
           return parts.join(' / ');
         };
 
+        const formatRunDetail = (run) => {
+          const summary = formatRunSummary(run);
+          const events = progressEvents(run);
+          if (!events.length) return summary;
+          return [
+            summary,
+            '',
+            '关键节点：',
+            ...events.map((event) => `${formatTime(event.timestamp_ms)} ${formatProgressEvent(event)}`),
+          ].join('\n');
+        };
+
         const formatRunSummary = (run) => {
           const summary = run?.last_summary;
           if (!summary) return '--';
@@ -1181,6 +1183,7 @@
           runStatusClass,
           progressEvents,
           formatProgressEvent,
+          formatRunDetail,
           formatRunSummary,
           jobError,
           compactText,
