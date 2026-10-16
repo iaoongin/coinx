@@ -47,6 +47,30 @@ def create_job_run(job_id, started_at=None, session=None):
             db.close()
 
 
+def update_job_run(run_id, status=None, summary=None, error=None, session=None):
+    """Persist an in-flight run snapshot without closing the run."""
+    own_session = session is None
+    db = session or get_session()
+    try:
+        run = db.get(ScheduledJobRun, run_id)
+        if run is None:
+            return False
+        if status is not None:
+            run.status = status
+        if summary is not None:
+            run.summary_json = summary
+        if error is not None:
+            run.error_message = str(error)[:500]
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if own_session:
+            db.close()
+
+
 def finish_job_run(run_id, status, summary=None, error=None, completed_at=None, duration_ms=None, session=None):
     own_session = session is None
     db = session or get_session()

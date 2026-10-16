@@ -9,6 +9,7 @@ from coinx.collector.bybit.series import BybitRateLimitUnavailable, clear_bybit_
 from coinx.collector.gate import series as gate_series
 from coinx.collector.gate.series import GateUnsupportedContract
 from coinx.collector.exchange_repair import (
+    _build_history_gap_tasks,
     _flush_group_records,
     repair_history_symbols,
     repair_rolling_symbols,
@@ -1185,10 +1186,45 @@ def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkey
     assert summary['missing_records'] == 478
     assert summary['written_records'] == 2
     assert summary['affected'] == 2
+    assert summary['status'] == 'partial_success'
+    assert summary['remaining_task_count'] == 2
     assert calls == [
         expected_segments[0],
         expected_segments[2],
     ]
+
+
+def test_build_history_gap_tasks_merges_contiguous_points_and_keeps_full_gap_range(monkeypatch):
+    period_ms = FIVE_MINUTES_MS
+    day_segments = [
+        (0, 4 * period_ms),
+        (10 * period_ms, 14 * period_ms),
+    ]
+    monkeypatch.setattr(
+        'coinx.collector.exchange_repair.get_existing_series_timestamps',
+        lambda *args, **kwargs: {
+            'BTCUSDT': {0, 4 * period_ms},
+        },
+    )
+
+    tasks, stats = _build_history_gap_tasks(
+        'okx',
+        'BTCUSDT',
+        'open_interest_hist',
+        '5m',
+        day_segments,
+    )
+
+    assert [(task['start_time'], task['end_time']) for task in tasks] == [
+        (period_ms, 3 * period_ms),
+        (10 * period_ms, 14 * period_ms),
+    ]
+    assert [task['missing_point_count'] for task in tasks] == [3, 5]
+    assert stats == {
+        'missing_day_count': 2,
+        'missing_record_count': 8,
+        'gap_range_count': 2,
+    }
 
 
 def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_session, monkeypatch):
@@ -1259,8 +1295,9 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
 
     assert summary['success_count'] == 1
     assert calls == [
-        (local_today_start, latest_closed),
+        (latest_closed, latest_closed),
     ]
+    assert '缺天=1,缺点=1,缺段=1' in summary['history_missing_day_stats']
 
 
 def test_exchange_history_repair_marks_empty_api_response_as_no_data(db_session, monkeypatch):
@@ -1379,6 +1416,8 @@ def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monk
     assert summary['records'] == 300
     assert summary['missing_records'] == 0
     assert summary['written_records'] == 300
+    assert summary['status'] == 'success'
+    assert summary['remaining_task_count'] == 0
     assert calls
     assert all(call[2] == 100 for call in calls)
 
@@ -1436,3 +1475,4 @@ def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeyp
         and '未命中缺口=' in message
         for message in info_logs
     )
+    assert any('任务进度:' in message and '区间=' in message and '缺点=' in message for message in info_logs)

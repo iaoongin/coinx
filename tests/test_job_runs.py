@@ -7,6 +7,7 @@ from coinx.repositories.job_runs import (
     get_job_runs,
     get_latest_job_runtime_metadata,
     recover_interrupted_job_runs,
+    update_job_run,
 )
 
 
@@ -70,6 +71,22 @@ def test_job_run_serialization_exposes_detail_without_polluting_summary(db_sessi
     assert run['last_error'] == 'short diagnostic'
     assert run['last_error_detail'] == 'full diagnostic'
     assert run['last_summary'] == {'count': 1}
+
+
+def test_update_job_run_persists_inflight_summary_without_finishing(db_session):
+    run_id = create_job_run('long-running-job', started_at=1_000, session=db_session)
+
+    assert update_job_run(
+        run_id,
+        status='running',
+        summary={'stage': 'batch_2', 'progress_events': [{'message': '批次 2 完成'}]},
+        session=db_session,
+    ) is True
+
+    run = get_job_runs('long-running-job', session=db_session)[0]
+    assert run['status'] == 'running'
+    assert run['last_finished_at_ms'] is None
+    assert run['last_summary']['stage'] == 'batch_2'
 
 
 def test_recover_interrupted_runs_marks_them_as_errors(db_session):

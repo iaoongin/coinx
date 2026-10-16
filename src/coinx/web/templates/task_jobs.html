@@ -406,6 +406,35 @@
       white-space: nowrap;
     }
 
+    .history-progress {
+      margin-top: 7px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .history-progress-title {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .history-progress-list {
+      display: grid;
+      gap: 3px;
+      margin: 4px 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--text-secondary);
+    }
+
+    .history-progress-list li {
+      overflow-wrap: anywhere;
+    }
+
+    .history-progress-time {
+      margin-right: 5px;
+      color: var(--text-muted);
+    }
+
     .summary-detail-button {
       color: var(--text-secondary);
       border-color: var(--border-default);
@@ -729,7 +758,15 @@
                     <span class="cell-mono history-summary-text" :title="formatRunSummary(run)">[[ compactText(formatRunSummary(run), 180) ]]</span>
                     <button v-if="isLongText(formatRunSummary(run), 180)" class="btn summary-detail-button" @click="openErrorDetail('历史摘要', formatRunSummary(run), true)">详情</button>
                   </div>
-                  <span v-else class="cell-mono">--</span>
+                  <div v-if="progressEvents(run).length" class="history-progress">
+                    <div class="history-progress-title">关键节点（实时刷新）</div>
+                    <ol class="history-progress-list">
+                      <li v-for="event in progressEvents(run)" :key="`${run.id}-${event.timestamp_ms}-${event.stage}`">
+                        <span class="cell-mono history-progress-time">[[ formatTime(event.timestamp_ms) ]]</span>[[ formatProgressEvent(event) ]]
+                      </li>
+                    </ol>
+                  </div>
+                  <span v-if="formatRunSummary(run) === '--' && !progressEvents(run).length" class="cell-mono">--</span>
                 </td>
                 <td class="error-cell">
                   <div v-if="run.last_error" class="cell-stack error-stack">
@@ -867,7 +904,7 @@
           if (normalized === 'running') return '运行中';
           if (normalized === 'success') return '成功';
           if (normalized === 'error') return '失败';
-          if (normalized === 'partial') return '部分失败';
+          if (normalized === 'partial' || normalized === 'partial_success') return '未完成';
           if (normalized === 'skipped') return '跳过';
           if (normalized === 'paused') return '已暂停';
           if (normalized === 'ready') return '就绪';
@@ -881,7 +918,7 @@
           if (job.paused) return 'paused';
           const normalized = String(job.runtime?.last_status || '').toLowerCase();
           if (normalized === 'error') return 'error';
-          if (normalized === 'partial') return 'partial';
+          if (normalized === 'partial' || normalized === 'partial_success') return 'partial';
           if (normalized === 'success') return 'success';
           return 'ready';
         };
@@ -940,11 +977,46 @@
 
         const runStatusClass = (run) => String(run?.status || 'ready').toLowerCase();
 
+        const progressEvents = (run) => {
+          const events = Array.isArray(run?.last_summary?.progress_events)
+            ? run.last_summary.progress_events
+            : [];
+          return events.slice(-8).reverse();
+        };
+
+        const formatProgressEvent = (event) => {
+          const parts = [event?.message || event?.stage || '状态更新'];
+          if (event?.batch_index && event?.batch_count) {
+            parts.push(`批次 ${event.batch_index}/${event.batch_count}`);
+          }
+          if (event?.remaining_task_count !== undefined) {
+            parts.push(`剩余缺口任务 ${event.remaining_task_count}`);
+          }
+          if (event?.status && event.status !== 'running') {
+            parts.push(`状态 ${statusText(event.status)}`);
+          }
+          return parts.join(' / ');
+        };
+
         const formatRunSummary = (run) => {
           const summary = run?.last_summary;
           if (!summary) return '--';
           const parts = [];
-          for (const [key, label] of [['saved_count', '保存'], ['success_count', '成功'], ['failure_count', '失败'], ['skipped_count', '跳过'], ['deleted_count', '清理'], ['count', '记录']]) {
+          for (const [key, label] of [
+            ['saved_count', '保存'],
+            ['success_count', '成功任务'],
+            ['failure_count', '失败任务'],
+            ['skipped_count', '跳过任务'],
+            ['pending_task_count', '待处理任务'],
+            ['remaining_task_count', '剩余缺口任务'],
+            ['expected_records', '目标记录'],
+            ['records', '命中记录'],
+            ['written_records', '写入记录'],
+            ['missing_records', '未命中记录'],
+            ['affected', '影响行'],
+            ['deleted_count', '清理'],
+            ['count', '记录'],
+          ]) {
             if (summary[key] !== undefined) parts.push(`${label} ${summary[key]}`);
           }
           if (summary.message) parts.unshift(summary.message);
@@ -999,8 +1071,9 @@
           }
         };
 
-        const loadJobHistory = async (jobId, offset = 0) => {
-          historyLoading.value = { ...historyLoading.value, [jobId]: true };
+        const loadJobHistory = async (jobId, offset = 0, options = {}) => {
+          const silent = options?.silent === true;
+          if (!silent) historyLoading.value = { ...historyLoading.value, [jobId]: true };
           try {
             const response = await fetch(`/api/task-jobs/${jobId}/runs?limit=5&offset=${offset}`, {
               coinxSuppressGlobalError: true,
@@ -1020,7 +1093,7 @@
             console.error(error);
             showToast(`加载任务历史失败: ${error.message}`, 'error');
           } finally {
-            historyLoading.value = { ...historyLoading.value, [jobId]: false };
+            if (!silent) historyLoading.value = { ...historyLoading.value, [jobId]: false };
           }
         };
 
@@ -1042,11 +1115,19 @@
           historyModalJob.value = null;
         };
 
+        const refreshOpenHistory = () => {
+          const jobId = historyModalJob.value?.id;
+          if (!jobId) return;
+          const meta = activeJobHistoryMeta.value;
+          loadJobHistory(jobId, meta.offset, { silent: true });
+        };
+
         const startAutoRefresh = () => {
           if (timer) clearInterval(timer);
           if (!autoRefresh.value) return;
           timer = setInterval(() => {
             loadJobs({ silent: true });
+            refreshOpenHistory();
           }, 10000);
         };
 
@@ -1098,6 +1179,8 @@
           statusClass,
           statusLabel,
           runStatusClass,
+          progressEvents,
+          formatProgressEvent,
           formatRunSummary,
           jobError,
           compactText,

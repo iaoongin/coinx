@@ -165,29 +165,49 @@ def _format_history_missing_day_stats(stats_by_exchange):
         for series_type in sorted(stats.get('by_type') or {}):
             type_stats = stats['by_type'][series_type]
             by_type_parts.append(
-                f"{series_type}(币种={len(type_stats.get('symbols') or set())},缺天={type_stats.get('days', 0)})"
+                f"{series_type}(币种={len(type_stats.get('symbols') or set())},"
+                f"缺天={type_stats.get('days', 0)},"
+                f"缺点={type_stats.get('records', 0)},"
+                f"缺段={type_stats.get('ranges', 0)})"
             )
         parts.append(
             f"{exchange}(币种={len(stats.get('symbols') or set())},"
             f"类型={len(stats.get('by_type') or {})},"
             f"缺天={stats.get('days', 0)},"
+            f"缺点={stats.get('records', 0)},"
+            f"缺段={stats.get('ranges', 0)},"
             f"按类型={ '|'.join(by_type_parts) if by_type_parts else '无' })"
         )
     return '; '.join(parts)
 
 
-def _record_history_missing_day_stats(stats_by_exchange, exchange, symbol, series_type, day_count):
-    if day_count <= 0:
+def _record_history_missing_day_stats(
+    stats_by_exchange,
+    exchange,
+    symbol,
+    series_type,
+    day_count,
+    missing_record_count=0,
+    gap_range_count=0,
+):
+    if day_count <= 0 and missing_record_count <= 0 and gap_range_count <= 0:
         return
     exchange_stats = stats_by_exchange.setdefault(
         exchange,
-        {'symbols': set(), 'days': 0, 'by_type': {}},
+        {'symbols': set(), 'days': 0, 'records': 0, 'ranges': 0, 'by_type': {}},
     )
     exchange_stats['symbols'].add(symbol)
     exchange_stats['days'] += day_count
-    type_stats = exchange_stats['by_type'].setdefault(series_type, {'symbols': set(), 'days': 0})
+    exchange_stats['records'] += missing_record_count
+    exchange_stats['ranges'] += gap_range_count
+    type_stats = exchange_stats['by_type'].setdefault(
+        series_type,
+        {'symbols': set(), 'days': 0, 'records': 0, 'ranges': 0},
+    )
     type_stats['symbols'].add(symbol)
     type_stats['days'] += day_count
+    type_stats['records'] += missing_record_count
+    type_stats['ranges'] += gap_range_count
 
 
 def _result_with_breakdown(result, breakdown):
@@ -276,7 +296,11 @@ def _build_history_gap_tasks(exchange, symbol, series_type, period, day_segments
     for segment_start, segment_end in day_segments:
         target_times.extend(_build_target_times_in_range(segment_start, segment_end, period=period))
     if not target_times:
-        return []
+        return [], {
+            'missing_day_count': 0,
+            'missing_record_count': 0,
+            'gap_range_count': 0,
+        }
 
     existing_by_symbol = get_existing_series_timestamps(
         exchange,
@@ -288,23 +312,37 @@ def _build_history_gap_tasks(exchange, symbol, series_type, period, day_segments
     )
     existing_times = existing_by_symbol.get(symbol, set())
     gap_tasks = []
+    missing_day_count = 0
+    missing_record_count = 0
+    gap_range_count = 0
     for segment_start, segment_end in day_segments:
         segment_target_times = _build_target_times_in_range(segment_start, segment_end, period=period)
         if not segment_target_times:
             continue
-        if all(timestamp in existing_times for timestamp in segment_target_times):
+        missing_times = [timestamp for timestamp in segment_target_times if timestamp not in existing_times]
+        if not missing_times:
             continue
-        gap_tasks.append(
-            {
-                'exchange': exchange,
-                'symbol': symbol,
-                'series_type': series_type,
-                'period': period,
-                'start_time': segment_start,
-                'end_time': segment_target_times[-1],
-            }
-        )
-    return gap_tasks
+        missing_day_count += 1
+        missing_record_count += len(missing_times)
+        for gap_group in _group_contiguous_times(missing_times, period=period):
+            gap_range_count += 1
+            gap_tasks.append(
+                {
+                    'exchange': exchange,
+                    'symbol': symbol,
+                    'series_type': series_type,
+                    'period': period,
+                    'start_time': gap_group[0],
+                    'end_time': gap_group[-1],
+                    'missing_point_count': len(gap_group),
+                    'missing_day_count': 1,
+                }
+            )
+    return gap_tasks, {
+        'missing_day_count': missing_day_count,
+        'missing_record_count': missing_record_count,
+        'gap_range_count': gap_range_count,
+    }
 
 
 def _unsupported_symbol_result(adapter, symbol, series_type, mode, window_precise, extra=None):
@@ -499,6 +537,7 @@ def _log_repair_summary(summary):
             [
                 f"预检已完整={summary.get('precheck_skipped_count', 0)}",
                 f"待修补任务={summary.get('pending_task_count', 0)}",
+                f"剩余缺口任务={summary.get('remaining_task_count', 0)}",
                 f"当天裁剪截止={summary.get('current_day_trimmed_end_time')}",
                 f"缺口分布={summary.get('history_missing_day_stats')}",
                 f"覆盖时长={summary.get('coverage_hours')}",
@@ -563,7 +602,15 @@ def _log_repair_summary(summary):
 
 
 def _task_progress_label(task):
-    return f"{task.get('symbol')}/{task.get('series_type')}/{task.get('period')}"
+    label = f"{task.get('symbol')}/{task.get('series_type')}/{task.get('period')}"
+    if task.get('mode') == 'history' or task.get('missing_point_count') is not None:
+        start_time = task.get('start_time')
+        end_time = task.get('end_time')
+        if start_time is not None and end_time is not None:
+            label += f" 区间={start_time}~{end_time}"
+        if task.get('missing_point_count') is not None:
+            label += f" 缺点={task.get('missing_point_count')}"
+    return label
 
 
 def _should_log_task_progress(completed, total):
@@ -1307,7 +1354,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         continue
 
                     with timed_category(precheck_breakdown, 'db_read_ms'):
-                        gap_tasks = _build_history_gap_tasks(
+                        gap_tasks, gap_stats = _build_history_gap_tasks(
                             adapter.exchange_id,
                             symbol,
                             series_type,
@@ -1330,7 +1377,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         adapter.exchange_id,
                         symbol,
                         series_type,
-                        len(gap_tasks),
+                        gap_stats['missing_day_count'],
+                        gap_stats['missing_record_count'],
+                        gap_stats['gap_range_count'],
                     )
                     exchange_stats['pending'] += len(gap_tasks)
                     exchange_task_counts[adapter.exchange_id] = exchange_task_counts.get(adapter.exchange_id, 0) + len(gap_tasks)
@@ -1675,6 +1724,47 @@ def _build_summary(mode, symbols, series_types, exchanges, results, started_at, 
     }
     if extra:
         summary.update(extra)
+    remaining_task_count = sum(
+        1
+        for item in results
+        if item.get('status') in {'error', 'skipped'}
+        or max(
+            (item.get('expected_records') or 0) - (item.get('records') or 0),
+            0,
+        ) > 0
+        or (
+            item.get('mode') == 'history'
+            and (item.get('written_records') or 0) < (item.get('records') or 0)
+        )
+    )
+    if (
+        mode == 'history'
+        and (summary.get('pending_task_count') or 0) > 0
+        and (summary.get('records') or 0) == 0
+        and (summary.get('written_records') or 0) == 0
+    ):
+        remaining_task_count = max(
+            remaining_task_count,
+            int(summary.get('pending_task_count') or 0),
+        )
+    summary['remaining_task_count'] = remaining_task_count
+    if mode == 'history':
+        # A repair task is successful only when every planned gap was returned
+        # and persisted. A successful API call with a partial/empty response
+        # must remain visible as incomplete instead of being reported as done.
+        has_unresolved_gap = (
+            remaining_task_count > 0
+            or (
+                (summary.get('pending_task_count') or 0) > 0
+                and (
+                    (summary.get('records') or 0) == 0
+                    or (summary.get('written_records') or 0) < (summary.get('records') or 0)
+                )
+            )
+        )
+        summary['status'] = 'partial_success' if has_unresolved_gap else 'success'
+        if has_unresolved_gap:
+            summary['message'] = '历史缺口未全部补齐'
     summary['duration_breakdown_ms'] = attach_other_duration(
         summary.get('duration_breakdown_ms') or sum_duration_breakdowns(
             item.get('duration_breakdown_ms') for item in results

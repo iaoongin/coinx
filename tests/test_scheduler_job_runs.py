@@ -93,6 +93,32 @@ def test_merge_repair_summaries_keeps_counts_without_task_details():
     }
 
 
+def test_merge_history_repair_marks_zero_write_with_remaining_gap_incomplete():
+    summary = scheduler_module._merge_repair_summaries([
+        {
+            'status': 'success',
+            'mode': 'history',
+            'symbols': ['BTCUSDT'],
+            'series_types': ['klines'],
+            'exchanges': ['okx'],
+            'success_count': 6,
+            'failure_count': 0,
+            'skipped_count': 0,
+            'pending_task_count': 6,
+            'remaining_task_count': 6,
+            'expected_records': 120,
+            'records': 0,
+            'written_records': 0,
+            'missing_records': 120,
+            'results': [],
+        },
+    ])
+
+    assert summary['status'] == 'partial'
+    assert summary['remaining_task_count'] == 6
+    assert summary['missing_records'] == 120
+
+
 def test_job_metadata_persists_successful_lifecycle(monkeypatch):
     created = []
     completed = []
@@ -116,6 +142,40 @@ def test_job_metadata_persists_successful_lifecycle(monkeypatch):
     assert completed[0][0] == 7
     assert completed[0][1]['status'] == 'success'
     assert completed[0][1]['summary'] == {'count': 3}
+
+
+def test_job_progress_updates_memory_and_persists_bounded_event(monkeypatch):
+    updates = []
+    monkeypatch.setattr(scheduler_module, 'JOB_METADATA', {})
+    monkeypatch.setattr(scheduler_module, 'create_job_run', lambda *_args, **_kwargs: 9)
+    monkeypatch.setattr(
+        scheduler_module,
+        'update_job_run',
+        lambda run_id, **kwargs: updates.append((run_id, kwargs)) or True,
+    )
+
+    scheduler_module._mark_job_started('job-a')
+    metadata = scheduler_module._mark_job_progress(
+        'job-a',
+        'batch_finished',
+        '第 1 批完成',
+        batch_index=1,
+        batch_count=3,
+    )
+
+    assert metadata['running'] is True
+    assert metadata['last_status'] == 'running'
+    assert metadata['last_summary']['stage'] == 'batch_finished'
+    assert metadata['last_summary']['progress_events'][0]['batch_index'] == 1
+    assert updates == [
+        (
+            9,
+            {
+                'status': 'running',
+                'summary': metadata['last_summary'],
+            },
+        ),
+    ]
 
 
 def test_job_run_persistence_failure_does_not_block_metadata(monkeypatch):

@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>低频历史补齐 - 状态预览</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090a0c;
+      --panel: #111315;
+      --panel-2: #17191c;
+      --line: #282c31;
+      --text: #e8eaed;
+      --muted: #8c939d;
+      --green: #72d39a;
+      --green-bg: rgba(44, 146, 91, .14);
+      --amber: #f4c76b;
+      --amber-bg: rgba(205, 145, 31, .14);
+      --red: #ef9292;
+      --red-bg: rgba(179, 61, 61, .14);
+      --blue: #91baff;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 46px 0 64px;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font: 600 12px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 4vw, 34px);
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 720px;
+      margin: 12px 0 28px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .legend span,
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .legend span {
+      padding: 7px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend i,
+    .status i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .legend .complete { color: var(--green); }
+    .legend .incomplete { color: var(--amber); }
+    .legend .interrupted { color: var(--red); }
+
+    .definition-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 1px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .definition-block {
+      min-height: 116px;
+      padding: 18px 20px;
+      background: var(--panel);
+    }
+
+    .definition-block h2 {
+      margin: 0 0 9px;
+      color: var(--muted);
+      font: 600 12px/1 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .definition-block strong {
+      display: block;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .definition-block p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .definition-example {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 6px 8px;
+      border: 1px solid rgba(145,186,255,.28);
+      color: var(--blue);
+      font: 12px/1.4 var(--mono);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+    }
+
+    th {
+      padding: 13px 16px;
+      background: var(--panel-2);
+      color: var(--muted);
+      font: 500 12px/1 var(--mono);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 16px;
+      border-top: 1px solid rgba(255,255,255,.06);
+      vertical-align: top;
+    }
+
+    .status {
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .status.complete { color: var(--green); border-color: rgba(114,211,154,.32); background: var(--green-bg); }
+    .status.incomplete { color: var(--amber); border-color: rgba(244,199,107,.34); background: var(--amber-bg); }
+    .status.interrupted { color: var(--red); border-color: rgba(239,146,146,.32); background: var(--red-bg); }
+
+    .mono { font-family: var(--mono); font-size: 12px; color: #cdd2d9; white-space: nowrap; }
+    .muted { color: var(--muted); }
+    .stack { display: grid; gap: 6px; }
+    .summary { min-width: 360px; line-height: 1.7; }
+
+    .metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 12px;
+      color: #cdd2d9;
+      font: 12px/1.55 var(--mono);
+    }
+
+    .scope {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 12px;
+      margin-bottom: 5px;
+      color: var(--blue);
+      font: 12px/1.55 var(--mono);
+    }
+
+    .scope span { white-space: nowrap; }
+    .scope strong { color: var(--text); font-weight: 650; }
+
+    .metric strong { color: var(--text); font-weight: 650; }
+    .metric.warn strong { color: var(--amber); }
+    .metric.good strong { color: var(--green); }
+    .metric.bad strong { color: var(--red); }
+
+    .hint {
+      display: inline-block;
+      margin-top: 6px;
+      color: var(--amber);
+      font-size: 12px;
+    }
+
+    .error { color: var(--red); font: 12px/1.55 var(--mono); }
+
+    .details {
+      margin-top: 24px;
+      padding: 18px 20px;
+      border-left: 3px solid var(--amber);
+      background: #12110e;
+    }
+
+    .details h2 { margin: 0 0 10px; font-size: 15px; }
+    .details p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .details code { color: var(--text); font-family: var(--mono); }
+
+    @media (max-width: 640px) {
+      .page { width: min(100% - 20px, 1180px); padding-top: 28px; }
+      .lead { margin-bottom: 20px; }
+      .definition-grid { grid-template-columns: 1fr; }
+      .table-wrap { margin: 0 -1px; }
+      td, th { padding: 13px 12px; }
+      .summary { min-width: 330px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="eyebrow">Task history preview</p>
+    <h1>低频历史补齐 · 执行记录</h1>
+    <p class="lead">状态由实际缺口和写入结果决定。仅有“成功任务数”但没有写入记录的执行，会明确显示为“未完成”。</p>
+
+    <div class="legend" aria-label="状态图例">
+      <span class="complete"><i></i>已完成</span>
+      <span class="incomplete"><i></i>未完成</span>
+      <span class="interrupted"><i></i>服务中断</span>
+    </div>
+
+    <section class="definition-grid" aria-label="统计口径说明">
+      <div class="definition-block">
+        <h2>任务单元是什么</h2>
+        <strong>一个交易所 + 一个币种 + 一个数据类型 + 一个周期 + 一个缺失日</strong>
+        <p>完整性检查按天拆分，所以同一个币种缺 3 天，就会产生 3 个任务单元。</p>
+        <span class="definition-example">OKX / BTCUSDT / klines / 5m / 2026-10-14</span>
+      </div>
+      <div class="definition-block">
+        <h2>记录是什么</h2>
+        <strong>一个周期对应的一条时间点行情数据</strong>
+        <p>例如 5m K 线每 5 分钟一条；完整一天最多约 288 条。本次示例目标为 120 条。</p>
+      </div>
+    </section>
+
+    <section class="table-wrap" aria-label="低频历史补齐执行记录">
+      <table>
+        <thead>
+          <tr>
+            <th>状态</th>
+            <th>开始</th>
+            <th>结束 / 耗时</th>
+            <th>摘要（任务单元 / 记录）</th>
+            <th>错误</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="status incomplete"><i></i>未完成</span></td>
+            <td class="mono">2026/10/15<br>21:25:02</td>
+            <td class="mono">21:25:05<br><span class="muted">2.70s</span></td>
+            <td class="summary">
+              <div class="scope">
+                <span>交易所 <strong>2</strong></span>
+                <span>币种 <strong>3</strong></span>
+                <span>类型 <strong>3</strong></span>
+                <span>周期 <strong>1</strong></span>
+                <span>日期 <strong>2</strong></span>
+              </div>
+              <div class="metrics">
+                <span class="metric"><strong>任务单元 6</strong></span>
+                <span class="metric warn">初始缺口任务 <strong>6</strong></span>
+                <span class="metric warn">剩余缺口任务 <strong>6</strong></span>
+                <span class="metric">目标记录 <strong>120</strong></span>
+                <span class="metric bad">命中记录 <strong>0</strong></span>
+                <span class="metric bad">写入记录 <strong>0</strong></span>
+                <span class="metric bad">未命中记录 <strong>120</strong></span>
+              </div>
+              <span class="hint">历史缺口未全部补齐</span>
+            </td>
+            <td class="muted">--</td>
+          </tr>
+          <tr>
+            <td><span class="status complete"><i></i>成功</span></td>
+            <td class="mono">2026/10/15<br>20:02:11</td>
+            <td class="mono">20:02:18<br><span class="muted">7.14s</span></td>
+            <td class="summary">
+              <div class="scope">
+                <span>交易所 <strong>1</strong></span>
+                <span>币种 <strong>1</strong></span>
+                <span>类型 <strong>3</strong></span>
+                <span>周期 <strong>1</strong></span>
+                <span>日期 <strong>1</strong></span>
+              </div>
+              <div class="metrics">
+                <span class="metric good"><strong>任务单元 2</strong></span>
+                <span class="metric">初始缺口任务 <strong>2</strong></span>
+                <span class="metric good">剩余缺口任务 <strong>0</strong></span>
+                <span class="metric">目标记录 <strong>300</strong></span>
+                <span class="metric good">命中记录 <strong>300</strong></span>
+                <span class="metric good">写入记录 <strong>300</strong></span>
+                <span class="metric good">未命中记录 <strong>0</strong></span>
+              </div>
+            </td>
+            <td class="muted">--</td>
+          </tr>
+          <tr>
+            <td><span class="status interrupted"><i></i>失败</span></td>
+            <td class="mono">2026/10/15<br>20:38:28</td>
+            <td class="mono">21:20:14<br><span class="muted">41m46.6s</span></td>
+            <td class="summary">
+              <div class="scope">
+                <span>交易所 <strong>2</strong></span>
+                <span>币种 <strong>190</strong></span>
+                <span>类型 <strong>3</strong></span>
+                <span>周期 <strong>1</strong></span>
+                <span>日期 <strong>14</strong></span>
+              </div>
+              <span class="muted">任务未完成，已处理批次不会被伪装成全量成功</span>
+            </td>
+            <td class="error">服务中断，任务未完成</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <aside class="details">
+      <h2>状态判断</h2>
+      <p><code>日期 2</code> 是去重后的缺口日数量，不是任务单元数；同一个日期被多个币种缺失时仍只算 1 天。<code>任务单元 6</code> 仍表示 6 个“币种 + 类型 + 周期 + 缺失日”组合。</p>
+    </aside>
+  </main>
+</body>
+</html>

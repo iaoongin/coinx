@@ -55,6 +55,7 @@ from .repositories.job_runs import (
     ensure_job_run_schema,
     finish_job_run,
     recover_interrupted_job_runs,
+    update_job_run,
 )
 from .repositories.retention import (
     cleanup_expired_market_data,
@@ -72,6 +73,7 @@ JOB_METADATA_LOCK = threading.Lock()
 JOB_METADATA = {}
 JOB_ERROR_MAX_LENGTH = 500
 JOB_ERROR_DETAIL_MAX_LENGTH = 20000
+JOB_PROGRESS_EVENT_LIMIT = 40
 
 
 def scheduled_job(*args, **kwargs):
@@ -163,6 +165,47 @@ def _mark_job_started(job_id):
     return metadata
 
 
+def _append_job_progress_event(summary, event):
+    progress_summary = dict(summary or {})
+    events = list(progress_summary.get('progress_events') or [])
+    events.append(event)
+    progress_summary['progress_events'] = events[-JOB_PROGRESS_EVENT_LIMIT:]
+    progress_summary['stage'] = event.get('stage')
+    progress_summary['message'] = event.get('message')
+    progress_summary['status'] = 'running'
+    return progress_summary
+
+
+def _mark_job_progress(job_id, stage, message, **details):
+    """Persist a bounded in-flight snapshot so long jobs remain diagnosable."""
+    event = {
+        'timestamp_ms': int(time.time() * 1000),
+        'stage': stage,
+        'message': message,
+    }
+    event.update({key: value for key, value in details.items() if value is not None})
+    with JOB_METADATA_LOCK:
+        metadata = JOB_METADATA.setdefault(job_id, {})
+        summary = _append_job_progress_event(metadata.get('last_summary'), event)
+        run_id = metadata.get('run_id')
+        metadata.update(
+            {
+                'running': True,
+                'last_status': 'running',
+                'last_summary': summary,
+                'last_updated_at_ms': event['timestamp_ms'],
+            }
+        )
+        metadata['job_id'] = job_id
+        snapshot = dict(metadata)
+    if run_id is not None:
+        try:
+            update_job_run(run_id, status='running', summary=summary)
+        except Exception:
+            logger.exception('任务运行进度记录更新失败: job_id=%s run_id=%s stage=%s', job_id, run_id, stage)
+    return snapshot
+
+
 def _mark_job_finished(job_id, status='success', summary=None, error=None, started_at=None):
     finished_at_ms = int(time.time() * 1000)
     duration_ms = None
@@ -170,18 +213,40 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
     error_message = format_job_error(error)
     error_detail = format_job_error_detail(error)
-    persisted_summary = dict(summary) if isinstance(summary, dict) else summary
+    runtime_summary = dict(summary) if isinstance(summary, dict) else summary
+    with JOB_METADATA_LOCK:
+        previous_summary = (JOB_METADATA.get(job_id) or {}).get('last_summary')
+    progress_events = previous_summary.get('progress_events') if isinstance(previous_summary, dict) else None
+    if progress_events:
+        runtime_summary = dict(runtime_summary or {})
+        terminal_messages = {
+            'success': '任务完成',
+            'partial': '任务未全部完成',
+            'partial_success': '任务未全部完成',
+            'error': '任务失败',
+        }
+        runtime_summary['progress_events'] = (
+            list(progress_events)
+            + [{
+                'timestamp_ms': finished_at_ms,
+                'stage': 'finished',
+                'message': terminal_messages.get(status, f'任务结束：{status}'),
+            }]
+        )[-JOB_PROGRESS_EVENT_LIMIT:]
     if error_detail:
-        persisted_summary = dict(persisted_summary or {})
+        persisted_summary = dict(runtime_summary or {})
         persisted_summary['_error_detail'] = error_detail
+    else:
+        persisted_summary = runtime_summary
     metadata = _update_job_metadata(
         job_id,
         running=False,
         last_finished_at_ms=finished_at_ms,
         last_duration_ms=duration_ms,
         last_status=status,
-        last_summary=summary,
+        last_summary=runtime_summary,
         last_error=error_message,
+        last_updated_at_ms=finished_at_ms,
     )
     run_id = metadata.get('run_id')
     if run_id is not None:
@@ -293,6 +358,7 @@ _REPAIR_STAGE_SUMMARY_FIELDS = (
     'skipped_count',
     'precheck_skipped_count',
     'pending_task_count',
+    'remaining_task_count',
     'unsupported_count',
     'expected_records',
     'api_records',
@@ -402,7 +468,26 @@ def _merge_repair_summaries(stage_summaries):
     status = 'success'
     if any((summary.get('status') or 'success') == 'error' for summary in summaries):
         status = 'error'
-    elif any((summary.get('failure_count', 0) or 0) > 0 for summary in summaries):
+    elif any(
+        (summary.get('status') or 'success') in {'partial', 'partial_success'}
+        or (summary.get('failure_count', 0) or 0) > 0
+        or (
+            summary.get('mode') == 'history'
+            and (
+                (summary.get('skipped_count', 0) or 0) > 0
+                or (summary.get('remaining_task_count', 0) or 0) > 0
+                or (summary.get('missing_records', 0) or 0) > 0
+                or (
+                    (summary.get('pending_task_count', 0) or 0) > 0
+                    and (
+                        (summary.get('records', 0) or 0) == 0
+                        or (summary.get('written_records', 0) or 0) < (summary.get('records', 0) or 0)
+                    )
+                )
+            )
+        )
+        for summary in summaries
+    ):
         status = 'partial'
 
     symbols = {
@@ -432,6 +517,7 @@ def _merge_repair_summaries(stage_summaries):
         'failure_count': sum(summary.get('failure_count', 0) or 0 for summary in summaries),
         'skipped_count': sum(summary.get('skipped_count', 0) or 0 for summary in summaries),
         'precheck_skipped_count': sum(summary.get('precheck_skipped_count', 0) or 0 for summary in summaries),
+        'remaining_task_count': sum(summary.get('remaining_task_count', 0) or 0 for summary in summaries),
         'duration_ms': sum(summary.get('duration_ms', 0) or 0 for summary in summaries),
     }
     merged['series_types'] = list(dict.fromkeys(
@@ -466,6 +552,8 @@ def _merge_repair_summaries(stage_summaries):
         summaries,
         'duration_breakdown_by_series_type',
     )
+    if status == 'partial' and any(summary.get('mode') == 'history' for summary in summaries):
+        merged['message'] = '历史缺口未全部补齐'
 
     exchange_summaries = {}
     for stage in compact_stages:
@@ -499,7 +587,7 @@ def _iter_history_symbol_batches(symbols):
         yield normalized_symbols[start:start + batch_size]
 
 
-def _run_history_repair_batches(symbols, series_types, max_workers, stage):
+def _run_history_repair_batches(symbols, series_types, max_workers, stage, progress_callback=None):
     summaries = []
     batches = list(_iter_history_symbol_batches(symbols))
     total_batches = len(batches)
@@ -512,6 +600,14 @@ def _run_history_repair_batches(symbols, series_types, max_workers, stage):
             len(batch_symbols),
             REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
         )
+        if progress_callback:
+            progress_callback(
+                stage=f'history_{stage}_batch_started',
+                message=f'历史补齐{stage}阶段第{batch_index}/{total_batches}批开始',
+                batch_index=batch_index,
+                batch_count=total_batches,
+                batch_symbols=len(batch_symbols),
+            )
         batch_summary = run_history_repair_job(
             symbols=batch_symbols,
             series_types=series_types,
@@ -522,6 +618,19 @@ def _run_history_repair_batches(symbols, series_types, max_workers, stage):
         batch_summary['batch_index'] = batch_index
         batch_summary['batch_count'] = total_batches
         summaries.append(batch_summary)
+        if progress_callback:
+            progress_callback(
+                stage=f'history_{stage}_batch_finished',
+                message=f'历史补齐{stage}阶段第{batch_index}/{total_batches}批完成',
+                batch_index=batch_index,
+                batch_count=total_batches,
+                batch_symbols=len(batch_symbols),
+                status=batch_summary.get('status'),
+                success_count=batch_summary.get('success_count', 0),
+                failure_count=batch_summary.get('failure_count', 0),
+                skipped_count=batch_summary.get('skipped_count', 0),
+                remaining_task_count=batch_summary.get('remaining_task_count', 0),
+            )
     return summaries
 
 
@@ -571,6 +680,11 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
         started_at = time.perf_counter()
         _mark_job_started('repair_market_rolling_job')
         try:
+            _mark_job_progress(
+                'repair_market_rolling_job',
+                'rolling_scope',
+                '正在计算滚动修补范围',
+            )
             tracked_symbols = list(dict.fromkeys(get_active_coins()))
             score_symbols = get_market_structure_score_symbols(
                 top_volume_limit=FETCH_COINS_TOP_VOLUME_COUNT,
@@ -596,6 +710,13 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
                 REPAIR_ROLLING_POINTS,
                 worker_count,
             )
+            _mark_job_progress(
+                'repair_market_rolling_job',
+                'rolling_tracked_started',
+                '开始修补跟踪币种全类型',
+                tracked_symbols=len(tracked_symbols),
+                top_symbols=len(top_symbols),
+            )
             if tracked_symbols:
                 tracked_summary = repair_rolling_tracked_symbols(
                     symbols=tracked_symbols,
@@ -613,6 +734,14 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
                 tracked_summary.get('failure_count', 0),
                 tracked_summary.get('skipped_count', 0),
                 format_duration_ms(tracked_summary.get('duration_ms', 0.0)),
+            )
+            _mark_job_progress(
+                'repair_market_rolling_job',
+                'rolling_tracked_finished',
+                '跟踪币种全类型修补完成',
+                success_count=tracked_summary.get('success_count', 0),
+                failure_count=tracked_summary.get('failure_count', 0),
+                skipped_count=tracked_summary.get('skipped_count', 0),
             )
             logger.info(
                 '滚动修补阶段 2/2: 开始修补 top 榜币种全类型: symbols=%d series_types=%s points=%s max_workers=%s',
@@ -638,6 +767,14 @@ if HOMEPAGE_SERIES_REPAIR_ENABLED:
                 top_summary.get('failure_count', 0),
                 top_summary.get('skipped_count', 0),
                 format_duration_ms(top_summary.get('duration_ms', 0.0)),
+            )
+            _mark_job_progress(
+                'repair_market_rolling_job',
+                'rolling_top_finished',
+                'top 榜币种全类型修补完成',
+                success_count=top_summary.get('success_count', 0),
+                failure_count=top_summary.get('failure_count', 0),
+                skipped_count=top_summary.get('skipped_count', 0),
             )
             summary = _merge_repair_summaries([tracked_summary, top_summary])
             _mark_job_finished('repair_market_rolling_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)
@@ -681,6 +818,11 @@ if REPAIR_HISTORY_ENABLED:
         _mark_job_started('repair_market_history_job')
         try:
             logger.info('开始执行低频历史补齐任务')
+            _mark_job_progress(
+                'repair_market_history_job',
+                'history_scope',
+                '正在计算历史补齐范围',
+            )
             tracked_symbols = list(dict.fromkeys(get_active_coins()))
             top_symbols = []
             worker_count = resolve_repair_worker_count(ENABLED_EXCHANGES)
@@ -710,6 +852,14 @@ if REPAIR_HISTORY_ENABLED:
                 market_symbols = list(dict.fromkeys(tracked_symbols + smart_money_symbols))
                 tracked_symbol_set = set(tracked_symbols)
                 top_symbols = [symbol for symbol in market_symbols if symbol not in tracked_symbol_set]
+            _mark_job_progress(
+                'repair_market_history_job',
+                'history_scope_ready',
+                '历史补齐范围已确定',
+                tracked_symbols=len(tracked_symbols),
+                top_symbols=len(top_symbols),
+                smart_money_symbols=len(smart_money_symbols),
+            )
             logger.info(
                 '历史修补阶段 1/2: 开始修补跟踪币种全类型: symbols=%d series_types=%s coverage_hours=%s max_workers=%s',
                 len(tracked_symbols),
@@ -723,6 +873,9 @@ if REPAIR_HISTORY_ENABLED:
                     list(HOMEPAGE_REQUIRED_SERIES_TYPES),
                     worker_count,
                     'tracked',
+                    progress_callback=lambda **details: _mark_job_progress(
+                        'repair_market_history_job', **details
+                    ),
                 )
                 tracked_summary = _merge_repair_summaries(tracked_batch_summaries)
             else:
@@ -737,6 +890,15 @@ if REPAIR_HISTORY_ENABLED:
                 tracked_summary.get('skipped_count', 0),
                 format_duration_ms(tracked_summary.get('duration_ms', 0.0)),
             )
+            _mark_job_progress(
+                'repair_market_history_job',
+                'history_tracked_finished',
+                '跟踪币种历史补齐完成',
+                success_count=tracked_summary.get('success_count', 0),
+                failure_count=tracked_summary.get('failure_count', 0),
+                skipped_count=tracked_summary.get('skipped_count', 0),
+                remaining_task_count=tracked_summary.get('remaining_task_count', 0),
+            )
             logger.info(
                 '历史修补阶段 2/2: 开始修补 top 榜币种全类型: symbols=%d series_types=%s coverage_hours=%s max_workers=%s',
                 len(top_symbols),
@@ -750,6 +912,9 @@ if REPAIR_HISTORY_ENABLED:
                     list(HOMEPAGE_REQUIRED_SERIES_TYPES),
                     worker_count,
                     'top',
+                    progress_callback=lambda **details: _mark_job_progress(
+                        'repair_market_history_job', **details
+                    ),
                 )
                 top_summary = _merge_repair_summaries(top_batch_summaries)
             else:
@@ -763,6 +928,15 @@ if REPAIR_HISTORY_ENABLED:
                 top_summary.get('failure_count', 0),
                 top_summary.get('skipped_count', 0),
                 format_duration_ms(top_summary.get('duration_ms', 0.0)),
+            )
+            _mark_job_progress(
+                'repair_market_history_job',
+                'history_top_finished',
+                'top 榜币种历史补齐完成',
+                success_count=top_summary.get('success_count', 0),
+                failure_count=top_summary.get('failure_count', 0),
+                skipped_count=top_summary.get('skipped_count', 0),
+                remaining_task_count=top_summary.get('remaining_task_count', 0),
             )
             summary = _merge_repair_summaries(tracked_batch_summaries + top_batch_summaries)
             _mark_job_finished('repair_market_history_job', status=summary.get('status') or 'success', summary=summary, started_at=started_at)

@@ -20,13 +20,14 @@ def test_task_jobs_page_renders():
     assert '任务管理'.encode('utf-8') in response.data
     assert '任务调度控制台'.encode('utf-8') in response.data
     assert 'SCHEDULER_ENABLED=false'.encode('utf-8') in response.data
-    assert '部分失败'.encode('utf-8') in response.data
+    assert '未完成'.encode('utf-8') in response.data
     assert '限流等待'.encode('utf-8') in response.data
     assert '冷却剩余'.encode('utf-8') in response.data
     assert '执行记录'.encode('utf-8') in response.data
     assert '下一页'.encode('utf-8') in response.data
     assert '/runs?limit=5&offset='.encode('utf-8') in response.data
     assert 'history-modal'.encode('utf-8') in response.data
+    assert '关键节点（实时刷新）'.encode('utf-8') in response.data
     assert 'window.CoinxToast'.encode('utf-8') in response.data
     assert 'coinxSuppressGlobalError'.encode('utf-8') in response.data
     assert ':class="[\'message-box\', flash.type]"'.encode('utf-8') not in response.data
