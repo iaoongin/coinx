@@ -10,9 +10,12 @@ from coinx.collector.gate import series as gate_series
 from coinx.collector.gate.series import GateUnsupportedContract
 from coinx.collector.exchange_repair import (
     _build_history_gap_tasks,
+    _format_time_range,
+    _format_timestamp_ms,
     _history_request_window,
     _limit_history_day_segments,
     _flush_group_records,
+    _should_flush_repair_buffer,
     repair_history_symbols,
     repair_rolling_symbols,
 )
@@ -37,6 +40,16 @@ def _assert_duration_breakdown(summary):
     for key in ('api_ms', 'rate_limit_wait_ms', 'db_read_ms', 'db_write_ms', 'parse_ms', 'other_ms'):
         assert key in breakdown
         assert breakdown[key] >= 0
+
+
+def test_format_repair_time_ranges_in_shanghai_time_and_marks_cross_day():
+    assert _format_timestamp_ms(1792131900000) == '2026-10-16 14:25:00'
+    assert _format_time_range(1792131900000, 1792131900000) == (
+        '2026-10-16 14:25:00~2026-10-16 14:25:00'
+    )
+    assert _format_time_range(15 * 60 * 60 * 1000, 16 * 60 * 60 * 1000) == (
+        '1970-01-01 23:00:00~1970-01-02 00:00:00（跨天）'
+    )
 
 
 def test_format_duration_breakdown_uses_friendly_units():
@@ -975,6 +988,13 @@ def test_exchange_repair_grouped_flush_uses_history_batch_size_and_logs(monkeypa
     assert all('pending_records' not in item for item in flushed)
 
 
+def test_history_flush_trigger_uses_record_count_or_time(monkeypatch):
+    assert not _should_flush_repair_buffer(0, last_flush_at=0, batch_size=2, interval_seconds=10, now=100)
+    assert _should_flush_repair_buffer(2, last_flush_at=100, batch_size=2, interval_seconds=10, now=100)
+    assert _should_flush_repair_buffer(1, last_flush_at=89, batch_size=2, interval_seconds=10, now=100)
+    assert _should_flush_repair_buffer(1, last_flush_at=100, batch_size=2, interval_seconds=10, now=100, force=True)
+
+
 def test_gate_history_repair_paginates_open_interest_without_end_time(db_session, monkeypatch):
     _clear_rate_limit_states()
 
@@ -1196,7 +1216,7 @@ def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkey
     ]
 
 
-def test_build_history_gap_tasks_merges_contiguous_points_and_keeps_full_gap_range(monkeypatch):
+def test_build_history_gap_tasks_keeps_natural_day_window_and_missing_points(monkeypatch):
     period_ms = FIVE_MINUTES_MS
     day_segments = [
         (0, 4 * period_ms),
@@ -1218,10 +1238,14 @@ def test_build_history_gap_tasks_merges_contiguous_points_and_keeps_full_gap_ran
     )
 
     assert [(task['start_time'], task['end_time']) for task in tasks] == [
-        (period_ms, 3 * period_ms),
+        (0, 4 * period_ms),
         (10 * period_ms, 14 * period_ms),
     ]
     assert [task['missing_point_count'] for task in tasks] == [3, 5]
+    assert [task['missing_target_times'] for task in tasks] == [
+        [period_ms, 2 * period_ms, 3 * period_ms],
+        [10 * period_ms, 11 * period_ms, 12 * period_ms, 13 * period_ms, 14 * period_ms],
+    ]
     assert stats == {
         'missing_day_count': 2,
         'missing_record_count': 8,
@@ -1306,12 +1330,13 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
 
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             calls.append((start_time, end_time))
+            record_time = end_time if end_time is not None else start_time
             return [
                 {
                     'symbol': symbol,
                     'period': period,
-                    'open_time': start_time,
-                    'close_time': start_time + FIVE_MINUTES_MS - 1,
+                    'open_time': record_time,
+                    'close_time': record_time + FIVE_MINUTES_MS - 1,
                     'open_price': 1,
                     'high_price': 2,
                     'low_price': 1,
@@ -1351,7 +1376,7 @@ def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_s
 
     assert summary['success_count'] == 1
     assert calls == [
-        (latest_closed, latest_closed),
+        (local_today_start, latest_closed),
     ]
     assert '缺天=1,缺点=1,缺段=1' in summary['history_missing_day_stats']
 

@@ -28,7 +28,7 @@
 |---|---|---|---|---|---|---|---|
 | `market_rank_refresh_job` | `scheduled_market_rank_refresh` | 行情刷新 | `interval`，每 `UPDATE_INTERVAL` 秒 | 刷新行情榜快照 | 全市场行情榜币种 | 行情榜快照数据 | 是 |
 | `repair_market_rolling_job` | `scheduled_repair_market_rolling` | 滚动修补 | `interval`，每 `REPAIR_TRACKED_INTERVAL` 秒 | 滚动修补市场币种最新序列 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
-| `repair_market_history_job` | `scheduled_repair_market_history` | 历史补齐 | `interval`，每 `REPAIR_HISTORY_INTERVAL` 秒 | 按 `REPAIR_HISTORY_SYMBOL_BATCH_SIZE` 分批补市场币种历史缺口并写库 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
+| `repair_market_history_job` | `scheduled_repair_market_history` | 历史补齐 | `interval`，每 `REPAIR_HISTORY_INTERVAL` 秒 | 按 `REPAIR_HISTORY_SYMBOL_BATCH_SIZE` 分批补市场币种历史缺口，并按记录数或时间增量刷写 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
 | `update_coins_config_job` | `scheduled_coins_config_update` | 配置刷新 | `cron`，每天 `00:00` | 刷新跟踪币配置 | 币种配置 | 跟踪币配置列表 | 否 |
 
 ## 启动期补全任务

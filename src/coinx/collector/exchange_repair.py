@@ -1,5 +1,6 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 
 from coinx.coin_manager import get_active_coins
 from coinx.collector.exchange_adapters import get_exchange_adapters
@@ -26,6 +27,7 @@ from coinx.config import (
     REPAIR_HISTORY_MAX_WORKERS,
     REPAIR_HISTORY_SYMBOL_BATCH_SIZE,
     REPAIR_HISTORY_WRITE_BATCH_SIZE,
+    REPAIR_FLUSH_INTERVAL_SECONDS,
     REPAIR_ROLLING_MAX_WORKERS,
     REPAIR_ROLLING_POINTS,
     REPAIR_ROLLING_WRITE_BATCH_SIZE,
@@ -40,6 +42,7 @@ from coinx.utils import logger
 
 FIVE_MINUTES_MS = 5 * 60 * 1000
 LOCAL_DAY_OFFSET_MS = 8 * 60 * 60 * 1000
+LOCAL_TIMEZONE = timezone(timedelta(hours=8))
 _history_symbol_cursor = 0
 _RATE_LIMIT_EXCEPTIONS = (
     GateRateLimitUnavailable,
@@ -52,6 +55,28 @@ _RATE_LIMIT_EXCEPTIONS = (
 
 def _is_exchange_budget_unavailable(exchange):
     return _exchange_budget_unavailable_seconds(exchange) > 0
+
+
+def _format_timestamp_ms(timestamp_ms):
+    if timestamp_ms is None:
+        return '-'
+    try:
+        moment = datetime.fromtimestamp(int(timestamp_ms) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return str(timestamp_ms)
+    return moment.astimezone(LOCAL_TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _format_time_range(start_time, end_time):
+    start_label = _format_timestamp_ms(start_time)
+    end_label = _format_timestamp_ms(end_time)
+    cross_day = (
+        start_time is not None
+        and end_time is not None
+        and _format_timestamp_ms(start_time)[:10] != _format_timestamp_ms(end_time)[:10]
+    )
+    suffix = '（跨天）' if cross_day else ''
+    return f'{start_label}~{end_label}{suffix}'
 
 
 def _exchange_budget_unavailable_seconds(exchange):
@@ -373,20 +398,22 @@ def _build_history_gap_tasks(exchange, symbol, series_type, period, day_segments
             continue
         missing_day_count += 1
         missing_record_count += len(missing_times)
-        for gap_group in _group_contiguous_times(missing_times, period=period):
-            gap_range_count += 1
-            gap_tasks.append(
-                {
-                    'exchange': exchange,
-                    'symbol': symbol,
-                    'series_type': series_type,
-                    'period': period,
-                    'start_time': gap_group[0],
-                    'end_time': gap_group[-1],
-                    'missing_point_count': len(gap_group),
-                    'missing_day_count': 1,
-                }
-            )
+        gap_range_count += len(_group_contiguous_times(missing_times, period=period))
+        gap_tasks.append(
+            {
+                'exchange': exchange,
+                'symbol': symbol,
+                'series_type': series_type,
+                'period': period,
+                # Request the whole natural-day window, but only repair the
+                # points found missing during the precheck.
+                'start_time': segment_start,
+                'end_time': segment_target_times[-1],
+                'missing_target_times': sorted(missing_times),
+                'missing_point_count': len(missing_times),
+                'missing_day_count': 1,
+            }
+        )
     return gap_tasks, {
         'missing_day_count': missing_day_count,
         'missing_record_count': missing_record_count,
@@ -588,11 +615,11 @@ def _log_repair_summary(summary):
                 f"预检已完整={summary.get('precheck_skipped_count', 0)}",
                 f"待修补任务={summary.get('pending_task_count', 0)}",
                 f"剩余缺口任务={summary.get('remaining_task_count', 0)}",
-                f"当天裁剪截止={summary.get('current_day_trimmed_end_time')}",
+                f"当天裁剪截止={_format_timestamp_ms(summary.get('current_day_trimmed_end_time'))}",
                 f"缺口分布={summary.get('history_missing_day_stats')}",
                 f"覆盖时长={summary.get('coverage_hours')}",
                 f"是否全量扫描={'是' if summary.get('full_scan') else '否'}",
-                f"修补窗口={summary.get('start_time')}~{summary.get('end_time')}",
+                f"修补窗口={_format_time_range(summary.get('start_time'), summary.get('end_time'))}",
             ]
         )
 
@@ -657,7 +684,7 @@ def _task_progress_label(task):
         start_time = task.get('start_time')
         end_time = task.get('end_time')
         if start_time is not None and end_time is not None:
-            label += f" 区间={start_time}~{end_time}"
+            label += f" 区间={_format_time_range(start_time, end_time)}"
         if task.get('missing_point_count') is not None:
             label += f" 缺点={task.get('missing_point_count')}"
     return label
@@ -787,7 +814,14 @@ def _filter_budget_unavailable_tasks(tasks, mode):
                     'window_precise': task['adapter'].supports_time_window(task['series_type']),
                     'affected': 0,
                     'records': 0,
-                    'expected_records': len(_build_target_times_in_range(task.get('start_time'), task.get('end_time'), period=task.get('period'))),
+                    'expected_records': len(
+                        task.get('missing_target_times')
+                        or _build_target_times_in_range(
+                            task.get('start_time'),
+                            task.get('end_time'),
+                            period=task.get('period'),
+                        )
+                    ),
                     'api_records': 0,
                     'written_records': 0,
                     'pages': 0,
@@ -877,6 +911,103 @@ def _flush_group_records(exchange, group_results, db_session=None, mode='rolling
             result['duration_breakdown_ms'] = round_duration_breakdown(breakdown)
 
     return group_results
+
+
+def _repair_write_batch_size(mode):
+    return max(
+        1,
+        int(
+            REPAIR_HISTORY_WRITE_BATCH_SIZE
+            if mode == 'history'
+            else REPAIR_ROLLING_WRITE_BATCH_SIZE
+        or 1),
+    )
+
+
+def _repair_flush_interval_seconds():
+    return max(1, int(REPAIR_FLUSH_INTERVAL_SECONDS or 1))
+
+
+def _should_flush_repair_buffer(record_count, last_flush_at, batch_size, interval_seconds, now=None, force=False):
+    if record_count <= 0:
+        return False
+    if force or record_count >= max(1, int(batch_size or 1)):
+        return True
+    current_time = time.perf_counter() if now is None else now
+    return current_time - last_flush_at >= max(1, int(interval_seconds or 1))
+
+
+def _flush_repair_buffer(exchange, buffered_results, db_session=None, mode='rolling', trigger='threshold'):
+    if not buffered_results:
+        return 0
+    record_count = sum(len(result.get('pending_records') or []) for result in buffered_results)
+    if record_count <= 0:
+        return 0
+    logger.info(
+        '增量刷写触发: 模式=%s 交易所=%s 任务数=%d 记录数=%d 触发原因=%s',
+        mode,
+        exchange,
+        len(buffered_results),
+        record_count,
+        trigger,
+    )
+    _flush_group_records(exchange, buffered_results, db_session=db_session, mode=mode)
+    return record_count
+
+
+def _run_incremental_repair_group(exchange, runnable_tasks, group_worker, db_session, mode, started_at):
+    runnable_results = []
+    buffered_results = []
+    buffered_record_count = 0
+    last_flush_at = time.perf_counter()
+    total_runnable = len(runnable_tasks)
+    batch_size = _repair_write_batch_size(mode)
+    interval_seconds = _repair_flush_interval_seconds()
+
+    for completed, task in enumerate(runnable_tasks, start=1):
+        result = group_worker(task, db_session=db_session)
+        runnable_results.append(result)
+        pending_records = result.get('pending_records') or []
+        if pending_records:
+            buffered_results.append(result)
+            buffered_record_count += len(pending_records)
+
+        force_flush = completed == total_runnable
+        if _should_flush_repair_buffer(
+            buffered_record_count,
+            last_flush_at,
+            batch_size,
+            interval_seconds,
+            force=force_flush,
+        ):
+            if force_flush:
+                trigger = '任务组完成'
+            elif buffered_record_count >= batch_size:
+                trigger = '记录数阈值'
+            else:
+                trigger = '时间阈值'
+            _flush_repair_buffer(
+                exchange,
+                buffered_results,
+                db_session=db_session,
+                mode=mode,
+                trigger=trigger,
+            )
+            buffered_results = []
+            buffered_record_count = 0
+            last_flush_at = time.perf_counter()
+
+        _log_task_progress(
+            mode,
+            exchange,
+            completed,
+            total_runnable,
+            runnable_results,
+            task,
+            started_at,
+        )
+
+    return runnable_results
 
 
 def _run_grouped_tasks(tasks, worker_func, max_workers, group_key_func, db_session=None, group_runner=None):
@@ -1226,15 +1357,15 @@ def repair_rolling_symbols(symbols=None, series_types=None, exchanges=None, now_
             _format_series_counts(series_counts),
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='rolling')
-        group_results = skipped_results + _run_tasks(
+        runnable_results = _run_incremental_repair_group(
+            exchange,
             runnable_tasks,
             group_worker,
-            1,
-            db_session=db_session,
+            db_session,
             mode='rolling',
-            exchange=exchange,
+            started_at=started,
         )
-        group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='rolling')
+        group_results = skipped_results + runnable_results
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=rolling 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
@@ -1348,15 +1479,19 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                 if history_limit:
                     logger.info(
                         '历史补齐范围按接口能力裁剪: 交易所=%s 序列类型=%s 周期=%s 最大历史=%s小时 '
-                        '原窗口=%s~%s 实际窗口=%s~%s',
+                        '原窗口=%s 实际窗口=%s',
                         adapter.exchange_id,
                         series_type,
                         period,
                         history_limit['max_age_hours'],
-                        history_limit['original_start_time'],
-                        history_limit['original_end_time'],
-                        history_limit['effective_start_time'],
-                        history_limit['effective_end_time'],
+                        _format_time_range(
+                            history_limit['original_start_time'],
+                            history_limit['original_end_time'],
+                        ),
+                        _format_time_range(
+                            history_limit['effective_start_time'],
+                            history_limit['effective_end_time'],
+                        ),
                     )
                 if not day_segments:
                     continue
@@ -1480,7 +1615,13 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             period = task['period']
             target_start_time = task['start_time']
             target_end_time = task['end_time']
-            expected_records = len(_build_target_times_in_range(target_start_time, target_end_time, period=period))
+            missing_target_times = task.get('missing_target_times')
+            target_times = set(
+                missing_target_times
+                if missing_target_times is not None
+                else _build_target_times_in_range(target_start_time, target_end_time, period=period)
+            )
+            expected_records = len(target_times)
             cursor_time = target_start_time
             backward_cursor_end_time = target_end_time
             pending_records = []
@@ -1489,9 +1630,6 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             record_count = 0
             pages = 0
             expanded_request_count = 0
-            target_times = set(
-                _build_target_times_in_range(target_start_time, target_end_time, period=period)
-            )
             seen_target_times = set()
 
             while cursor_time <= target_end_time:
@@ -1723,15 +1861,15 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             len(group_tasks),
         )
         runnable_tasks, skipped_results = _filter_budget_unavailable_tasks(group_tasks, mode='history')
-        group_results = skipped_results + _run_tasks(
+        runnable_results = _run_incremental_repair_group(
+            exchange,
             runnable_tasks,
             group_worker,
-            1,
-            db_session=db_session,
+            db_session,
             mode='history',
-            exchange=exchange,
+            started_at=started,
         )
-        group_results = _flush_group_records(exchange, group_results, db_session=db_session, mode='history')
+        group_results = skipped_results + runnable_results
         result_stats = _summarize_results(group_results)
         logger.info(
             '交易所执行完成: 模式=history 交易所=%s 成功=%s 失败=%s 跳过=%s 跳过原因=%s 耗时=%s 累计耗时分类=%s',
