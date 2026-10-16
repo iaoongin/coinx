@@ -104,10 +104,9 @@
     .table-meta { display: flex; justify-content: space-between; gap: 10px; margin: 10px 0 8px; color: var(--text-muted, #71717a); font-size: 11px; }
     .table-shell { overflow-x: auto; border: 1px solid var(--border-default, #2d3038); border-radius: 8px; background: var(--bg-secondary, #16181d); }
     .signal-table { width: 100%; min-width: 1360px; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
-    .signal-table th, .signal-table td { padding: 9px 8px; border-bottom: 1px solid var(--border-subtle, #292c33); text-align: right; white-space: nowrap; }
-    .signal-table th { background: var(--bg-elevated, #1d2027); color: var(--text-muted, #a1a1aa); font-size: 11px; font-weight: 600; }
+    .signal-table th, .signal-table td { padding: 9px 8px; border-bottom: 1px solid var(--border-subtle, #292c33); text-align: center; white-space: nowrap; }
+    .signal-table th { background: var(--bg-elevated, #1d2027); color: var(--text-muted, #a1a1aa); font-size: 11px; font-weight: 600; text-align: center; }
     .signal-table td { color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: 12px; }
-    .signal-table th:first-child, .signal-table td:first-child { text-align: left; }
     .signal-table tbody tr:hover { background: var(--bg-hover, #20232a); }
     .symbol { color: var(--text-primary, #f4f4f5); font-weight: 700; }
     .direction { display: inline-flex; min-width: 38px; justify-content: center; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
@@ -119,7 +118,7 @@
     .price-delta { margin-left: 2px; }
     .notional-pnl { margin-left: 2px; }
     .trend-cell { padding-left: 4px !important; padding-right: 4px !important; }
-    .trend-chart { display: block; width: 100%; min-width: 110px; height: 30px; }
+    .trend-chart { display: block; width: 100%; min-width: 90px; height: 30px; }
     .trend-line { fill: none; stroke: var(--gold-primary, #d4af37); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
     .detail-button { height: 25px; padding: 0 8px; }
     .empty, .error-box { padding: 42px 16px; color: var(--text-muted, #71717a); text-align: center; font-size: 12px; }
@@ -180,6 +179,14 @@
           </select>
         </div>
         <div class="control-group">
+          <label class="control-label" for="smart-money-asset-type">资产类型</label>
+          <select id="smart-money-asset-type" v-model="underlyingType" @change="changeUnderlyingType" class="select-input" aria-label="资产类型筛选">
+            <option value="COIN">加密货币</option>
+            <option value="TRADITIONAL">传统金融</option>
+            <option value="">不限</option>
+          </select>
+        </div>
+        <div class="control-group">
           <span class="control-label">方向</span>
           <div class="segmented">
             <button v-for="item in sideOptions" :key="item.value" :class="['segment', { active: side === item.value }]" @click="side = item.value; load(1)">[[ item.label ]]</button>
@@ -188,6 +195,7 @@
         <div class="control-group">
           <label class="control-label" for="smart-money-net-notional">净名义</label>
           <select id="smart-money-net-notional" v-model="netNotionalPreset" @change="changeNetNotionalFilter" class="select-input">
+            <option value="">不限</option>
             <option value="1000000">&gt; 1M</option>
             <option value="10000000">&gt; 10M</option>
             <option value="50000000">&gt; 50M</option>
@@ -207,6 +215,26 @@
             <option value="custom">自定义</option>
           </select>
           <input v-if="priceSpreadPreset === 'custom'" v-model="customMaxPriceSpread" @change="applyPriceSpreadFilter" @keyup.enter="applyPriceSpreadFilter" class="search-input price-spread-input" type="number" min="0" step="0.1" placeholder="最大百分比" aria-label="自定义均价距当前价最大百分比">
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-price-trend">7天走势 ≤</label>
+          <select id="smart-money-price-trend" v-model="maxPriceTrendPercent" @change="applyPriceTrendFilter" class="select-input" aria-label="7天走势最大百分比">
+            <option value="">不限</option>
+            <option value="-10">≤ -10%</option>
+            <option value="-20">≤ -20%</option>
+            <option value="10">≤ +10%</option>
+            <option value="20">≤ +20%</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label class="control-label" for="smart-money-price-drawdown">7天高点回撤 ≤</label>
+          <select id="smart-money-price-drawdown" v-model="maxPriceDrawdownPercent" @change="applyPriceDrawdownFilter" class="select-input" aria-label="7天高点回撤最大百分比">
+            <option value="">不限</option>
+            <option value="-5">≤ -5%</option>
+            <option value="-10">≤ -10%</option>
+            <option value="-20">≤ -20%</option>
+            <option value="-30">≤ -30%</option>
+          </select>
         </div>
         <div class="control-group">
           <label class="control-label" for="smart-money-sort">排序</label>
@@ -249,12 +277,12 @@
         <table class="signal-table">
           <colgroup>
             <col style="width:8%"><col style="width:5%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:7%">
-            <col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:11%"><col style="width:9%"><col style="width:9%"><col style="width:4%">
+            <col style="width:8%"><col style="width:8%"><col style="width:6%"><col style="width:8%"><col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:5%">
           </colgroup>
           <thead>
             <tr>
               <th>币种</th><th>方向</th><th>多空名义比</th><th>多头名义</th><th>空头名义</th><th>净名义</th>
-              <th>多头鲸鱼 / 交易员</th><th>空头鲸鱼 / 交易员</th><th>当前标记价</th><th>7天走势</th><th>多头均价</th><th>空头均价</th><th>详情</th>
+              <th>多头鲸鱼 / 交易员</th><th>空头鲸鱼 / 交易员</th><th>当前标记价</th><th>7天走势</th><th class="drawdown-header">7天高点回撤</th><th>多头均价</th><th>空头均价</th><th>详情</th>
             </tr>
           </thead>
           <tbody>
@@ -278,8 +306,9 @@
                 <svg v-if="sparklinePoints(row.price_trend)" class="trend-chart" viewBox="0 0 120 30" preserveAspectRatio="none" aria-label="7天价格走势">
                   <polyline class="trend-line" :points="sparklinePoints(row.price_trend)"></polyline>
                 </svg>
-                <span v-else class="sub-metric">--</span>
+                <span v-else class="trend-chart sub-metric">--</span>
               </td>
+              <td :title="drawdownTitle(row.price_trend)" :class="drawdownClass(row.price_trend)">[[ formatDrawdownPercent(row.price_trend) ]]</td>
               <td>
                 [[ formatPrice(row.long_avg_entry_price) ]]
                 <span v-if="formatProfitPercent(row.long_avg_entry_price, row.mark_price, 'long')" :class="['sub-metric', 'price-delta', profitPercentClass(row.long_avg_entry_price, row.mark_price, 'long')]">([[ formatProfitPercent(row.long_avg_entry_price, row.mark_price, 'long') ]])</span>
@@ -334,11 +363,14 @@
         const snapshotSelection = ref('');
         const keyword = ref('');
         const timeRange = ref('ALL');
+        const underlyingType = ref('COIN');
         const side = ref('');
         const netNotionalPreset = ref('10000000');
         const customMinNetNotional = ref('10000000');
         const priceSpreadPreset = ref('5');
         const customMaxPriceSpread = ref('5');
+        const maxPriceTrendPercent = ref('');
+        const maxPriceDrawdownPercent = ref('-10');
         const sortBy = ref('long_short_ratio');
         const sortOrder = ref('desc');
         const page = ref(1);
@@ -410,9 +442,28 @@
         const trendTitle = (trend) => {
           const values = trendValues(trend);
           if (values.length < 2) return '7天走势：暂无完整数据';
-          const change = (values[values.length - 1] - values[0]) / values[0] * 100;
-          const sign = change > 0 ? '+' : '';
-          return `7天走势（1小时聚合）：${sign}${change.toFixed(2)}%`;
+          return '7天走势（1小时聚合）';
+        };
+        const drawdownPercentValue = (trend) => {
+          const values = trendValues(trend);
+          if (values.length < 2) return null;
+          const peak = Math.max(...values);
+          if (peak === 0) return null;
+          return (values[values.length - 1] - peak) / Math.abs(peak) * 100;
+        };
+        const formatDrawdownPercent = (trend) => {
+          const drawdown = drawdownPercentValue(trend);
+          if (drawdown === null) return '--';
+          return `${drawdown > 0 ? '+' : ''}${drawdown.toFixed(2)}%`;
+        };
+        const drawdownClass = (trend) => {
+          const drawdown = drawdownPercentValue(trend);
+          return drawdown < 0 ? 'metric-negative' : drawdown > 0 ? 'metric-positive' : '';
+        };
+        const drawdownTitle = (trend) => {
+          const drawdown = drawdownPercentValue(trend);
+          if (drawdown === null) return '7天高点回撤：暂无完整数据';
+          return `7天高点回撤：${drawdown.toFixed(2)}%`;
         };
         const pnlValue = (row, positionSide) => {
           const markNumber = Number(row?.mark_price);
@@ -469,6 +520,7 @@
           const params = new URLSearchParams({
             keyword: keyword.value.trim(),
             time_range: timeRange.value,
+            underlying_type: underlyingType.value,
             side: side.value,
             min_net_notional: netNotionalPreset.value === 'custom'
               ? customMinNetNotional.value.trim()
@@ -476,6 +528,8 @@
             max_mark_price_spread_percent: priceSpreadPreset.value === 'custom'
               ? customMaxPriceSpread.value.trim()
               : priceSpreadPreset.value,
+            max_price_trend_percent: maxPriceTrendPercent.value.trim(),
+            max_price_drawdown_percent: maxPriceDrawdownPercent.value.trim(),
             sort_by: sortBy.value,
             sort_order: sortOrder.value,
             page: String(nextPage),
@@ -513,6 +567,11 @@
           load(1);
         };
 
+        const changeUnderlyingType = () => {
+          snapshotSelection.value = '';
+          load(1);
+        };
+
         const changeNetNotionalFilter = () => {
           load(1);
         };
@@ -528,6 +587,14 @@
 
         const applyPriceSpreadFilter = () => {
           if (customMaxPriceSpread.value.trim() === '') return;
+          load(1);
+        };
+
+        const applyPriceTrendFilter = () => {
+          load(1);
+        };
+
+        const applyPriceDrawdownFilter = () => {
           load(1);
         };
 
@@ -549,13 +616,13 @@
         });
 
         return {
-          rows, snapshots, snapshotTime, snapshotSelection, keyword, timeRange, side,
+          rows, snapshots, snapshotTime, snapshotSelection, keyword, timeRange, underlyingType, side,
           netNotionalPreset, customMinNetNotional, sortBy, sortOrder,
-          priceSpreadPreset, customMaxPriceSpread,
+          priceSpreadPreset, customMaxPriceSpread, maxPriceTrendPercent, maxPriceDrawdownPercent,
           page, pageSize, totalCount, stats, loading, errorMessage, selectedRow, sideOptions,
-          pageCount, formatTime, formatMetric, formatExact, formatPrice, sparklinePoints, trendTitle, formatPnl, pnlClass, formatProfitPercent, profitPercentClass, formatRatio, metricClass, sideClass, sideLabel,
-          load, searchImmediately, changeTimeRange, changeNetNotionalFilter, applyNetNotionalFilter,
-          changePriceSpreadFilter, applyPriceSpreadFilter, openDetail,
+          pageCount, formatTime, formatMetric, formatExact, formatPrice, sparklinePoints, trendTitle, formatDrawdownPercent, drawdownClass, drawdownTitle, formatPnl, pnlClass, formatProfitPercent, profitPercentClass, formatRatio, metricClass, sideClass, sideLabel,
+          load, searchImmediately, changeTimeRange, changeUnderlyingType, changeNetNotionalFilter, applyNetNotionalFilter,
+          changePriceSpreadFilter, applyPriceSpreadFilter, applyPriceTrendFilter, applyPriceDrawdownFilter, openDetail,
         };
       },
     }).mount('#app');

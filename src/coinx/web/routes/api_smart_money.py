@@ -28,6 +28,9 @@ def get_smart_money():
             snapshot_time=request.args.get('snapshot_time', type=int),
             min_net_notional=request.args.get('min_net_notional', '10000000'),
             max_mark_price_spread_percent=request.args.get('max_mark_price_spread_percent', '5'),
+            max_price_trend_percent=request.args.get('max_price_trend_percent', ''),
+            max_price_drawdown_percent=request.args.get('max_price_drawdown_percent', '-10'),
+            underlying_type=request.args.get('underlying_type', 'COIN'),
             time_range=time_range,
         )
         return jsonify({

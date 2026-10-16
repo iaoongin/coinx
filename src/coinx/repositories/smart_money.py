@@ -13,7 +13,7 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from coinx import config
 from coinx.collector.binance.smart_money import fetch_smart_money_signal_list
 from coinx.database import get_session
-from coinx.models import MarketFuturesSmartMoneySignal
+from coinx.models import Coin, MarketFuturesSmartMoneySignal
 from coinx.repositories.funding_rate import load_latest_funding_rates
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.utils import logger
@@ -53,6 +53,16 @@ DISPLAY_SORT_COLUMNS = {
 }
 TREND_POINT_COUNT = 168
 TREND_BUCKET_MS = 60 * 60 * 1000
+TRADITIONAL_UNDERLYING_TYPES = (
+    'EQUITY',
+    'HK_EQUITY',
+    'CN_EQUITY',
+    'KR_EQUITY',
+    'COMMODITY',
+    'INDEX',
+    'FX',
+    'PREMARKET',
+)
 
 
 def get_smart_money_scope_symbols(
@@ -323,6 +333,8 @@ def _smart_money_filters(
     period,
     snapshot_time,
     min_net_notional=None,
+    underlying_type=None,
+    asset_symbols=None,
 ):
     filters = [
         'exchange = :exchange',
@@ -346,7 +358,46 @@ def _smart_money_filters(
     if min_net_notional is not None:
         filters.append('ABS(net_notional) > :min_net_notional')
         params['min_net_notional'] = float(min_net_notional)
+    if underlying_type:
+        if not asset_symbols:
+            filters.append('1 = 0')
+        else:
+            symbol_placeholders = []
+            for index, symbol in enumerate(asset_symbols):
+                placeholder = f'asset_symbol_{index}'
+                symbol_placeholders.append(f':{placeholder}')
+                params[placeholder] = symbol
+            filters.append(f"symbol IN ({', '.join(symbol_placeholders)})")
     return filters, params
+
+
+def _normalize_underlying_type(value):
+    if value is None or str(value).strip() == '':
+        return None
+    return str(value).strip().upper()
+
+
+def _get_symbols_by_underlying_type(underlying_type, session=None):
+    if not underlying_type:
+        return None
+    own_session = session is None
+    db = session or get_session()
+    try:
+        type_filter = (
+            Coin.underlying_type.in_(TRADITIONAL_UNDERLYING_TYPES)
+            if underlying_type == 'TRADITIONAL'
+            else Coin.underlying_type == underlying_type
+        )
+        return [
+            row[0]
+            for row in db.query(Coin.symbol)
+            .filter(type_filter)
+            .all()
+            if row[0]
+        ]
+    finally:
+        if own_session:
+            db.close()
 
 
 def _normalize_min_net_notional(value):
@@ -370,6 +421,30 @@ def _normalize_max_mark_price_spread_percent(value):
         raise ValueError('max_mark_price_spread_percent must be a non-negative number') from exc
     if not maximum.is_finite() or maximum < 0:
         raise ValueError('max_mark_price_spread_percent must be a non-negative number')
+    return maximum
+
+
+def _normalize_max_price_trend_percent(value):
+    if value is None or str(value).strip() == '':
+        return None
+    try:
+        minimum = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError('max_price_trend_percent must be a finite number') from exc
+    if not minimum.is_finite():
+        raise ValueError('max_price_trend_percent must be a finite number')
+    return minimum
+
+
+def _normalize_max_price_drawdown_percent(value):
+    if value is None or str(value).strip() == '':
+        return None
+    try:
+        maximum = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError('max_price_drawdown_percent must be a finite number') from exc
+    if not maximum.is_finite():
+        raise ValueError('max_price_drawdown_percent must be a finite number')
     return maximum
 
 
@@ -398,6 +473,57 @@ def _filter_rows_by_mark_price_spread(rows, maximum_percent):
     return filtered
 
 
+def _price_trend_change_percent(row):
+    trend = row.get('price_trend') or []
+    values = [
+        _decimal(point.get('value'))
+        for point in trend
+        if isinstance(point, dict)
+    ]
+    values = [value for value in values if value is not None and value.is_finite()]
+    if len(values) < 2 or values[0] == 0:
+        return None
+    return (values[-1] - values[0]) / abs(values[0]) * Decimal('100')
+
+
+def _filter_rows_by_max_price_trend(rows, maximum_percent):
+    if maximum_percent is None:
+        return list(rows)
+    filtered = []
+    for row in rows:
+        change = _price_trend_change_percent(row)
+        if change is not None and change <= maximum_percent:
+            filtered.append(row)
+    return filtered
+
+
+def _price_trend_drawdown_percent(row):
+    trend = row.get('price_trend') or []
+    values = [
+        _decimal(point.get('value'))
+        for point in trend
+        if isinstance(point, dict)
+    ]
+    values = [value for value in values if value is not None and value.is_finite()]
+    if len(values) < 2:
+        return None
+    peak = max(values)
+    if peak == 0:
+        return None
+    return (values[-1] - peak) / abs(peak) * Decimal('100')
+
+
+def _filter_rows_by_max_price_drawdown(rows, maximum_percent):
+    if maximum_percent is None:
+        return list(rows)
+    filtered = []
+    for row in rows:
+        drawdown = _price_trend_drawdown_percent(row)
+        if drawdown is not None and drawdown <= maximum_percent:
+            filtered.append(row)
+    return filtered
+
+
 def _sum_smart_money_stats(rows):
     stats = {'net_notional': Decimal('0'), 'long_notional': Decimal('0'), 'short_notional': Decimal('0')}
     for row in rows:
@@ -418,6 +544,9 @@ def load_smart_money_page(
     snapshot_time: Optional[int] = None,
     min_net_notional=None,
     max_mark_price_spread_percent=None,
+    max_price_trend_percent=None,
+    max_price_drawdown_percent=None,
+    underlying_type=None,
     exchange: str = 'binance',
     time_range: str = 'ALL',
     period: str = '15m',
@@ -434,6 +563,9 @@ def load_smart_money_page(
     max_mark_price_spread_percent = _normalize_max_mark_price_spread_percent(
         max_mark_price_spread_percent,
     )
+    max_price_trend_percent = _normalize_max_price_trend_percent(max_price_trend_percent)
+    max_price_drawdown_percent = _normalize_max_price_drawdown_percent(max_price_drawdown_percent)
+    underlying_type = _normalize_underlying_type(underlying_type)
     sort_column = DISPLAY_SORT_COLUMNS.get(sort_by, 'net_notional')
     order = 'ASC' if str(sort_order).lower() == 'asc' else 'DESC'
     keyword = (keyword or '').strip().upper()
@@ -455,6 +587,15 @@ def load_smart_money_page(
             filters.append(f'snapshot_time = {int(snapshot_time)}')
         if min_net_notional is not None:
             filters.append(f'abs(net_notional) > {min_net_notional}')
+        if underlying_type:
+            asset_symbols = _get_symbols_by_underlying_type(underlying_type)
+            if not asset_symbols:
+                return _smart_money_page_result([], 0, None, [], {})
+            quoted_symbols = ', '.join(
+                f"'{str(symbol).replace(chr(39), chr(39) * 2)}'"
+                for symbol in asset_symbols
+            )
+            filters.append(f'symbol IN ({quoted_symbols})')
         where_sql = ' AND '.join(filters)
         if snapshot_time is None:
             latest_rows = repository.client.query_rows(
@@ -465,15 +606,21 @@ def load_smart_money_page(
                 return _smart_money_page_result([], 0, None, [], {})
             where_sql = f'{where_sql} AND snapshot_time = {int(snapshot_time)}'
         offset = (page - 1) * page_size
-        if max_mark_price_spread_percent is not None:
+        if (
+            max_mark_price_spread_percent is not None
+            or max_price_trend_percent is not None
+            or max_price_drawdown_percent is not None
+        ):
             rows = repository.client.query_rows(
                 f"SELECT {', '.join(DISPLAY_COLUMNS)} FROM {table} WHERE {where_sql} "
                 f'ORDER BY {sort_column} {order}, symbol ASC'
             )
-            rows = _filter_rows_by_mark_price_spread(
-                _attach_mark_prices(rows),
-                max_mark_price_spread_percent,
-            )
+            rows = _attach_mark_prices(rows)
+            if max_price_trend_percent is not None or max_price_drawdown_percent is not None:
+                rows = _attach_price_trends(rows)
+            rows = _filter_rows_by_mark_price_spread(rows, max_mark_price_spread_percent)
+            rows = _filter_rows_by_max_price_trend(rows, max_price_trend_percent)
+            rows = _filter_rows_by_max_price_drawdown(rows, max_price_drawdown_percent)
             total_count = len(rows)
             stats = _sum_smart_money_stats(rows)
             rows = rows[offset:offset + page_size]
@@ -492,7 +639,8 @@ def load_smart_money_page(
             total_count = count_rows[0].get('total_count', 0) if count_rows else 0
             stats = stats_rows[0] if stats_rows else {}
             rows = _attach_mark_prices(rows)
-        rows = _attach_price_trends(rows)
+        if max_price_trend_percent is None and max_price_drawdown_percent is None:
+            rows = _attach_price_trends(rows)
         snapshot_rows = repository.client.query_rows(
             f'SELECT DISTINCT snapshot_time FROM {table} WHERE '
             f"exchange = '{str(exchange).replace(chr(39), chr(39) * 2)}' "
@@ -510,6 +658,7 @@ def load_smart_money_page(
     own_session = session is None
     db = session or get_session()
     try:
+        asset_symbols = _get_symbols_by_underlying_type(underlying_type, session=db)
         base_filters, params = _smart_money_filters(
             keyword,
             side,
@@ -518,6 +667,8 @@ def load_smart_money_page(
             period,
             snapshot_time,
             min_net_notional,
+            underlying_type,
+            asset_symbols,
         )
         base_where = ' AND '.join(base_filters)
         if snapshot_time is None:
@@ -532,7 +683,11 @@ def load_smart_money_page(
             base_where = ' AND '.join(base_filters)
 
         offset = (page - 1) * page_size
-        if max_mark_price_spread_percent is not None:
+        if (
+            max_mark_price_spread_percent is not None
+            or max_price_trend_percent is not None
+            or max_price_drawdown_percent is not None
+        ):
             rows = db.execute(
                 text(
                     f'SELECT {", ".join(DISPLAY_COLUMNS)} '
@@ -541,10 +696,12 @@ def load_smart_money_page(
                 ),
                 params,
             ).mappings().all()
-            rows = _filter_rows_by_mark_price_spread(
-                _attach_mark_prices(rows, session=db),
-                max_mark_price_spread_percent,
-            )
+            rows = _attach_mark_prices(rows, session=db)
+            if max_price_trend_percent is not None or max_price_drawdown_percent is not None:
+                rows = _attach_price_trends(rows, session=db)
+            rows = _filter_rows_by_mark_price_spread(rows, max_mark_price_spread_percent)
+            rows = _filter_rows_by_max_price_trend(rows, max_price_trend_percent)
+            rows = _filter_rows_by_max_price_drawdown(rows, max_price_drawdown_percent)
             count = len(rows)
             stats = _sum_smart_money_stats(rows)
             rows = rows[offset:offset + page_size]
@@ -570,7 +727,8 @@ def load_smart_money_page(
                 ),
                 params,
             ).mappings().one()
-        rows = _attach_price_trends(rows, session=db)
+        if max_price_trend_percent is None and max_price_drawdown_percent is None:
+            rows = _attach_price_trends(rows, session=db)
         snapshot_filters, snapshot_params = _smart_money_filters(
             keyword,
             side,
@@ -579,6 +737,8 @@ def load_smart_money_page(
             period,
             None,
             min_net_notional,
+            underlying_type,
+            asset_symbols,
         )
         snapshot_rows = db.execute(
             text(

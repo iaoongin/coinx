@@ -14,7 +14,7 @@ from coinx.repositories.smart_money import (
     normalize_smart_money_row,
     save_smart_money_signals,
 )
-from coinx.models import MarketFuturesSmartMoneySignal, MarketFundingRate, MarketKline
+from coinx.models import Coin, MarketFuturesSmartMoneySignal, MarketFundingRate, MarketKline
 
 
 def _payload(rows=None, code='000000'):
@@ -250,6 +250,54 @@ def test_load_smart_money_page_filters_by_absolute_net_notional(db_session):
     assert [row['symbol'] for row in result['data']] == ['BTCUSDT', 'SOLUSDT']
 
 
+def test_load_smart_money_page_filters_by_underlying_type(db_session):
+    Coin.__table__.create(bind=db_session.bind, checkfirst=True)
+    db_session.add_all([
+        Coin(symbol='BTCUSDT', underlying_type='COIN'),
+        Coin(symbol='SNDKUSDT', underlying_type='EQUITY'),
+        Coin(symbol='HKTECHUSDT', underlying_type='HK_EQUITY'),
+    ])
+    db_session.commit()
+    rows = [
+        normalize_smart_money_row(
+            {**_payload()['data'][0], 'symbol': symbol},
+            snapshot_time=1_700_000_000_000,
+        )
+        for symbol in ('BTCUSDT', 'SNDKUSDT', 'HKTECHUSDT')
+    ]
+    save_smart_money_signals(rows, session=db_session)
+
+    result = load_smart_money_page(
+        session=db_session,
+        time_range='30m',
+        min_net_notional=None,
+        max_mark_price_spread_percent=None,
+        max_price_trend_percent=None,
+        underlying_type='COIN',
+        sort_by='symbol',
+        sort_order='asc',
+        page_size=10,
+    )
+
+    assert result['total_count'] == 1
+    assert [row['symbol'] for row in result['data']] == ['BTCUSDT']
+
+    traditional_result = load_smart_money_page(
+        session=db_session,
+        time_range='30m',
+        min_net_notional=None,
+        max_mark_price_spread_percent=None,
+        max_price_trend_percent=None,
+        underlying_type='TRADITIONAL',
+        sort_by='symbol',
+        sort_order='asc',
+        page_size=10,
+    )
+
+    assert traditional_result['total_count'] == 2
+    assert [row['symbol'] for row in traditional_result['data']] == ['HKTECHUSDT', 'SNDKUSDT']
+
+
 def test_load_smart_money_page_filters_by_mark_price_distance(db_session, monkeypatch):
     rows = [
         normalize_smart_money_row(
@@ -289,6 +337,93 @@ def test_load_smart_money_page_filters_by_mark_price_distance(db_session, monkey
 
     assert result['total_count'] == 2
     assert [row['symbol'] for row in result['data']] == ['BTCUSDT', 'ETHUSDT']
+
+
+def test_load_smart_money_page_filters_by_maximum_seven_day_trend(db_session, monkeypatch):
+    rows = [
+        normalize_smart_money_row(
+            {**_payload()['data'][0], 'symbol': symbol},
+            snapshot_time=1_700_000_000_000,
+        )
+        for symbol in ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
+    ]
+    save_smart_money_signals(rows, session=db_session)
+
+    trend_changes = {'BTCUSDT': -10, 'ETHUSDT': -20, 'SOLUSDT': -30}
+
+    def fake_attach_price_trends(signal_rows, session=None):
+        return [
+            {
+                **dict(row),
+                'price_trend': [
+                    {'value': 100},
+                    {'value': 100 + trend_changes[row['symbol']]},
+                ],
+            }
+            for row in signal_rows
+        ]
+
+    monkeypatch.setattr(
+        'coinx.repositories.smart_money._attach_price_trends',
+        fake_attach_price_trends,
+    )
+
+    result = load_smart_money_page(
+        session=db_session,
+        time_range='30m',
+        min_net_notional=None,
+        max_mark_price_spread_percent=None,
+        max_price_trend_percent='-20',
+        sort_by='symbol',
+        sort_order='asc',
+        page_size=10,
+    )
+
+    assert result['total_count'] == 2
+    assert [row['symbol'] for row in result['data']] == ['ETHUSDT', 'SOLUSDT']
+
+
+def test_load_smart_money_page_filters_by_seven_day_peak_drawdown(db_session, monkeypatch):
+    rows = [
+        normalize_smart_money_row(
+            {**_payload()['data'][0], 'symbol': symbol},
+            snapshot_time=1_700_000_000_000,
+        )
+        for symbol in ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
+    ]
+    save_smart_money_signals(rows, session=db_session)
+
+    trend_values = {
+        'BTCUSDT': [100, 95, 90],
+        'ETHUSDT': [100, 90, 80],
+        'SOLUSDT': [100, 105, 95],
+    }
+
+    def fake_attach_price_trends(signal_rows, session=None):
+        return [
+            {**dict(row), 'price_trend': [{'value': value} for value in trend_values[row['symbol']]]}
+            for row in signal_rows
+        ]
+
+    monkeypatch.setattr(
+        'coinx.repositories.smart_money._attach_price_trends',
+        fake_attach_price_trends,
+    )
+
+    result = load_smart_money_page(
+        session=db_session,
+        time_range='30m',
+        min_net_notional=None,
+        max_mark_price_spread_percent=None,
+        max_price_trend_percent=None,
+        max_price_drawdown_percent='-20',
+        sort_by='symbol',
+        sort_order='asc',
+        page_size=10,
+    )
+
+    assert result['total_count'] == 1
+    assert [row['symbol'] for row in result['data']] == ['ETHUSDT']
 
 
 def test_save_smart_money_signals_creates_missing_table(db_session):
