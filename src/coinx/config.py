@@ -269,6 +269,13 @@ PRIMARY_PRICE_EXCHANGE = get_env('PRIMARY_PRICE_EXCHANGE', 'binance')
 OKX_BASE_URL = get_env('OKX_BASE_URL', 'https://www.okx.com')
 OKX_RUBIK_MIN_INTERVAL_MS = get_env('OKX_RUBIK_MIN_INTERVAL_MS', 500, int)
 OKX_429_RETRY_FALLBACK_SECONDS = get_env('OKX_429_RETRY_FALLBACK_SECONDS', 5, int)
+# The OKX Rubik open-interest endpoint currently returns no 5m data beyond
+# roughly the most recent three days. Keep this configurable because the
+# upstream retention window can change independently of the application.
+OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS = max(
+    0,
+    get_env('OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS', 72, int),
+)
 BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://api.bybit.com')
 BYBIT_CATEGORY = get_env('BYBIT_CATEGORY', 'linear')
 GATE_BASE_URL = get_env('GATE_BASE_URL', 'https://fx-api.gateio.ws')

@@ -155,6 +155,35 @@ def _build_history_window_bounds(now_ms, period, coverage_hours):
     return [segments[0][0], segments[-1][1]]
 
 
+def _limit_history_day_segments(adapter, series_type, day_segments, latest_time, period):
+    """Restrict a history scan to the upstream range supported by an adapter."""
+    max_age_getter = getattr(adapter, 'history_max_age_hours', None)
+    max_age_hours = max_age_getter(series_type) if max_age_getter else None
+    if max_age_hours is None or max_age_hours <= 0 or not day_segments:
+        return day_segments, None
+
+    period_ms = _period_to_ms(period)
+    cutoff_time = max(0, latest_time - int(max_age_hours * 60 * 60 * 1000))
+    cutoff_time -= cutoff_time % period_ms
+    limited_segments = []
+    for segment_start, segment_end in day_segments:
+        if segment_end < cutoff_time:
+            continue
+        limited_start = max(segment_start, cutoff_time)
+        if limited_start <= segment_end:
+            limited_segments.append((limited_start, segment_end))
+
+    if len(limited_segments) == len(day_segments) and limited_segments == day_segments:
+        return day_segments, None
+    return limited_segments, {
+        'max_age_hours': max_age_hours,
+        'original_start_time': day_segments[0][0],
+        'original_end_time': day_segments[-1][1],
+        'effective_start_time': limited_segments[0][0] if limited_segments else None,
+        'effective_end_time': limited_segments[-1][1] if limited_segments else None,
+    }
+
+
 def _format_history_missing_day_stats(stats_by_exchange):
     if not stats_by_exchange:
         return '无'
@@ -263,6 +292,26 @@ def _page_limit(series_type, adapter=None):
 
 def _page_end_time(start_time, end_time, page_limit, period='5m'):
     return min(end_time, start_time + max(page_limit - 1, 0) * _period_to_ms(period))
+
+
+def _history_request_window(adapter, series_type, period, start_time, end_time, now_ms):
+    """Widen very short precise requests so APIs do not reject begin=end windows."""
+    padding_getter = getattr(adapter, 'history_window_padding', None)
+    padding_periods = padding_getter(series_type) if padding_getter else 0
+    period_ms = _period_to_ms(period)
+    if (
+        padding_periods <= 0
+        or start_time is None
+        or end_time is None
+        or end_time - start_time > 2 * period_ms
+    ):
+        return start_time, end_time, False
+    padding_ms = padding_periods * period_ms
+    return (
+        max(0, start_time - padding_ms),
+        min(now_ms, end_time + padding_ms),
+        True,
+    )
 
 
 def _uses_open_ended_history_paging(adapter, series_type):
@@ -420,6 +469,7 @@ def _reason_label(reason):
         'unsupported_symbol': '不支持币种',
         'supported_symbol_lookup_failed': '币种支持检查失败',
         'no_data': '无可用数据',
+        'no_target_data': '返回数据未命中目标缺口',
     }
     if reason and str(reason).endswith('_budget_unavailable'):
         return '限流冷却中'
@@ -1287,6 +1337,27 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             periods = adapter.periods_for_series(series_type) if hasattr(adapter, 'periods_for_series') else (HOMEPAGE_SERIES_REPAIR_PERIOD,)
             for period in periods:
                 day_segments = _build_history_day_segments(current_time_ms, period, effective_coverage_hours)
+                latest_time = latest_closed_period_open_time(current_time_ms, period)
+                day_segments, history_limit = _limit_history_day_segments(
+                    adapter,
+                    series_type,
+                    day_segments,
+                    latest_time,
+                    period,
+                )
+                if history_limit:
+                    logger.info(
+                        '历史补齐范围按接口能力裁剪: 交易所=%s 序列类型=%s 周期=%s 最大历史=%s小时 '
+                        '原窗口=%s~%s 实际窗口=%s~%s',
+                        adapter.exchange_id,
+                        series_type,
+                        period,
+                        history_limit['max_age_hours'],
+                        history_limit['original_start_time'],
+                        history_limit['original_end_time'],
+                        history_limit['effective_start_time'],
+                        history_limit['effective_end_time'],
+                    )
                 if not day_segments:
                     continue
                 target_start_time = day_segments[0][0]
@@ -1417,6 +1488,11 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
             api_records = 0
             record_count = 0
             pages = 0
+            expanded_request_count = 0
+            target_times = set(
+                _build_target_times_in_range(target_start_time, target_end_time, period=period)
+            )
+            seen_target_times = set()
 
             while cursor_time <= target_end_time:
                 use_open_ended_history_paging = _uses_open_ended_history_paging(task['adapter'], task['series_type'])
@@ -1437,6 +1513,16 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         else (_page_end_time(cursor_time, target_end_time, limit, period=period) if window_precise else None)
                     )
                 )
+                request_start_time, request_end_time, request_expanded = _history_request_window(
+                    task['adapter'],
+                    task['series_type'],
+                    period,
+                    page_start_time,
+                    page_end_time if window_precise else None,
+                    current_time_ms,
+                )
+                if request_expanded:
+                    expanded_request_count += 1
                 with timed_category(breakdown, 'api_ms'):
                     payload = task['adapter'].fetch_series_payload(
                         series_type=task['series_type'],
@@ -1444,44 +1530,67 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         period=period,
                         limit=limit,
                         session=http_session if db_session is not None else None,
-                        start_time=page_start_time,
-                        end_time=page_end_time if window_precise else None,
+                        start_time=request_start_time,
+                        end_time=request_end_time if window_precise else None,
                     )
                 with timed_category(breakdown, 'parse_ms'):
-                    records = task['adapter'].parse_series_payload(task['series_type'], payload, task['symbol'], period)
-                    api_records += len(records)
-                    records = _trim_unclosed_records(task['series_type'], records, current_time_ms, period=period)
-                    current_end_time = (
-                        target_end_time
-                        if use_open_ended_history_paging
-                        else (page_end_time if window_precise else target_end_time)
+                    records = task['adapter'].parse_series_payload(
+                        task['series_type'], payload, task['symbol'], period
                     )
-                    filtered_records = [
+                    api_records += len(records)
+                    records = _trim_unclosed_records(
+                        task['series_type'], records, current_time_ms, period=period
+                    )
+                    page_records = [
                         record
                         for record in records
-                        if target_start_time <= record.get(time_field, -1) <= current_end_time
+                        if (
+                            not window_precise
+                            or (
+                                (request_start_time is None or record.get(time_field, -1) >= request_start_time)
+                                and (request_end_time is None or record.get(time_field, -1) <= request_end_time)
+                            )
+                        )
                     ]
+                    filtered_records = []
+                    for record in page_records:
+                        record_time = record.get(time_field)
+                        if window_precise:
+                            if record_time not in target_times or record_time in seen_target_times:
+                                continue
+                        elif not (target_start_time <= record_time <= target_end_time):
+                            continue
+                        filtered_records.append(record)
+                        if window_precise:
+                            seen_target_times.add(record_time)
                 pending_records.extend(filtered_records)
                 record_count += len(filtered_records)
-                if filtered_records:
+                if page_records:
                     pages += 1
 
                 if not window_precise:
                     break
                 if use_open_ended_history_paging:
-                    if not filtered_records:
+                    if not page_records:
                         break
-                    last_time = filtered_records[-1].get(time_field)
+                    last_time = page_records[-1].get(time_field)
                     if last_time is None or last_time < cursor_time:
                         break
                     cursor_time = last_time + _period_to_ms(period)
-                    if len(filtered_records) < limit:
+                    if len(page_records) < limit:
                         break
                     continue
                 if use_backward_window_history_paging:
-                    if not filtered_records:
+                    if not page_records:
                         break
-                    earliest_time = filtered_records[-1].get(time_field)
+                    page_times = [
+                        record.get(time_field)
+                        for record in page_records
+                        if record.get(time_field) is not None
+                    ]
+                    if not page_times:
+                        break
+                    earliest_time = min(page_times)
                     if earliest_time is None or earliest_time <= target_start_time:
                         break
                     backward_cursor_end_time = earliest_time - _period_to_ms(period)
@@ -1500,7 +1609,7 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         'period': period,
                         'status': 'skipped',
                         'mode': 'history',
-                        'reason': 'no_data',
+                        'reason': 'no_target_data' if api_records else 'no_data',
                         'window_precise': window_precise,
                         'start_time': target_start_time,
                         'end_time': target_end_time,
@@ -1511,6 +1620,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                         'api_records': api_records,
                         'written_records': 0,
                         'pages': pages,
+                        'expanded_request_count': expanded_request_count,
+                        'request_start_time': request_start_time,
+                        'request_end_time': request_end_time,
                     },
                     breakdown,
                 )
@@ -1532,6 +1644,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     'api_records': api_records,
                     'written_records': 0,
                     'pages': pages,
+                    'expanded_request_count': expanded_request_count,
+                    'request_start_time': request_start_time,
+                    'request_end_time': request_end_time,
                     'pending_records': pending_records,
                 },
                 breakdown,

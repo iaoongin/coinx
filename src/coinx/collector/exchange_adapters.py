@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from coinx.config import OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS
+
 HOMEPAGE_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
 DEFAULT_TAKER_PERIOD_BY_INTERVAL = {
     '5m': '5m',
@@ -35,6 +37,8 @@ class ExchangeSeriesAdapter:
     series_periods: dict = None
     taker_period_by_interval: dict = None
     taker_period_fallback: str = None
+    history_window_padding_periods: int = 0
+    history_max_age_hours_by_series: dict = None
 
     def supports_time_window(self, series_type):
         return series_type in self.precise_window_series_types
@@ -112,6 +116,15 @@ class ExchangeSeriesAdapter:
             return mapped_period
         return self.taker_period_fallback
 
+    def history_window_padding(self, series_type):
+        return max(0, int(self.history_window_padding_periods or 0))
+
+    def history_max_age_hours(self, series_type):
+        if not self.history_max_age_hours_by_series:
+            return None
+        value = self.history_max_age_hours_by_series.get(series_type)
+        return max(0, int(value)) if value is not None else None
+
 
 def _build_binance_adapter():
     from coinx.collector.binance import series as binance_series
@@ -147,6 +160,10 @@ def _build_okx_adapter():
         },
         taker_period_by_interval=OKX_TAKER_PERIOD_BY_INTERVAL,
         taker_period_fallback='5m',
+        history_window_padding_periods=1,
+        history_max_age_hours_by_series={
+            'open_interest_hist': OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS,
+        },
     )
 
 

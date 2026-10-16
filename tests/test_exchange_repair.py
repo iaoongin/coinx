@@ -10,6 +10,8 @@ from coinx.collector.gate import series as gate_series
 from coinx.collector.gate.series import GateUnsupportedContract
 from coinx.collector.exchange_repair import (
     _build_history_gap_tasks,
+    _history_request_window,
+    _limit_history_day_segments,
     _flush_group_records,
     repair_history_symbols,
     repair_rolling_symbols,
@@ -85,8 +87,8 @@ class FakeAdapter:
                 {
                     'symbol': symbol,
                     'period': period,
-                    'open_time': start_time or 900000,
-                    'close_time': (start_time or 900000) + 299999,
+                    'open_time': start_time if start_time is not None else 900000,
+                    'close_time': (start_time if start_time is not None else 900000) + 299999,
                     'open_price': 1,
                     'high_price': 2,
                     'low_price': 1,
@@ -99,7 +101,7 @@ class FakeAdapter:
                 {
                     'symbol': symbol,
                     'period': period,
-                    'event_time': start_time or 900000,
+                    'event_time': start_time if start_time is not None else 900000,
                     'sum_open_interest': 10,
                     'sum_open_interest_value': 15,
                 }
@@ -108,7 +110,7 @@ class FakeAdapter:
             {
                 'symbol': symbol,
                 'period': period,
-                'event_time': start_time or 900000,
+                    'event_time': start_time if start_time is not None else 900000,
                 'buy_vol': 10,
                 'sell_vol': 4,
             }
@@ -476,7 +478,7 @@ def test_exchange_history_repair_collects_adapter_series_periods(db_session, mon
     assert [call[3] for call in calls] == [500, 500]
     assert [call[4] for call in calls] == [0, 0]
     assert [call[5] for call in calls] == [7_200_000, 3_600_000]
-    assert [(row.period, row.event_time) for row in rows] == [('1H', 900000), ('5m', 900000)]
+    assert [(row.period, row.event_time) for row in rows] == [('1H', 0), ('5m', 0)]
 
 
 def test_exchange_rolling_repair_groups_parallelism_by_exchange(db_session, monkeypatch):
@@ -903,7 +905,7 @@ def test_exchange_history_repair_batches_group_writes(db_session, monkeypatch):
 
     assert summary['success_count'] == 2
     assert len(calls) == 2
-    assert upsert_calls == [('binance', 'klines', [900000, 900000], 2000)]
+    assert upsert_calls == [('binance', 'klines', [0, 0], 2000)]
     assert [item['affected'] for item in summary['results']] == [1, 1]
 
 
@@ -1225,6 +1227,60 @@ def test_build_history_gap_tasks_merges_contiguous_points_and_keeps_full_gap_ran
         'missing_record_count': 8,
         'gap_range_count': 2,
     }
+
+
+def test_history_request_window_expands_short_okx_windows():
+    class ShortWindowAdapter:
+        def history_window_padding(self, series_type):
+            return 1
+
+    assert _history_request_window(
+        ShortWindowAdapter(),
+        'open_interest_hist',
+        '5m',
+        1_000_000,
+        1_000_000,
+        2_000_000,
+    ) == (700_000, 1_300_000, True)
+
+    assert _history_request_window(
+        ShortWindowAdapter(),
+        'open_interest_hist',
+        '5m',
+        1_000_000,
+        2_500_000,
+        3_000_000,
+    ) == (1_000_000, 2_500_000, False)
+
+
+def test_history_day_segments_are_limited_by_adapter_history_retention():
+    class LimitedHistoryAdapter:
+        def history_max_age_hours(self, series_type):
+            return 72
+
+    day_ms = 24 * 60 * 60 * 1000
+    segments, details = _limit_history_day_segments(
+        LimitedHistoryAdapter(),
+        'open_interest_hist',
+        [
+            (0, day_ms - FIVE_MINUTES_MS),
+            (day_ms, 2 * day_ms - FIVE_MINUTES_MS),
+            (2 * day_ms, 3 * day_ms - FIVE_MINUTES_MS),
+            (3 * day_ms, 4 * day_ms - FIVE_MINUTES_MS),
+            (4 * day_ms, 5 * day_ms - FIVE_MINUTES_MS),
+        ],
+        5 * day_ms - FIVE_MINUTES_MS,
+        '5m',
+    )
+
+    assert segments == [
+        (2 * day_ms - FIVE_MINUTES_MS, 2 * day_ms - FIVE_MINUTES_MS),
+        (2 * day_ms, 3 * day_ms - FIVE_MINUTES_MS),
+        (3 * day_ms, 4 * day_ms - FIVE_MINUTES_MS),
+        (4 * day_ms, 5 * day_ms - FIVE_MINUTES_MS),
+    ]
+    assert details['max_age_hours'] == 72
+    assert details['effective_start_time'] == 2 * day_ms - FIVE_MINUTES_MS
 
 
 def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_session, monkeypatch):

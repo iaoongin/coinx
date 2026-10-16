@@ -118,7 +118,7 @@
 
 项目中的 OKX 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/okx/series.py)。
 其中 `/api/v5/rubik/` 路径已在代码里归为单独的节流组，建议把这组接口视为高敏接口处理。
-OKX Rubik 本地实现不再对 `5m`/`1H`/`1D` 历史窗口做额外裁剪，修补任务会保留调用方传入的 `begin`/`end`，以支持 `168h` 等长窗口补齐。
+OKX Rubik 历史补齐会保留调用方的时间窗口；对短缺口会额外扩大前后一个周期，避免 `begin=end` 导致空响应，并在落库前过滤回目标缺口点。当前实测 `open_interest-history` 的 `5m` 数据通常只可取最近约 72 小时，应用通过 `OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS` 配置并裁剪超出接口能力的持仓历史范围；K 线和主动买卖量不使用该裁剪。
 
 ### Gate
 
