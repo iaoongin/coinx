@@ -42,6 +42,7 @@ class ExchangeSeriesAdapter:
     taker_period_by_interval: dict = None
     taker_period_fallback: str = None
     history_window_padding_periods: int = 0
+    history_window_padding_periods_by_series: dict = None
     history_max_age_hours_by_series: dict = None
     history_max_age_hours_by_series_period: dict = None
 
@@ -122,6 +123,9 @@ class ExchangeSeriesAdapter:
         return self.taker_period_fallback
 
     def history_window_padding(self, series_type):
+        series_padding = (self.history_window_padding_periods_by_series or {}).get(series_type)
+        if series_padding is not None:
+            return max(0, int(series_padding))
         return max(0, int(self.history_window_padding_periods or 0))
 
     def history_max_age_hours(self, series_type):
@@ -151,6 +155,9 @@ def _build_binance_adapter():
         precise_window_series_types=HOMEPAGE_SERIES_TYPES,
         taker_period_by_interval=DEFAULT_TAKER_PERIOD_BY_INTERVAL,
         taker_period_fallback='5m',
+        history_window_padding_periods_by_series={
+            'taker_buy_sell_vol': 1,
+        },
     )
 
 

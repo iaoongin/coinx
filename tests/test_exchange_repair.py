@@ -19,6 +19,7 @@ from coinx.collector.exchange_repair import (
     repair_history_symbols,
     repair_rolling_symbols,
 )
+from coinx.collector.exchange_adapters import get_exchange_adapters
 from coinx.collector.okx.series import OKXRateLimitUnavailable, clear_okx_rate_limit_state
 from coinx.collector.timing import format_duration_breakdown
 from coinx.models import MarketKline, MarketOpenInterestHist, MarketTakerBuySellVol
@@ -1277,6 +1278,32 @@ def test_history_request_window_expands_okx_windows():
         2_500_000,
         3_000_000,
     ) == (700_000, 2_800_000, True)
+
+
+def test_binance_history_window_padding_only_applies_to_taker_series():
+    adapter = next(
+        adapter for adapter in get_exchange_adapters(['binance']) if adapter.exchange_id == 'binance'
+    )
+
+    assert adapter.history_window_padding('taker_buy_sell_vol') == 1
+    assert adapter.history_window_padding('klines') == 0
+    assert adapter.history_window_padding('open_interest_hist') == 0
+    assert _history_request_window(
+        adapter,
+        'taker_buy_sell_vol',
+        '5m',
+        1_000_000,
+        2_000_000,
+        3_000_000,
+    ) == (700_000, 2_300_000, True)
+    assert _history_request_window(
+        adapter,
+        'klines',
+        '5m',
+        1_000_000,
+        2_000_000,
+        3_000_000,
+    ) == (1_000_000, 2_000_000, False)
 
 
 def test_history_day_segments_are_limited_by_adapter_history_retention():
