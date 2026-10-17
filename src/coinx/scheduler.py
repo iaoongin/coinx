@@ -221,8 +221,8 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         runtime_summary = dict(runtime_summary or {})
         terminal_messages = {
             'success': '任务完成',
-            'partial': '任务未全部完成',
-            'partial_success': '任务未全部完成',
+            'partial': '任务部分成功',
+            'partial_success': '任务部分成功',
             'error': '任务失败',
         }
         runtime_summary['progress_events'] = (
