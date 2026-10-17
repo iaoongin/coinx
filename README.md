@@ -20,6 +20,12 @@ CoinX 是一个面向 Binance U 本位合约的币种监控项目，提供定时
 - 提供币种配置页面，可切换交易对跟踪状态
 - 提供 Flask 页面和 JSON API
 
+## 文档导航
+
+- [`AGENTS.md`](AGENTS.md)：Agent 开发规则和项目硬约束
+- [`docs/`](docs/)：当前业务与技术实现文档
+- [`docs/superpowers/`](docs/superpowers/)：历史计划和设计规格，仅用于追溯
+
 ## Quick Start
 
 ### 1. 安装依赖
@@ -127,9 +133,8 @@ MySQL 数据保存在 Docker 命名卷 `mysql_data` 中。普通停止、重建�
 
 - 运行和安全：`COINX_ENV`、`WEB_*`、`INSTANCE_NAME`
 - 调度和首页：`SCHEDULER_*`、`COLLECTION_SCHEDULER_ONLY`、`UPDATE_INTERVAL`、`TIME_INTERVALS`、`HOMEPAGE_*`
-- 后端和数据库：`DB_*`、`MARKET_BACKEND`、`READ_BACKEND`、`MARKET_WRITE_BACKEND`
-- ClickHouse：`CLICKHOUSE_*`
-- 外部服务：交易所 `*_BASE_URL`、`PROXY_*`、`SR_*`
+- 后端和数据库：`DB_*`
+- 外部服务：交易所 `*_BASE_URL`、`PROXY_*`
 - 采集和通知：`FETCH_COINS_*`、`REPAIR_*`、`FUNDING_RATE_*`、`NOTIFICATION_*`、`RSS_*`
 
 建议把稳定的公共配置放在 `.env`，把本机和生产差异分别放在 `.env.local`、`.env.prod`。密码、JWT 密钥和通知加密密钥不要提交到 Git。
@@ -159,7 +164,7 @@ PROXY_POOL_STRATEGY=round_robin
 
 Profile 配置支持本地和生产环境。优先级为：进程环境变量 > `.env.<profile>` > `.env` > 代码默认值。默认 profile 是 `local`；`.env.local` 和 `.env.prod` 已被 Git 忽略。
 
-复制模板，并按环境填写数据库、密钥和 ClickHouse 配置：
+复制模板，并按环境填写数据库、交易所和密钥配置：
 
 ```bash
 cp .env.example .env
@@ -291,15 +296,20 @@ coinx/
 └─ .env.prod.example
 ```
 
+## 当前数据后端
+
+项目当前统一使用 MySQL：
+
+- 控制面数据使用 MySQL
+- 行情数据使用 MySQL
+- 建表脚本为 [`sql/schema.sql`](sql/schema.sql)
+- 行情采集、历史补齐、任务记录和页面查询均以 MySQL 链路为当前目标
+
+ClickHouse 和 StarRocks 已弃用。相关代码、配置和迁移文档仅用于历史追溯、现有代码排查和必要的下线工作，不作为新部署或新功能的兼容目标。
+
+具体业务实现见 [`docs/`](docs/)，其中交易所接口能力以 [`docs/exchange_series_feasibility.md`](docs/exchange_series_feasibility.md) 为准，调度任务以 [`docs/scheduler_jobs_overview.md`](docs/scheduler_jobs_overview.md) 为准。
+
 ## Data Files
-
-### ClickHouse 行情写入迁移
-
-生产统一使用 MARKET_BACKEND=clickhouse 控制行情读写；DB_TYPE 仍保持
-mysql，用于控制面、任务记录和告警状态。READ_BACKEND 与
-MARKET_WRITE_BACKEND 仅作为双实例灰度、故障回滚时的单方向兼容覆盖。
-
-六张行情表的 ClickHouse 读写切换、`_v2` 原子换表、断点导入和紧急回滚步骤见 [`docs/clickhouse-market-write-migration.md`](docs/clickhouse-market-write-migration.md)。`DB_TYPE` 保持 `mysql`，控制面和告警状态不会迁移到 ClickHouse。
 
 `data/` 目录下常见文件：
 
@@ -314,6 +324,7 @@ MARKET_WRITE_BACKEND 仅作为双实例灰度、故障回滚时的单方向兼�
 
 当前版本已经能完成基础监控闭环，但仍偏工程早期版本，现状包括：
 
+- 当前数据库目标为 MySQL
 - 首页、配置页、跌幅榜已可用
 - 详情页部分展示仍带有占位性质
 - 前端模板中仍有较多内联 CSS 和 JS
