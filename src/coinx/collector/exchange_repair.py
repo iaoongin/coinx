@@ -324,7 +324,7 @@ def _page_end_time(start_time, end_time, page_limit, period='5m'):
 
 
 def _history_request_window(adapter, series_type, period, start_time, end_time, now_ms):
-    """Widen very short precise requests so APIs do not reject begin=end windows."""
+    """Widen precise requests for APIs whose time bounds are exclusive."""
     padding_getter = getattr(adapter, 'history_window_padding', None)
     padding_periods = padding_getter(series_type) if padding_getter else 0
     period_ms = _period_to_ms(period)
@@ -332,7 +332,6 @@ def _history_request_window(adapter, series_type, period, start_time, end_time, 
         padding_periods <= 0
         or start_time is None
         or end_time is None
-        or end_time - start_time > 2 * period_ms
     ):
         return start_time, end_time, False
     padding_ms = padding_periods * period_ms
@@ -1616,6 +1615,9 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
         try:
             time_field = _get_time_field(task['series_type'])
             limit = _page_limit(task['series_type'], adapter=task['adapter'])
+            padding_getter = getattr(task['adapter'], 'history_window_padding', None)
+            padding_periods = padding_getter(task['series_type']) if padding_getter else 0
+            target_page_limit = max(1, limit - 2 * padding_periods)
             period = task['period']
             target_start_time = task['start_time']
             target_end_time = task['end_time']
@@ -1642,7 +1644,10 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     window_precise and _uses_backward_window_history_paging(task['adapter'], task['series_type'])
                 )
                 page_start_time = (
-                    max(target_start_time, backward_cursor_end_time - max(limit - 1, 0) * _period_to_ms(period))
+                    max(
+                        target_start_time,
+                        backward_cursor_end_time - max(target_page_limit - 1, 0) * _period_to_ms(period),
+                    )
                     if use_backward_window_history_paging
                     else (cursor_time if window_precise else None)
                 )
@@ -1652,7 +1657,11 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     else (
                         backward_cursor_end_time
                         if use_backward_window_history_paging
-                        else (_page_end_time(cursor_time, target_end_time, limit, period=period) if window_precise else None)
+                        else (
+                            _page_end_time(cursor_time, target_end_time, target_page_limit, period=period)
+                            if window_precise
+                            else None
+                        )
                     )
                 )
                 request_start_time, request_end_time, request_expanded = _history_request_window(
@@ -1736,7 +1745,10 @@ def repair_history_symbols(symbols=None, series_types=None, exchanges=None, now_
                     if earliest_time is None or earliest_time <= target_start_time:
                         break
                     backward_cursor_end_time = earliest_time - _period_to_ms(period)
-                    cursor_time = max(target_start_time, backward_cursor_end_time - max(limit - 1, 0) * _period_to_ms(period))
+                    cursor_time = max(
+                        target_start_time,
+                        backward_cursor_end_time - max(target_page_limit - 1, 0) * _period_to_ms(period),
+                    )
                     if backward_cursor_end_time < target_start_time:
                         break
                     continue

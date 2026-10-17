@@ -1081,6 +1081,9 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
         def page_limit(self, series_type):
             return 100
 
+        def history_window_padding(self, series_type):
+            return 1
+
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             assert series_type == 'open_interest_hist'
             assert start_time is not None
@@ -1095,7 +1098,7 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
                     'sum_open_interest': 10 + index,
                     'sum_open_interest_value': 100 + index,
                 }
-                for index in range(end_index, start_index - 1, -1)
+                for index in range(end_index - 1, start_index, -1)
             ]
 
         def parse_series_payload(self, series_type, payload, symbol, period):
@@ -1107,7 +1110,7 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
         symbols=['BTCUSDT'],
         series_types=['open_interest_hist'],
         exchanges=['okx'],
-        now_ms=600 * FIVE_MINUTES_MS,
+        now_ms=1600 * FIVE_MINUTES_MS,
         full_scan=True,
         max_workers=1,
         coverage_hours=(600 * 5) // 60,
@@ -1125,10 +1128,9 @@ def test_okx_history_repair_paginates_open_interest_backward_from_end_time(db_se
         .all()
     )
 
-    assert summary['success_count'] == 3
-    assert len(rows) == 600
-    assert rows[0].event_time == 0
-    assert rows[-1].event_time == 599 * FIVE_MINUTES_MS
+    assert summary['success_count'] > 1
+    assert len(rows) == 1120
+    assert rows[-1].event_time - rows[0].event_time == 1119 * FIVE_MINUTES_MS
 
 
 def test_exchange_history_repair_splits_missing_ranges_by_day(db_session, monkeypatch):
@@ -1253,7 +1255,7 @@ def test_build_history_gap_tasks_keeps_natural_day_window_and_missing_points(mon
     }
 
 
-def test_history_request_window_expands_short_okx_windows():
+def test_history_request_window_expands_okx_windows():
     class ShortWindowAdapter:
         def history_window_padding(self, series_type):
             return 1
@@ -1274,7 +1276,7 @@ def test_history_request_window_expands_short_okx_windows():
         1_000_000,
         2_500_000,
         3_000_000,
-    ) == (1_000_000, 2_500_000, False)
+    ) == (700_000, 2_800_000, True)
 
 
 def test_history_day_segments_are_limited_by_adapter_history_retention():
@@ -1472,7 +1474,7 @@ def test_exchange_history_repair_marks_empty_api_response_as_no_data(db_session,
     assert calls
 
 
-def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monkeypatch):
+def test_okx_history_repair_paginates_taker_with_exclusive_bounds_and_exchange_limit(db_session, monkeypatch):
     _clear_rate_limit_states()
     calls = []
 
@@ -1492,10 +1494,15 @@ def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monk
         def page_limit(self, series_type):
             return 100
 
+        def history_window_padding(self, series_type):
+            return 1
+
         def fetch_series_payload(self, series_type, symbol, period, limit, session=None, start_time=None, end_time=None):
             calls.append((start_time, end_time, limit))
             start_index = int(start_time / FIVE_MINUTES_MS)
             end_index = int(end_time / FIVE_MINUTES_MS)
+            # OKX begin/end are exclusive. The repair layer must expand the
+            # request by one period on both sides before filtering target points.
             return [
                 {
                     'symbol': symbol,
@@ -1504,7 +1511,7 @@ def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monk
                     'buy_vol': 10,
                     'sell_vol': 4,
                 }
-                for index in range(start_index, end_index + 1)
+                for index in range(start_index + 1, end_index)
             ]
 
         def parse_series_payload(self, series_type, payload, symbol, period):
@@ -1520,22 +1527,23 @@ def test_okx_history_repair_paginates_taker_with_exchange_limit(db_session, monk
         symbols=['BSBUSDT'],
         series_types=['taker_buy_sell_vol'],
         exchanges=['okx'],
-        now_ms=300 * FIVE_MINUTES_MS,
+        now_ms=1300 * FIVE_MINUTES_MS,
         full_scan=True,
         max_workers=1,
         coverage_hours=25,
         db_session=db_session,
     )
 
-    assert summary['success_count'] == 2
-    assert summary['expected_records'] == 300
-    assert summary['records'] == 300
+    assert summary['success_count'] > 1
+    assert summary['expected_records'] == 820
+    assert summary['records'] == 820
     assert summary['missing_records'] == 0
-    assert summary['written_records'] == 300
+    assert summary['written_records'] == 820
     assert summary['status'] == 'success'
     assert summary['remaining_task_count'] == 0
     assert calls
     assert all(call[2] == 100 for call in calls)
+    assert all((end_time - start_time) // FIVE_MINUTES_MS + 1 <= 100 for start_time, end_time, _ in calls)
 
 
 def test_exchange_history_repair_emits_chinese_precheck_logs(db_session, monkeypatch):

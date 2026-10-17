@@ -166,6 +166,7 @@ def _build_okx_adapter():
         is_symbol_supported=okx_series.is_symbol_supported,
         supported_symbols_fetcher=okx_series.get_supported_symbols,
         page_limits={
+            'klines': 300,
             'open_interest_hist': 100,
             'taker_buy_sell_vol': 100,
         },
