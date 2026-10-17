@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 
-from coinx.config import OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS
+from coinx.config import (
+    OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS,
+    OKX_TAKER_VOLUME_1H_MAX_AGE_HOURS,
+    OKX_TAKER_VOLUME_5M_MAX_AGE_HOURS,
+)
 
 HOMEPAGE_SERIES_TYPES = ('klines', 'open_interest_hist', 'taker_buy_sell_vol')
 DEFAULT_TAKER_PERIOD_BY_INTERVAL = {
@@ -39,6 +43,7 @@ class ExchangeSeriesAdapter:
     taker_period_fallback: str = None
     history_window_padding_periods: int = 0
     history_max_age_hours_by_series: dict = None
+    history_max_age_hours_by_series_period: dict = None
 
     def supports_time_window(self, series_type):
         return series_type in self.precise_window_series_types
@@ -125,6 +130,15 @@ class ExchangeSeriesAdapter:
         value = self.history_max_age_hours_by_series.get(series_type)
         return max(0, int(value)) if value is not None else None
 
+    def history_max_age_hours_for_period(self, series_type, period):
+        configured_period_limits = self.history_max_age_hours_by_series_period or {}
+        if series_type not in configured_period_limits:
+            return self.history_max_age_hours(series_type)
+        period_limits = configured_period_limits.get(series_type) or {}
+        if period in period_limits:
+            return max(0, int(period_limits[period]))
+        return None
+
 
 def _build_binance_adapter():
     from coinx.collector.binance import series as binance_series
@@ -163,6 +177,15 @@ def _build_okx_adapter():
         history_window_padding_periods=1,
         history_max_age_hours_by_series={
             'open_interest_hist': OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS,
+        },
+        history_max_age_hours_by_series_period={
+            'open_interest_hist': {
+                '5m': OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS,
+            },
+            'taker_buy_sell_vol': {
+                '5m': OKX_TAKER_VOLUME_5M_MAX_AGE_HOURS,
+                '1H': OKX_TAKER_VOLUME_1H_MAX_AGE_HOURS,
+            },
         },
     )
 

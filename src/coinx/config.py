@@ -276,6 +276,16 @@ OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS = max(
     0,
     get_env('OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS', 72, int),
 )
+# OKX Rubik contract taker-volume keeps a shorter window for 5m than for 1H.
+# Keep both limits configurable because the upstream retention policy may change.
+OKX_TAKER_VOLUME_5M_MAX_AGE_HOURS = max(
+    0,
+    get_env('OKX_TAKER_VOLUME_5M_MAX_AGE_HOURS', 48, int),
+)
+OKX_TAKER_VOLUME_1H_MAX_AGE_HOURS = max(
+    0,
+    get_env('OKX_TAKER_VOLUME_1H_MAX_AGE_HOURS', 720, int),
+)
 BYBIT_BASE_URL = get_env('BYBIT_BASE_URL', 'https://api.bybit.com')
 BYBIT_CATEGORY = get_env('BYBIT_CATEGORY', 'linear')
 GATE_BASE_URL = get_env('GATE_BASE_URL', 'https://fx-api.gateio.ws')

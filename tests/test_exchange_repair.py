@@ -1307,6 +1307,41 @@ def test_history_day_segments_are_limited_by_adapter_history_retention():
     assert details['effective_start_time'] == 2 * day_ms - FIVE_MINUTES_MS
 
 
+def test_history_day_segments_use_period_specific_adapter_retention():
+    class PeriodLimitedHistoryAdapter:
+        def history_max_age_hours_for_period(self, series_type, period):
+            return {'5m': 48, '1H': 720}.get(period)
+
+    day_ms = 24 * 60 * 60 * 1000
+    day_segments = [
+        (0, day_ms - FIVE_MINUTES_MS),
+        (day_ms, 2 * day_ms - FIVE_MINUTES_MS),
+        (2 * day_ms, 3 * day_ms - FIVE_MINUTES_MS),
+        (3 * day_ms, 4 * day_ms - FIVE_MINUTES_MS),
+        (4 * day_ms, 5 * day_ms - FIVE_MINUTES_MS),
+    ]
+
+    segments, details = _limit_history_day_segments(
+        PeriodLimitedHistoryAdapter(),
+        'taker_buy_sell_vol',
+        day_segments,
+        5 * day_ms - FIVE_MINUTES_MS,
+        '5m',
+    )
+    assert segments[0] == (3 * day_ms - FIVE_MINUTES_MS, 3 * day_ms - FIVE_MINUTES_MS)
+    assert details['max_age_hours'] == 48
+
+    segments, details = _limit_history_day_segments(
+        PeriodLimitedHistoryAdapter(),
+        'taker_buy_sell_vol',
+        day_segments,
+        5 * day_ms - FIVE_MINUTES_MS,
+        '1H',
+    )
+    assert segments == day_segments
+    assert details is None
+
+
 def test_exchange_history_repair_limits_current_day_to_latest_closed_period(db_session, monkeypatch):
     _clear_rate_limit_states()
     calls = []

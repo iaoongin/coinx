@@ -280,6 +280,10 @@ def test_okx_adapter_marks_homepage_series_as_precise_windows():
     assert adapter.page_limit('open_interest_hist') == 100
     assert adapter.page_limit('taker_buy_sell_vol') == 100
     assert adapter.periods_for_series('taker_buy_sell_vol') == ('5m', '1H')
+    assert adapter.history_max_age_hours_for_period('taker_buy_sell_vol', '5m') == 48
+    assert adapter.history_max_age_hours_for_period('taker_buy_sell_vol', '1H') == 720
+    assert adapter.history_max_age_hours_for_period('open_interest_hist', '5m') == 72
+    assert adapter.history_max_age_hours_for_period('open_interest_hist', '1H') is None
     assert adapter.taker_period_for_interval('24h') == '5m'
     assert adapter.taker_period_for_interval('48h') == '1H'
     assert adapter.taker_period_for_interval('168h') == '1H'

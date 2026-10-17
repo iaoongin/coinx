@@ -182,8 +182,12 @@ def _build_history_window_bounds(now_ms, period, coverage_hours):
 
 def _limit_history_day_segments(adapter, series_type, day_segments, latest_time, period):
     """Restrict a history scan to the upstream range supported by an adapter."""
-    max_age_getter = getattr(adapter, 'history_max_age_hours', None)
-    max_age_hours = max_age_getter(series_type) if max_age_getter else None
+    period_max_age_getter = getattr(adapter, 'history_max_age_hours_for_period', None)
+    if period_max_age_getter:
+        max_age_hours = period_max_age_getter(series_type, period)
+    else:
+        max_age_getter = getattr(adapter, 'history_max_age_hours', None)
+        max_age_hours = max_age_getter(series_type) if max_age_getter else None
     if max_age_hours is None or max_age_hours <= 0 or not day_segments:
         return day_segments, None
 

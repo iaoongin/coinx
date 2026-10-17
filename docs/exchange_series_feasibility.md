@@ -111,14 +111,23 @@
 |---|---|---|---|---|---|
 | `GET /api/v5/public/instruments` | 拉 OKX 可用 USDT 永续合约列表，做 `supports_symbol` 缓存 | `instType=SWAP` | `20次/2s` | `IP + Instrument Type` | 走缓存，避免高频刷新 |
 | `GET /api/v5/market/history-candles` | 拉 K 线历史 | `instId`, `bar`, `before`, `after`, `limit` | `20次/2s` | `IP` | `limit` 最大 `300`；实测需按 `before=start_time`、`after=end_time` 传参 |
-| `GET /api/v5/rubik/stat/contracts/open-interest-history` | 拉持仓历史 `open_interest_hist` | `instId`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前实测默认仅返回 `100` 条，分页方式仍需继续确认 |
+| `GET /api/v5/rubik/stat/contracts/open-interest-history` | 拉持仓历史 `open_interest_hist` | `instId`, `period`, `begin`, `end` | `5次/2s` | `IP` | 当前实测默认仅返回 `100` 条；5m 默认按最近 72 小时裁剪，其他周期不直接套用该限制 |
 | `GET /api/v5/rubik/stat/contracts/open-interest-volume` | 合约持仓统计量 | `ccy`, `period`, `begin`, `end` | `5次/2s` | `IP` | 不再作为 `open_interest_hist` 主接口候选 |
 | `GET /api/v5/rubik/stat/taker-volume-contract` | 拉合约维度主动买卖量 `taker_buy_sell_vol` | `instId`, `period`, `begin`, `end` | `5次/2s` | `IP` | 已切换到合约维度新接口，不再使用 `ccy + instType=CONTRACTS` 的聚合接口；仍建议按 `400-500ms` 间隔串行 |
-| `GET /api/v5/public/funding-rate` | 拉单币/全量资金费率 | `instId` | `10次/2s` | `IP + Instrument ID` | 建议按 `200ms+` 间隔控制，全量加载避免频繁触发 |
+| `GET /api/v5/public/funding-rate` | 拉单币/全量当前资金费率 | `instId` | `10次/2s` | `IP + Instrument ID` | 只返回当前费率，不用于历史补齐；历史数据使用下方官方历史接口 |
+| `GET /api/v5/public/funding-rate-history` | 拉资金费率历史 | `instId`, `before`, `after`, `limit` | `10次/2s` | `IP + Instrument ID` | 官方最多 3 个月，当前项目尚未接入市场序列补齐 |
 
 项目中的 OKX 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/okx/series.py)。
 其中 `/api/v5/rubik/` 路径已在代码里归为单独的节流组，建议把这组接口视为高敏接口处理。
-OKX Rubik 历史补齐会保留调用方的时间窗口；对短缺口会额外扩大前后一个周期，避免 `begin=end` 导致空响应，并在落库前过滤回目标缺口点。当前实测 `open_interest-history` 的 `5m` 数据通常只可取最近约 72 小时，应用通过 `OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS` 配置并裁剪超出接口能力的持仓历史范围；K 线和主动买卖量不使用该裁剪。
+OKX Rubik 历史补齐会保留调用方的时间窗口；对短缺口会额外扩大前后一个周期，避免 `begin=end` 导致空响应，并在落库前过滤回目标缺口点。
+
+主动买卖量必须按周期裁剪，不能把业务的 14 天窗口原样请求给两个周期：
+
+- `taker_buy_sell_vol/5m`：默认只扫描最近 `48` 小时，对应 OKX 接口约 `2` 天能力；更早缺口不再反复请求 5m 空数据。
+- `taker_buy_sell_vol/1H`：默认扫描最近 `720` 小时（30 天），覆盖当前业务的 14 天窗口。
+- 以上限制由 `OKX_TAKER_VOLUME_5M_MAX_AGE_HOURS`、`OKX_TAKER_VOLUME_1H_MAX_AGE_HOURS` 配置，且按“序列类型 + 周期”生效。
+
+持仓历史目前仍通过 `OKX_OPEN_INTEREST_HISTORY_MAX_AGE_HOURS` 配置 5m 默认约 72 小时的实测范围；由于 1H/1D 的上游保留能力尚未稳定核实，不把 5m 的限制自动套到其它周期。K 线历史接口官方支持近几年（仅 1s K 线约 3 个月），因此 14 天窗口无需额外历史裁剪。
 
 ### Gate
 
@@ -366,7 +375,10 @@ Bybit V5 API **没有**提供合约维度的 taker buy/sell volume 接口。调�
 - Gate API v4 Futures: [docs](https://www.gate.com/docs/developers/apiv4/en/futures/)
 - OKX API docs v5: [docs-v5](https://www.okx.com/docs-v5/en)
 - OKX API changelog: [log_en](https://www.okx.com/docs-v5/log_en/)
+- OKX `history-candles` 官方说明：支持近几年历史，1s K 线约 3 个月
+- OKX `funding-rate-history` 官方说明：最多 3 个月历史，`limit` 最大 400
 - 补充实测结论：
   - `history-candles` 若把 `before/after` 方向传反，会直接返回空数组。
   - `open-interest-volume` 的 `5m` 实测只会返回最近约 `48h`（约 `570-575` 条）切片；更早时间会返回 `50030 Illegal time range`，说明它并不适合做精确的持仓历史补齐。
   - `open-interest-history` 才是更贴近“持仓量历史”的接口，但当前实测仅返回最近 `100` 条，且尚未确认有效的翻页/游标参数，暂时不能直接替换上线。
+  - `taker-volume-contract` 的 5m/1H 历史能力不同：当前按 5m 约 2 天、1H 约 30 天配置；旧逻辑会对 14 天窗口全部生成 5m 请求，导致较早日期持续得到空响应并在后续轮次重复扫描。
