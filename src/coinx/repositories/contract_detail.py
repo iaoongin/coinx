@@ -1,6 +1,7 @@
 from coinx.repositories.funding_rate import load_latest_funding_rates
 from coinx.repositories.homepage_series import get_homepage_series_snapshot
 from coinx.repositories.market_structure_score import get_market_structure_score_snapshot
+from coinx.repositories.smart_money import load_latest_smart_money_for_symbol
 from coinx.database import get_session
 from coinx.config import TIME_INTERVALS
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
@@ -97,6 +98,7 @@ def get_contract_detail(
 
     funding_map = _call_with_as_of(funding_loader, [normalized_symbol], now_ms) or {}
     funding = funding_map.get(normalized_symbol) or {}
+    smart_money = load_latest_smart_money_for_symbol(normalized_symbol, as_of_ms=now_ms)
 
     funding_rate = funding.get('funding_rate', homepage.get('funding_rate'))
     predicted_rate = funding.get('predicted_rate', homepage.get('predicted_funding_rate'))
@@ -129,6 +131,7 @@ def get_contract_detail(
         },
         'intervals': _build_intervals(homepage),
         'exchange_distribution': _build_exchange_distribution(homepage),
+        'smart_money': smart_money,
     }
 
 

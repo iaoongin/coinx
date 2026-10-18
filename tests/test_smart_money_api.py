@@ -81,6 +81,25 @@ def test_smart_money_page_is_registered():
     assert 'metricClass(stats.net_notional)'.encode('utf-8') not in response.data
     assert 'metricClass(row.net_notional)'.encode('utf-8') not in response.data
     assert 'const pageSize = 10;'.encode('utf-8') in response.data
+    assert response.data.decode('utf-8').count('加载聪明钱数据中') == 1
+    assert '暂无符合当前筛选条件的数据。'.encode('utf-8') in response.data
+    assert 'const showStats = computed'.encode('utf-8') in response.data
+    assert '>币种<'.encode('utf-8') in response.data
+    assert 'smart-money-query-scope'.encode('utf-8') in response.data
+    assert '>筛选模式<'.encode('utf-8') in response.data
+    assert '全部条件'.encode('utf-8') in response.data
+    assert '仅按币种'.encode('utf-8') in response.data
+    assert '筛选条件'.encode('utf-8') in response.data
+    assert '排序与快照'.encode('utf-8') in response.data
+    assert 'queryKeyword'.encode('utf-8') in response.data
+    assert 'ignoreFilters'.encode('utf-8') in response.data
+    assert '@change="load(1)"'.encode('utf-8') not in response.data
+    assert '@change="searchSymbols"'.encode('utf-8') not in response.data
+    assert 'const searchSymbols = () =>'.encode('utf-8') in response.data
+    assert 'locatedSymbol'.encode('utf-8') not in response.data
+    assert 'showAdvancedFilters'.encode('utf-8') not in response.data
+    assert "underlying_type: ignoreOtherFilters ? '' : underlyingType.value".encode('utf-8') in response.data
+    assert "max_price_drawdown_percent: ignoreOtherFilters ? ''".encode('utf-8') in response.data
     assert 'value="1000000"'.encode('utf-8') in response.data
     assert 'value="10000000"'.encode('utf-8') in response.data
     page_html = response.get_data(as_text=True)

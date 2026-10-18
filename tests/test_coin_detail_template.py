@@ -12,10 +12,26 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert '<h2 class="overview-heading">交易所持仓分布</h2>' in template
     assert template.index('<h2 class="overview-heading">交易所持仓分布</h2>') < template.index('<h2>交易机会</h2>')
     assert template.index('<h2>多周期变化</h2>') < template.index('<h2>交易机会</h2>')
+    assert template.index('<h2>多周期变化</h2>') < template.index('<h2>聪明钱</h2>') < template.index('<h2>交易机会</h2>')
     assert template.count('数据时间：') == 6
     assert 'formatTime(detail.as_of)' in template
     assert 'formatTime(opportunityAsOf)' in template
     assert 'formatTime(series.anchor_time)' in template
+    assert 'smartMoneySnapshotTime' in template
+    assert '暂无该合约的聪明钱快照' in template
+    assert 'smartMoneySideLabel' in template
+    assert 'smart-money-section' in template
+    assert 'class="signal-table"' in template
+    assert '<th>当前标记价</th>' in template
+    assert '<th>7天走势</th>' in template
+    assert '<th>7天高点回撤</th>' in template
+    assert '<th>详情</th>' in template
+    assert '多头鲸鱼 / 交易员' in template
+    assert '空头鲸鱼 / 交易员' in template
+    smart_money_table_start = template.index('<table class="signal-table">')
+    smart_money_table = template[smart_money_table_start:template.index('</table>', smart_money_table_start)]
+    assert smart_money_table.count('<th>') == 15
+    assert smart_money_table.count('<col ') == 15
     assert 'opportunityAsOf.value = result.data?.as_of || null' in template
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;' in template
     assert 'opportunity?.entry_state' in template
@@ -87,7 +103,7 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     assert 'echarts.disconnect(chartSyncGroup)' in template
     assert 'el.clientWidth === 0' in template
     assert 'detail.value = result.data; recordRecentSymbol(requestedSymbol); await nextTick(); renderCharts();' in template
-    assert 'v-if="loading && !detail"' not in template
+    assert 'v-if="loading" class="empty">正在加载聪明钱数据...</div>' in template
     assert '历史趋势' in template
     assert '正在加载摘要...' in template
     assert '<period-matrix :coin="matrixCoin"></period-matrix>' in template

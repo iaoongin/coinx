@@ -35,6 +35,17 @@ test.describe('币种详情测试', () => {
     await expect(matrix.locator('.taker-tag')).toHaveCount(2);
   });
 
+  test('多周期变化后展示聪明钱快照', async ({ page }) => {
+    await visit(page, '/coin-detail?symbol=BTCUSDT');
+    const sectionHeadings = await page.locator('main h2').allTextContents();
+    expect(sectionHeadings.indexOf('多周期变化')).toBeLessThan(sectionHeadings.indexOf('聪明钱'));
+    await expect(page.getByRole('heading', { name: '聪明钱', exact: true })).toBeVisible();
+    await expect(page.locator('.smart-money-section .signal-table tbody tr')).toHaveCount(2);
+    await expect(page.locator('.smart-money-section .signal-table')).toContainText('净名义');
+    await expect(page.locator('.smart-money-section .signal-table')).toContainText('7天高点回撤');
+    await expect(page.locator('.smart-money-section .signal-table tbody tr').first()).toContainText('偏多');
+  });
+
   test('首页与详情页使用同一矩阵展示契约', async ({ page }) => {
     const readMatrixContract = async () => {
       const matrix = page.locator('.matrix');

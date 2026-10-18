@@ -13,14 +13,15 @@
     html { color-scheme: dark; }
     body {
       margin: 0;
+      overflow-x: hidden;
       background: var(--bg-primary, #101114);
       color: var(--text-primary, #f4f4f5);
       font-family: "Noto Sans SC", sans-serif;
     }
-    .page-frame { max-width: 1500px; margin: 0 auto; }
-    .page-frame .nav-container { width: 100%; }
+    .page-frame { width: 100%; max-width: 1500px; box-sizing: border-box; margin: 0 auto; padding: 0 14px 28px; }
+    .page-frame .nav-container { width: 100%; box-sizing: border-box; }
     .shell {
-      padding: 22px 24px 28px;
+      padding: 20px;
       border: 1px solid var(--border-default, #2d3038);
       border-radius: 10px;
       background: var(--bg-card, #17191f);
@@ -31,12 +32,14 @@
       align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 18px;
+      margin-bottom: 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-subtle, #292c33);
     }
-    .page-header h1 { margin: 0; font-size: 23px; line-height: 1.25; }
+    .page-header h1 { margin: 0; font-size: var(--font-size-2xl); line-height: 1.25; }
     .page-header h1 span { color: var(--gold-primary, #d4af37); }
-    .page-header p { margin: 7px 0 0; color: var(--text-secondary, #a1a1aa); font-size: 12px; }
-    .header-meta { color: var(--text-muted, #71717a); font-family: var(--font-mono, monospace); font-size: 11px; text-align: right; white-space: nowrap; }
+    .page-header p { margin: 7px 0 0; color: var(--text-secondary, #a1a1aa); font-size: var(--font-size-md); }
+    .header-meta { color: var(--text-muted, #71717a); font-family: var(--font-mono, monospace); font-size: var(--font-size-sm); text-align: right; white-space: nowrap; }
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -50,23 +53,33 @@
       border-radius: 7px;
       background: rgba(255, 255, 255, .02);
     }
-    .stat-label { color: var(--text-muted, #71717a); font-size: 11px; }
-    .stat-value { margin-top: 5px; color: var(--text-primary, #f4f4f5); font-family: var(--font-mono, monospace); font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stat-label { color: var(--text-muted, #71717a); font-size: var(--font-size-sm); }
+    .stat-value { margin-top: 5px; color: var(--text-primary, #f4f4f5); font-family: var(--font-mono, monospace); font-size: var(--font-size-base); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .stat-value.positive { color: #4ade80; }
     .stat-value.negative { color: #f87171; }
     .controls {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin-bottom: 12px;
+      display: block;
+      margin-bottom: 10px;
       padding: 10px;
       border: 1px solid var(--border-subtle, #292c33);
       border-radius: 7px;
-      background: rgba(255, 255, 255, .018);
+      background: var(--bg-secondary, #16181d);
     }
-    .control-group { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-    .control-label { color: var(--text-muted, #71717a); font-size: 11px; white-space: nowrap; }
+    .controls-grid { display: grid; width: 100%; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; gap: 8px; }
+    .lookup-group { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 30px; align-items: stretch; gap: 4px; min-width: 0; }
+    .lookup-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .ignore-filter-toggle { display: inline-flex; align-items: center; gap: 4px; min-width: 0; height: 13.2px; box-sizing: border-box; padding: 0 4px; border: 1px solid var(--border-subtle, #292c33); border-radius: 4px; background: rgba(255, 255, 255, .025); color: var(--text-muted, #71717a); font-size: var(--font-size-xs); line-height: 1.2; white-space: nowrap; cursor: pointer; }
+    .ignore-filter-toggle input { width: 13px; height: 13px; margin: 0; accent-color: var(--gold-primary, #d4af37); }
+    .lookup-group .search-input { width: 100%; max-width: none; min-width: 0; }
+    .lookup-group .btn { width: auto; }
+    .query-state { margin-top: 8px; padding: 7px 9px; border-left: 2px solid var(--gold-primary, #d4af37); background: rgba(212, 175, 55, .08); color: var(--text-secondary, #a1a1aa); font-size: var(--font-size-sm); }
+    .query-state strong { color: var(--gold-bright, #f7d96a); font-family: var(--font-mono, monospace); }
+    .control-group { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 4px; min-width: 0; }
+    .action-group .btn { width: 100%; }
+    .sort-group { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .sort-group .control-label { grid-column: 1 / -1; }
+    .sort-group .select-input { padding-left: 4px; padding-right: 4px; font-size: var(--font-size-xs) !important; }
+    .control-label { color: var(--text-muted, #71717a); font-size: var(--font-size-sm); line-height: 1.2; white-space: nowrap; }
     .search-input, .select-input {
       height: 30px;
       box-sizing: border-box;
@@ -75,14 +88,15 @@
       outline: none;
       background: var(--bg-secondary, #16181d);
       color: var(--text-primary, #f4f4f5);
-      font-size: 12px;
+      font-size: var(--font-size-md) !important;
     }
-    .search-input { width: 165px; padding: 0 9px; }
+    .search-input { width: 165px; padding: 0 9px; font-size: inherit !important; }
     .net-notional-input { width: 115px; }
     .price-spread-input { width: 92px; }
-    .select-input { min-width: 110px; padding: 0 7px; }
+    .control-group > .net-notional-input, .control-group > .price-spread-input { grid-column: 1 / -1; width: 100%; }
+    .select-input { width: 100%; min-width: 0; padding: 0 7px; }
     .search-input:focus, .select-input:focus { border-color: var(--gold-primary, #d4af37); box-shadow: 0 0 0 3px rgba(212, 175, 55, .1); }
-    .segmented { display: inline-flex; gap: 3px; padding: 3px; border-radius: 7px; background: rgba(255, 255, 255, .04); }
+    .segmented { display: flex; gap: 3px; padding: 3px; border-radius: 7px; background: rgba(255, 255, 255, .04); }
     .segment, .btn {
       height: 30px;
       box-sizing: border-box;
@@ -91,57 +105,83 @@
       background: var(--bg-elevated, #1d2027);
       color: var(--text-secondary, #a1a1aa);
       cursor: pointer;
-      font-size: 11px;
+      font-size: var(--font-size-sm);
       font-weight: 600;
       white-space: nowrap;
     }
-    .segment { padding: 0 9px; border-color: transparent; background: transparent; }
+    .segment { flex: 1; padding: 0 9px; border-color: transparent; background: transparent; }
     .segment:hover, .btn:hover { color: var(--text-primary, #f4f4f5); border-color: var(--border-strong, #575b66); }
     .segment.active { border-color: rgba(212, 175, 55, .45); background: rgba(212, 175, 55, .12); color: var(--gold-bright, #f7d96a); }
     .btn { padding: 0 11px; }
     .btn-primary { border-color: var(--gold-primary, #d4af37); background: var(--gold-primary, #d4af37); color: #080808; }
     .btn-primary:hover { background: var(--gold-hover, #e6c34f); color: #080808; }
-    .table-meta { display: flex; justify-content: space-between; gap: 10px; margin: 10px 0 8px; color: var(--text-muted, #71717a); font-size: 11px; }
+    .table-meta { display: flex; justify-content: space-between; gap: 10px; margin: 10px 0 8px; color: var(--text-muted, #71717a); font-size: var(--font-size-sm); }
     .table-shell { overflow-x: auto; border: 1px solid var(--border-default, #2d3038); border-radius: 8px; background: var(--bg-secondary, #16181d); }
     .signal-table { width: 100%; min-width: 1360px; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
     .signal-table th, .signal-table td { padding: 9px 8px; border-bottom: 1px solid var(--border-subtle, #292c33); text-align: center; white-space: nowrap; }
-    .signal-table th { background: var(--bg-elevated, #1d2027); color: var(--text-muted, #a1a1aa); font-size: 11px; font-weight: 600; text-align: center; }
-    .signal-table td { color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: 12px; }
+    .signal-table th { background: var(--bg-elevated, #1d2027); color: var(--text-muted, #a1a1aa); font-size: var(--font-size-sm); font-weight: 600; text-align: center; }
+    .signal-table td { color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: var(--font-size-md); }
     .signal-table tbody tr:hover { background: var(--bg-hover, #20232a); }
     .symbol { color: var(--text-primary, #f4f4f5); font-weight: 700; }
-    .direction { display: inline-flex; min-width: 38px; justify-content: center; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+    .direction { display: inline-flex; min-width: 38px; justify-content: center; padding: 3px 6px; border-radius: 5px; font-size: var(--font-size-xs); font-weight: 700; }
     .direction.buy { border: 1px solid rgba(74, 222, 128, .35); background: rgba(34, 197, 94, .12); color: #86efac; }
     .direction.sell { border: 1px solid rgba(248, 113, 113, .35); background: rgba(239, 68, 68, .12); color: #fca5a5; }
     .metric-positive { color: #4ade80 !important; }
     .metric-negative { color: #f87171 !important; }
-    .sub-metric { color: var(--text-muted, #71717a); font-size: 10px; }
+    .sub-metric { color: var(--text-muted, #71717a); font-size: var(--font-size-xs); }
     .price-delta { margin-left: 2px; }
     .notional-pnl { margin-left: 2px; }
     .trend-cell { padding-left: 4px !important; padding-right: 4px !important; }
     .trend-chart { display: block; width: 100%; min-width: 90px; height: 30px; }
     .trend-line { fill: none; stroke: var(--gold-primary, #d4af37); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
     .detail-button { height: 25px; padding: 0 8px; }
-    .empty, .error-box { padding: 42px 16px; color: var(--text-muted, #71717a); text-align: center; font-size: 12px; }
+    .empty, .error-box { min-height: 168px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 24px 16px; color: var(--text-muted, #71717a); text-align: center; font-size: var(--font-size-md); }
+    .loading-state { gap: 9px; border: 1px dashed var(--border-default, #2d3038); border-radius: 8px; background: var(--bg-secondary, #16181d); }
+    .loading-state::before { content: ''; width: 14px; height: 14px; border: 2px solid var(--border-strong, #575b66); border-top-color: var(--gold-primary, #d4af37); border-radius: 50%; animation: smart-money-spin .8s linear infinite; }
     .error-box { color: #fca5a5; }
-    .pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: 11px; }
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 14px; color: var(--text-secondary, #a1a1aa); font-family: var(--font-mono, monospace); font-size: var(--font-size-sm); }
     .modal-backdrop { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 18px; background: rgba(0, 0, 0, .7); }
     .modal { width: min(620px, 100%); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid var(--border-default, #2d3038); border-radius: 9px; background: var(--bg-card, #17191f); box-shadow: var(--shadow-card, 0 12px 32px rgba(0, 0, 0, .3)); }
     .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle, #292c33); }
-    .modal-header h2 { margin: 0; font-size: 16px; }
+    .modal-header h2 { margin: 0; font-size: var(--font-size-lg); }
     .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 14px 16px 16px; border: 1px solid var(--border-subtle, #292c33); background: var(--border-subtle, #292c33); }
     .detail-item { min-width: 0; padding: 9px 10px; background: var(--bg-secondary, #16181d); }
-    .detail-label { display: block; color: var(--text-muted, #71717a); font-size: 10px; }
-    .detail-value { display: block; margin-top: 4px; overflow-wrap: anywhere; color: var(--text-primary, #f4f4f5); font-family: var(--font-mono, monospace); font-size: 12px; }
+    .detail-label { display: block; color: var(--text-muted, #71717a); font-size: var(--font-size-xs); }
+    .detail-value { display: block; margin-top: 4px; overflow-wrap: anywhere; color: var(--text-primary, #f4f4f5); font-family: var(--font-mono, monospace); font-size: var(--font-size-md); }
+    @media (max-width: 1180px) and (min-width: 761px) {
+      .page-frame .nav-container { gap: 8px; padding-left: 10px; padding-right: 10px; }
+      .page-frame .nav-item, .page-frame .nav-menu-trigger { padding-left: 10px; padding-right: 10px; }
+      .page-frame .as-of-input { width: 132px; }
+    }
+    @media (max-width: 1100px) and (min-width: 761px) {
+      .controls-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .lookup-group { grid-column: span 2; }
+    }
     @media (max-width: 760px) {
+      :root {
+        --font-size-xs: 9px;
+        --font-size-sm: 10px;
+        --font-size-md: 11px;
+        --font-size-base: 14px;
+        --font-size-lg: 15px;
+        --font-size-2xl: 20px;
+      }
+      .page-frame { padding: 0 8px 20px; }
       .shell { padding: 16px 12px 22px; }
       .page-header { flex-direction: column; }
+      .page-header p { margin-top: 5px; line-height: 1.45; }
       .header-meta { text-align: left; white-space: normal; }
       .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .controls { align-items: flex-start; flex-direction: column; }
-      .control-group { width: 100%; flex-wrap: wrap; }
+      .stat { padding: 8px 10px; }
+      .stat-value { margin-top: 4px; }
+      .controls-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+      .lookup-group { grid-column: 1 / -1; width: 100%; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 30px; }
+      .action-group { grid-column: 1 / -1; }
+      .control-group { min-width: 0; }
       .search-input { width: min(100%, 260px); }
       .detail-grid { grid-template-columns: 1fr; }
     }
+    @keyframes smart-money-spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -155,124 +195,141 @@
         </div>
         <div class="header-meta">
           <div>数据源：Binance Futures</div>
-          <div v-if="snapshotTime">快照：[[ formatTime(snapshotTime) ]]</div>
+          <div v-if="!loading && !errorMessage && snapshotTime">快照：[[ formatTime(snapshotTime) ]]</div>
+          <div v-else-if="!loading && !errorMessage">暂无符合当前筛选的快照</div>
         </div>
       </header>
 
       <section class="stats-grid" aria-label="聪明钱统计">
-        <div class="stat"><div class="stat-label">当前结果数</div><div class="stat-value">[[ totalCount ]]</div></div>
-        <div class="stat"><div class="stat-label">净名义价值合计</div><div :title="formatExact(stats.net_notional)" class="stat-value">[[ formatMetric(stats.net_notional) ]]</div></div>
-        <div class="stat"><div class="stat-label">多头名义价值</div><div :title="formatExact(stats.long_notional)" class="stat-value positive">[[ formatMetric(stats.long_notional) ]]</div></div>
-        <div class="stat"><div class="stat-label">空头名义价值</div><div :title="formatExact(stats.short_notional)" class="stat-value negative">[[ formatMetric(stats.short_notional) ]]</div></div>
+        <div class="stat"><div class="stat-label">当前结果数</div><div class="stat-value">[[ showStats ? totalCount : '--' ]]</div></div>
+        <div class="stat"><div class="stat-label">净名义价值合计</div><div :title="showStats ? formatExact(stats.net_notional) : ''" class="stat-value">[[ showStats ? formatMetric(stats.net_notional) : '--' ]]</div></div>
+        <div class="stat"><div class="stat-label">多头名义价值</div><div :title="showStats ? formatExact(stats.long_notional) : ''" class="stat-value positive">[[ showStats ? formatMetric(stats.long_notional) : '--' ]]</div></div>
+        <div class="stat"><div class="stat-label">空头名义价值</div><div :title="showStats ? formatExact(stats.short_notional) : ''" class="stat-value negative">[[ showStats ? formatMetric(stats.short_notional) : '--' ]]</div></div>
       </section>
 
       <section class="controls" aria-label="聪明钱筛选">
-        <div class="control-group">
-          <span class="control-label">币种</span>
-          <input v-model="keyword" @keyup.enter="searchImmediately" class="search-input" type="search" placeholder="搜索 BTCUSDT" aria-label="搜索币种">
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-time-range">周期</label>
-          <select id="smart-money-time-range" v-model="timeRange" @change="changeTimeRange" class="select-input">
-            <option value="ALL">ALL</option>
-            <option value="30m">30m</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-asset-type">资产类型</label>
-          <select id="smart-money-asset-type" v-model="underlyingType" @change="changeUnderlyingType" class="select-input" aria-label="资产类型筛选">
-            <option value="COIN">加密货币</option>
-            <option value="TRADITIONAL">传统金融</option>
-            <option value="">不限</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <span class="control-label">方向</span>
-          <div class="segmented">
-            <button v-for="item in sideOptions" :key="item.value" :class="['segment', { active: side === item.value }]" @click="side = item.value; load(1)">[[ item.label ]]</button>
+        <div class="controls-grid" aria-label="筛选条件，排序与快照">
+          <div class="lookup-group">
+            <div class="lookup-heading">
+              <span class="control-label">币种</span>
+            </div>
+            <input v-model="keyword" @keyup.enter="searchSymbols" class="search-input" type="search" placeholder="BTCUSDT" aria-label="币种搜索">
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-query-scope">筛选模式</label>
+            <select id="smart-money-query-scope" v-model="ignoreFilters" class="select-input">
+              <option :value="false">全部条件</option>
+              <option :value="true">仅按币种</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-time-range">周期</label>
+            <select id="smart-money-time-range" v-model="timeRange" @change="changeTimeRange" class="select-input">
+              <option value="ALL">ALL</option>
+              <option value="30m">30m</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-asset-type">资产类型</label>
+            <select id="smart-money-asset-type" v-model="underlyingType" @change="changeUnderlyingType" class="select-input" aria-label="资产类型筛选">
+              <option value="COIN">加密货币</option>
+              <option value="TRADITIONAL">传统金融</option>
+              <option value="">不限</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-side">方向</label>
+            <select id="smart-money-side" v-model="side" class="select-input" aria-label="方向筛选">
+              <option v-for="item in sideOptions" :key="item.value" :value="item.value">[[ item.label ]]</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-net-notional">净名义</label>
+            <select id="smart-money-net-notional" v-model="netNotionalPreset" class="select-input">
+              <option value="">不限</option>
+              <option value="1000000">&gt; 1M</option>
+              <option value="10000000">&gt; 10M</option>
+              <option value="50000000">&gt; 50M</option>
+              <option value="100000000">&gt; 100M</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input v-if="netNotionalPreset === 'custom'" v-model="customMinNetNotional" @keyup.enter="searchSymbols" class="search-input net-notional-input" type="number" min="0" step="100000" placeholder="最小值" aria-label="自定义净名义最小值">
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-price-spread">均价距当前价</label>
+            <select id="smart-money-price-spread" v-model="priceSpreadPreset" class="select-input">
+              <option value="">不限</option>
+              <option value="5">&lt; 5%</option>
+              <option value="10">&lt; 10%</option>
+              <option value="20">&lt; 20%</option>
+              <option value="50">&lt; 50%</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input v-if="priceSpreadPreset === 'custom'" v-model="customMaxPriceSpread" @keyup.enter="searchSymbols" class="search-input price-spread-input" type="number" min="0" step="0.1" placeholder="最大百分比" aria-label="自定义均价距当前价最大百分比">
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-price-trend">7天走势 ≤</label>
+            <select id="smart-money-price-trend" v-model="maxPriceTrendPercent" class="select-input" aria-label="7天走势最大百分比">
+              <option value="">不限</option>
+              <option value="-10">≤ -10%</option>
+              <option value="-20">≤ -20%</option>
+              <option value="10">≤ +10%</option>
+              <option value="20">≤ +20%</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label class="control-label" for="smart-money-price-drawdown">7天高点回撤 ≤</label>
+            <select id="smart-money-price-drawdown" v-model="maxPriceDrawdownPercent" class="select-input">
+              <option value="">不限</option>
+              <option value="-5">≤ -5%</option>
+              <option value="-10">≤ -10%</option>
+              <option value="-20">≤ -20%</option>
+              <option value="-30">≤ -30%</option>
+            </select>
+          </div>
+          <div class="control-group sort-group">
+              <label class="control-label" for="smart-money-sort">排序</label>
+              <select id="smart-money-sort" v-model="sortBy" class="select-input">
+                <option value="long_short_ratio">多空名义比</option>
+                <option value="net_notional">净名义价值</option>
+                <option value="long_notional">多头名义价值</option>
+                <option value="short_notional">空头名义价值</option>
+                <option value="long_whales">多头鲸鱼数</option>
+                <option value="short_whales">空头鲸鱼数</option>
+                <option value="symbol">币种</option>
+              </select>
+              <select v-model="sortOrder" class="select-input" aria-label="排序方向">
+                <option value="desc">从高到低</option>
+                <option value="asc">从低到高</option>
+              </select>
+          </div>
+          <div class="control-group">
+              <label class="control-label" for="smart-money-snapshot">快照</label>
+              <select id="smart-money-snapshot" v-model="snapshotSelection" class="select-input">
+                <option value="">最新快照</option>
+                <option v-for="item in snapshots" :key="item" :value="String(item)">[[ formatTime(item) ]]</option>
+              </select>
+          </div>
+          <div class="control-group action-group">
+            <span class="control-label">操作</span>
+            <button class="btn btn-primary" type="button" @click="searchSymbols" :disabled="loading">搜索</button>
           </div>
         </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-net-notional">净名义</label>
-          <select id="smart-money-net-notional" v-model="netNotionalPreset" @change="changeNetNotionalFilter" class="select-input">
-            <option value="">不限</option>
-            <option value="1000000">&gt; 1M</option>
-            <option value="10000000">&gt; 10M</option>
-            <option value="50000000">&gt; 50M</option>
-            <option value="100000000">&gt; 100M</option>
-            <option value="custom">自定义</option>
-          </select>
-          <input v-if="netNotionalPreset === 'custom'" v-model="customMinNetNotional" @change="applyNetNotionalFilter" @keyup.enter="applyNetNotionalFilter" class="search-input net-notional-input" type="number" min="0" step="100000" placeholder="最小值" aria-label="自定义净名义最小值">
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-price-spread">均价距当前价</label>
-          <select id="smart-money-price-spread" v-model="priceSpreadPreset" @change="changePriceSpreadFilter" class="select-input">
-            <option value="">不限</option>
-            <option value="5">&lt; 5%</option>
-            <option value="10">&lt; 10%</option>
-            <option value="20">&lt; 20%</option>
-            <option value="50">&lt; 50%</option>
-            <option value="custom">自定义</option>
-          </select>
-          <input v-if="priceSpreadPreset === 'custom'" v-model="customMaxPriceSpread" @change="applyPriceSpreadFilter" @keyup.enter="applyPriceSpreadFilter" class="search-input price-spread-input" type="number" min="0" step="0.1" placeholder="最大百分比" aria-label="自定义均价距当前价最大百分比">
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-price-trend">7天走势 ≤</label>
-          <select id="smart-money-price-trend" v-model="maxPriceTrendPercent" @change="applyPriceTrendFilter" class="select-input" aria-label="7天走势最大百分比">
-            <option value="">不限</option>
-            <option value="-10">≤ -10%</option>
-            <option value="-20">≤ -20%</option>
-            <option value="10">≤ +10%</option>
-            <option value="20">≤ +20%</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-price-drawdown">7天高点回撤 ≤</label>
-          <select id="smart-money-price-drawdown" v-model="maxPriceDrawdownPercent" @change="applyPriceDrawdownFilter" class="select-input" aria-label="7天高点回撤最大百分比">
-            <option value="">不限</option>
-            <option value="-5">≤ -5%</option>
-            <option value="-10">≤ -10%</option>
-            <option value="-20">≤ -20%</option>
-            <option value="-30">≤ -30%</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-sort">排序</label>
-          <select id="smart-money-sort" v-model="sortBy" @change="load(1)" class="select-input">
-            <option value="long_short_ratio">多空名义比</option>
-            <option value="net_notional">净名义价值</option>
-            <option value="long_notional">多头名义价值</option>
-            <option value="short_notional">空头名义价值</option>
-            <option value="long_whales">多头鲸鱼数</option>
-            <option value="short_whales">空头鲸鱼数</option>
-            <option value="symbol">币种</option>
-          </select>
-          <select v-model="sortOrder" @change="load(1)" class="select-input" aria-label="排序方向">
-            <option value="desc">从高到低</option>
-            <option value="asc">从低到高</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label" for="smart-money-snapshot">快照</label>
-          <select id="smart-money-snapshot" v-model="snapshotSelection" @change="load(1)" class="select-input">
-            <option value="">最新快照</option>
-            <option v-for="item in snapshots" :key="item" :value="String(item)">[[ formatTime(item) ]]</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" @click="load(page)" :disabled="loading">[[ loading ? '加载中...' : '刷新' ]]</button>
+        <div v-if="queryKeyword" class="query-state">已搜索 <strong>[[ queryKeyword ]]</strong><span v-if="ignoreFilters">，已忽略其他筛选条件</span></div>
       </section>
 
       <div class="table-meta">
-        <span>[[ snapshotTime ? `快照时间 ${formatTime(snapshotTime)}` : '暂无已采集快照' ]]</span>
-        <span v-if="totalCount">第 [[ page ]] / [[ pageCount ]] 页，每页 [[ pageSize ]] 条</span>
+        <span v-if="!loading && !errorMessage && snapshotTime">快照时间 [[ formatTime(snapshotTime) ]]</span>
+        <span v-else-if="!loading && !errorMessage">暂无符合当前筛选的快照</span>
+        <span v-if="showStats && totalCount">第 [[ page ]] / [[ pageCount ]] 页，每页 [[ pageSize ]] 条</span>
       </div>
 
       <div v-if="errorMessage" class="error-box">
         <div>[[ errorMessage ]]</div>
         <button class="btn" style="margin-top:10px;" @click="load(page)">重试</button>
       </div>
-      <div v-else-if="loading" class="empty">正在加载聪明钱快照...</div>
-      <div v-else-if="!rows.length" class="empty">暂无聪明钱数据，请确认采集任务已经成功执行。</div>
+      <div v-else-if="loading" class="empty loading-state">加载聪明钱数据中</div>
+      <div v-else-if="!rows.length" class="empty">暂无符合当前筛选条件的数据。</div>
       <div v-else class="table-shell">
         <table class="signal-table">
           <colgroup>
@@ -352,7 +409,7 @@
   </div>
 
   <script>
-    const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
+    const { createApp, ref, computed, onMounted } = Vue;
 
     createApp({
       delimiters: ['[[', ']]'],
@@ -362,6 +419,8 @@
         const snapshotTime = ref(null);
         const snapshotSelection = ref('');
         const keyword = ref('');
+        const queryKeyword = ref('');
+        const ignoreFilters = ref(false);
         const timeRange = ref('ALL');
         const underlyingType = ref('COIN');
         const side = ref('');
@@ -376,7 +435,8 @@
         const page = ref(1);
         const pageSize = 10;
         const totalCount = ref(0);
-        const stats = ref({ net_notional: 0, long_notional: 0, short_notional: 0 });
+        const emptyStats = () => ({ net_notional: 0, long_notional: 0, short_notional: 0 });
+        const stats = ref(emptyStats());
         const loading = ref(false);
         const errorMessage = ref('');
         const selectedRow = ref(null);
@@ -385,10 +445,10 @@
           { value: 'BUY', label: '偏多' },
           { value: 'SELL', label: '偏空' },
         ];
-        let searchTimer = null;
         let latestRequestId = 0;
 
         const pageCount = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize)));
+        const showStats = computed(() => !loading.value && !errorMessage.value);
         const formatTime = (timestamp) => timestamp ? new Date(Number(timestamp)).toLocaleString('zh-CN') : '--';
         const formatMetric = (value) => {
           if (value === null || value === undefined || value === '') return '--';
@@ -517,19 +577,20 @@
           const nextPage = Math.min(Math.max(Number(targetPage) || 1, 1), pageCount.value || 1);
           loading.value = true;
           errorMessage.value = '';
+          const ignoreOtherFilters = ignoreFilters.value && Boolean(queryKeyword.value);
           const params = new URLSearchParams({
-            keyword: keyword.value.trim(),
+            keyword: queryKeyword.value,
             time_range: timeRange.value,
-            underlying_type: underlyingType.value,
-            side: side.value,
-            min_net_notional: netNotionalPreset.value === 'custom'
+            underlying_type: ignoreOtherFilters ? '' : underlyingType.value,
+            side: ignoreOtherFilters ? '' : side.value,
+            min_net_notional: ignoreOtherFilters ? '' : netNotionalPreset.value === 'custom'
               ? customMinNetNotional.value.trim()
               : netNotionalPreset.value,
-            max_mark_price_spread_percent: priceSpreadPreset.value === 'custom'
+            max_mark_price_spread_percent: ignoreOtherFilters ? '' : priceSpreadPreset.value === 'custom'
               ? customMaxPriceSpread.value.trim()
               : priceSpreadPreset.value,
-            max_price_trend_percent: maxPriceTrendPercent.value.trim(),
-            max_price_drawdown_percent: maxPriceDrawdownPercent.value.trim(),
+            max_price_trend_percent: ignoreOtherFilters ? '' : maxPriceTrendPercent.value.trim(),
+            max_price_drawdown_percent: ignoreOtherFilters ? '' : maxPriceDrawdownPercent.value.trim(),
             sort_by: sortBy.value,
             sort_order: sortOrder.value,
             page: String(nextPage),
@@ -550,79 +611,62 @@
           } catch (error) {
             if (requestId !== latestRequestId) return;
             rows.value = [];
+            snapshots.value = [];
+            snapshotTime.value = null;
+            totalCount.value = 0;
+            stats.value = emptyStats();
             errorMessage.value = error.message || '加载聪明钱失败';
           } finally {
             if (requestId === latestRequestId) loading.value = false;
           }
         };
 
-        const searchImmediately = () => {
-          if (searchTimer) clearTimeout(searchTimer);
-          searchTimer = null;
+        const searchSymbols = () => {
+          const normalized = keyword.value.trim().toUpperCase();
+          keyword.value = normalized;
+          queryKeyword.value = normalized;
+          load(1);
+        };
+
+        const resetFilters = () => {
+          keyword.value = '';
+          queryKeyword.value = '';
+          ignoreFilters.value = false;
+          timeRange.value = 'ALL';
+          underlyingType.value = 'COIN';
+          side.value = '';
+          netNotionalPreset.value = '10000000';
+          customMinNetNotional.value = '10000000';
+          priceSpreadPreset.value = '5';
+          customMaxPriceSpread.value = '5';
+          maxPriceTrendPercent.value = '';
+          maxPriceDrawdownPercent.value = '-10';
+          sortBy.value = 'long_short_ratio';
+          sortOrder.value = 'desc';
+          snapshotSelection.value = '';
           load(1);
         };
 
         const changeTimeRange = () => {
           snapshotSelection.value = '';
-          load(1);
         };
 
         const changeUnderlyingType = () => {
           snapshotSelection.value = '';
-          load(1);
         };
-
-        const changeNetNotionalFilter = () => {
-          load(1);
-        };
-
-        const applyNetNotionalFilter = () => {
-          if (customMinNetNotional.value.trim() === '') return;
-          load(1);
-        };
-
-        const changePriceSpreadFilter = () => {
-          load(1);
-        };
-
-        const applyPriceSpreadFilter = () => {
-          if (customMaxPriceSpread.value.trim() === '') return;
-          load(1);
-        };
-
-        const applyPriceTrendFilter = () => {
-          load(1);
-        };
-
-        const applyPriceDrawdownFilter = () => {
-          load(1);
-        };
-
-        watch(keyword, () => {
-          if (searchTimer) clearTimeout(searchTimer);
-          searchTimer = setTimeout(() => {
-            searchTimer = null;
-            load(1);
-          }, 300);
-        });
 
         const openDetail = (row) => { selectedRow.value = row; };
 
         onMounted(() => {
           load(1);
         });
-        onUnmounted(() => {
-          if (searchTimer) clearTimeout(searchTimer);
-        });
-
         return {
-          rows, snapshots, snapshotTime, snapshotSelection, keyword, timeRange, underlyingType, side,
+          rows, snapshots, snapshotTime, snapshotSelection, keyword, queryKeyword, ignoreFilters, timeRange, underlyingType, side,
           netNotionalPreset, customMinNetNotional, sortBy, sortOrder,
           priceSpreadPreset, customMaxPriceSpread, maxPriceTrendPercent, maxPriceDrawdownPercent,
-          page, pageSize, totalCount, stats, loading, errorMessage, selectedRow, sideOptions,
+          page, pageSize, totalCount, stats, showStats, loading, errorMessage, selectedRow, sideOptions,
           pageCount, formatTime, formatMetric, formatExact, formatPrice, sparklinePoints, trendTitle, formatDrawdownPercent, drawdownClass, drawdownTitle, formatPnl, pnlClass, formatProfitPercent, profitPercentClass, formatRatio, metricClass, sideClass, sideLabel,
-          load, searchImmediately, changeTimeRange, changeUnderlyingType, changeNetNotionalFilter, applyNetNotionalFilter,
-          changePriceSpreadFilter, applyPriceSpreadFilter, applyPriceTrendFilter, applyPriceDrawdownFilter, openDetail,
+          load, searchSymbols, resetFilters, changeTimeRange, changeUnderlyingType, openDetail,
         };
       },
     }).mount('#app');

@@ -10,6 +10,7 @@ from coinx.collector.binance.smart_money import (
 from coinx.collector.binance import smart_money as smart_money_module
 from coinx.repositories.smart_money import (
     get_smart_money_scope_symbols,
+    load_latest_smart_money_for_symbol,
     load_smart_money_page,
     normalize_smart_money_row,
     save_smart_money_signals,
@@ -171,6 +172,28 @@ def test_load_smart_money_page_defaults_to_latest_snapshot(db_session):
     assert result['data'][0]['price_trend'][0]['value'] == pytest.approx(2511)
     assert result['data'][0]['price_trend'][1]['value'] == pytest.approx(2523)
     assert result['snapshots'] == [1_700_000_900_000, 1_700_000_000_000]
+
+
+def test_load_latest_smart_money_for_symbol_returns_each_window(db_session):
+    rows = [
+        normalize_smart_money_row(
+            {**_payload()['data'][0], 'symbol': 'BTCUSDT', 'timeRange': time_range, 'netNotional': str(net_notional)},
+            snapshot_time=snapshot_time,
+            time_range=time_range,
+        )
+        for time_range, snapshot_time, net_notional in (
+            ('30m', 1_700_000_000_000, '100'),
+            ('30m', 1_700_000_900_000, '200'),
+            ('ALL', 1_700_000_800_000, '300'),
+        )
+    ]
+    save_smart_money_signals(rows, session=db_session)
+
+    result = load_latest_smart_money_for_symbol('btcusdt', session=db_session)
+
+    assert [row['time_range'] for row in result] == ['30m', 'ALL']
+    assert [row['net_notional'] for row in result] == [200.0, 300.0]
+    assert all(row['symbol'] == 'BTCUSDT' for row in result)
 
 
 def test_load_smart_money_page_supports_snapshot_filter_and_paging(db_session):

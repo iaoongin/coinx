@@ -227,6 +227,10 @@ const mockCoinDetail = {
     { exchange: 'binance', open_interest: 600000, open_interest_value: 40000000, share_percent: 46.8 },
     { exchange: 'bybit', open_interest: 350000, open_interest_value: 25000000, share_percent: 29.3 },
   ],
+  smart_money: [
+    { time_range: '30m', symbol: 'BTCUSDT', side: 'BUY', snapshot_time: 1711526400000, net_notional: 110000000, long_notional: 85000000, short_notional: 25000000, long_short_ratio: 3.4, long_traders: 170, short_traders: 167, long_whales: 89, short_whales: 59 },
+    { time_range: 'ALL', symbol: 'BTCUSDT', side: 'SELL', snapshot_time: 1711526400000, net_notional: -22000000, long_notional: 40000000, short_notional: 62000000, long_short_ratio: 0.65, long_traders: 120, short_traders: 150, long_whales: 50, short_whales: 70 },
+  ],
   structure_score: { total_score: 72.4, trade_signal: '强多', operation_advice: '只找回踩做多，不追高' },
 };
 

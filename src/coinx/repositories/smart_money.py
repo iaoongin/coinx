@@ -11,6 +11,7 @@ from sqlalchemy import func, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 from coinx import config
+from coinx import database
 from coinx.collector.binance.smart_money import fetch_smart_money_signal_list
 from coinx.database import get_session
 from coinx.models import Coin, MarketFuturesSmartMoneySignal
@@ -151,6 +152,72 @@ def get_smart_money_scope_symbols(
     except Exception as exc:
         logger.debug('读取聪明钱采集范围失败，将跳过扩展范围: %s', exc)
         return []
+
+
+def load_latest_smart_money_for_symbol(
+    symbol: str,
+    as_of_ms: Optional[int] = None,
+    session=None,
+) -> list[dict[str, Any]]:
+    """Load the latest persisted Smart Money row for each configured window."""
+    normalized_symbol = str(symbol or '').strip().upper()
+    if not normalized_symbol:
+        return []
+
+    own_session = session is None
+    db = session or database.get_session()
+    try:
+        time_ranges = list(dict.fromkeys([
+            *(config.SMART_MONEY_TIME_RANGES or []),
+            '30m',
+            'ALL',
+        ]))
+        rows = []
+        for time_range in time_ranges:
+            query = db.query(MarketFuturesSmartMoneySignal).filter(
+                MarketFuturesSmartMoneySignal.exchange == 'binance',
+                MarketFuturesSmartMoneySignal.time_range == time_range,
+                MarketFuturesSmartMoneySignal.period == config.SMART_MONEY_PERIOD,
+                MarketFuturesSmartMoneySignal.symbol == normalized_symbol,
+            )
+            if as_of_ms is not None:
+                query = query.filter(MarketFuturesSmartMoneySignal.snapshot_time <= int(as_of_ms))
+            row = query.order_by(MarketFuturesSmartMoneySignal.snapshot_time.desc()).first()
+            if row is None:
+                continue
+            rows.append(_display_row({
+                'exchange': row.exchange,
+                'time_range': row.time_range,
+                'symbol': row.symbol,
+                'period': row.period,
+                'snapshot_time': row.snapshot_time,
+                'side': row.side,
+                'net_notional': row.net_notional,
+                'long_notional': row.long_notional,
+                'short_notional': row.short_notional,
+                'long_traders': row.long_traders,
+                'long_whales': row.long_whales,
+                'short_traders': row.short_traders,
+                'short_whales': row.short_whales,
+                'long_qty': row.long_qty,
+                'short_qty': row.short_qty,
+                'long_avg_entry_price': row.long_avg_entry_price,
+                'short_avg_entry_price': row.short_avg_entry_price,
+            }))
+        rows = _attach_mark_prices(rows, session=db)
+        rows = _attach_price_trends(rows, session=db)
+        return rows
+    except Exception as exc:
+        logger.debug(
+            '读取合约聪明钱详情失败: symbol=%s error_type=%s error=%s',
+            normalized_symbol,
+            type(exc).__name__,
+            str(exc)[:200],
+        )
+        return []
+    finally:
+        if own_session:
+            db.close()
 
 
 def _display_row(row: Mapping[str, Any]) -> dict[str, Any]:

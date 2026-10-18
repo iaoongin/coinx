@@ -74,6 +74,26 @@
     .exchange-value { color: var(--text-secondary); font-family: var(--font-mono); font-size: 13px; }
     .exchange-sub { display: flex; justify-content: space-between; gap: 8px; }
     .exchange-warning { color: var(--gold-primary); }
+    .table-shell { overflow-x: auto; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-secondary); }
+    .signal-table { width: 100%; min-width: 0; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+    .signal-table th, .signal-table td { min-width: 0; padding: 7px 4px; border-bottom: 1px solid var(--border-subtle); text-align: center; white-space: nowrap; }
+    .signal-table th { background: var(--bg-elevated); color: var(--text-muted); font-size: 10px; font-weight: 600; line-height: 1.25; text-align: center; white-space: normal; }
+    .signal-table td { overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; }
+    .signal-table th { overflow-wrap: anywhere; }
+    .signal-table tbody tr:hover { background: var(--bg-hover); }
+    .signal-table .symbol { color: var(--text-primary); font-weight: 700; }
+    .direction { display: inline-flex; min-width: 38px; justify-content: center; padding: 3px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+    .direction.buy { border: 1px solid rgba(74, 222, 128, .35); background: rgba(34, 197, 94, .12); color: #86efac; }
+    .direction.sell { border: 1px solid rgba(248, 113, 113, .35); background: rgba(239, 68, 68, .12); color: #fca5a5; }
+    .metric-positive { color: #4ade80 !important; }
+    .metric-negative { color: #f87171 !important; }
+    .sub-metric { color: var(--text-muted); font-size: 10px; }
+    .price-delta { margin-left: 2px; }
+    .notional-pnl { margin-left: 2px; }
+    .trend-cell { padding-left: 4px !important; padding-right: 4px !important; }
+    .trend-chart { display: block; width: 100%; min-width: 0; height: 30px; }
+    .trend-line { fill: none; stroke: var(--gold-primary); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .detail-button { height: 25px; padding: 0 8px; }
     .empty { padding: 28px; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-default); border-radius: 6px; }
     .range-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
     .segments { display: flex; border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; }
@@ -121,6 +141,8 @@
       .charts { gap: 10px; }
       .chart-panel { padding: 8px; }
       .chart, .chart-state { height: 260px; }
+      .smart-money-section .signal-table { min-width: 1360px; }
+      .smart-money-section .trend-chart { min-width: 90px; }
       .opportunity-summary, .opportunity-plan { padding: 12px; }
       .opportunity-scores { gap: 6px; }
     }
@@ -195,6 +217,43 @@
         </section>
         <section v-else class="section"><div class="section-heading"><h2>多周期变化</h2></div><div class="empty">正在加载多周期数据...</div></section>
 
+        <section class="section smart-money-section">
+          <div class="section-heading"><h2>聪明钱</h2><div class="section-heading-actions"><span v-if="smartMoneySnapshotTime" class="section-updated">最新快照：[[ formatTime(smartMoneySnapshotTime) ]]</span><button class="btn section-refresh" type="button" @click="loadData" :disabled="loading">[[ loading ? '加载中' : '刷新' ]]</button></div></div>
+          <div v-if="loading" class="empty">正在加载聪明钱数据...</div>
+          <div v-else-if="smartMoney.length" class="table-shell">
+            <table class="signal-table">
+              <colgroup>
+                <col style="width:6%"><col style="width:7%"><col style="width:5%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%">
+                <col style="width:8%"><col style="width:8%"><col style="width:6%"><col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:5%">
+              </colgroup>
+              <thead><tr><th>周期</th><th>币种</th><th>方向</th><th>多空名义比</th><th>多头名义</th><th>空头名义</th><th>净名义</th><th>多头鲸鱼 / 交易员</th><th>空头鲸鱼 / 交易员</th><th>当前标记价</th><th>7天走势</th><th>7天高点回撤</th><th>多头均价</th><th>空头均价</th><th>详情</th></tr></thead>
+              <tbody>
+                <tr v-for="item in smartMoney" :key="item.time_range">
+                  <td>[[ item.time_range ]]</td>
+                  <td><span class="symbol">[[ item.symbol ]]</span></td>
+                  <td><span :class="['direction', smartMoneySideClass(item.side)]">[[ smartMoneySideLabel(item.side) ]]</span></td>
+                  <td :title="formatExact(item.long_short_ratio)">[[ formatRatio(item.long_short_ratio) ]]</td>
+                  <td :title="formatExact(item.long_notional)" class="metric-positive">[[ formatMetric(item.long_notional) ]]<span v-if="formatPnl(item, 'long')" class="sub-metric notional-pnl">（<span :class="pnlClass(item, 'long')">[[ formatPnl(item, 'long') ]]</span>）</span></td>
+                  <td :title="formatExact(item.short_notional)" class="metric-negative">[[ formatMetric(item.short_notional) ]]<span v-if="formatPnl(item, 'short')" class="sub-metric notional-pnl">（<span :class="pnlClass(item, 'short')">[[ formatPnl(item, 'short') ]]</span>）</span></td>
+                  <td :title="formatExact(item.net_notional)">[[ formatMetric(item.net_notional) ]]</td>
+                  <td>[[ item.long_whales ?? '--' ]] <span class="sub-metric">/ [[ item.long_traders ?? '--' ]]</span></td>
+                  <td>[[ item.short_whales ?? '--' ]] <span class="sub-metric">/ [[ item.short_traders ?? '--' ]]</span></td>
+                  <td>[[ formatSmartMoneyPrice(item.mark_price) ]]</td>
+                  <td class="trend-cell" :title="trendTitle(item.price_trend)">
+                    <svg v-if="sparklinePoints(item.price_trend)" class="trend-chart" viewBox="0 0 120 30" preserveAspectRatio="none" aria-label="7天价格走势"><polyline class="trend-line" :points="sparklinePoints(item.price_trend)"></polyline></svg>
+                    <span v-else class="trend-chart sub-metric">--</span>
+                  </td>
+                  <td :title="drawdownTitle(item.price_trend)" :class="drawdownClass(item.price_trend)">[[ formatDrawdownPercent(item.price_trend) ]]</td>
+                  <td>[[ formatSmartMoneyPrice(item.long_avg_entry_price) ]]<span v-if="formatProfitPercent(item.long_avg_entry_price, item.mark_price, 'long')" :class="['sub-metric', 'price-delta', profitPercentClass(item.long_avg_entry_price, item.mark_price, 'long')]">（[[ formatProfitPercent(item.long_avg_entry_price, item.mark_price, 'long') ]]）</span></td>
+                  <td>[[ formatSmartMoneyPrice(item.short_avg_entry_price) ]]<span v-if="formatProfitPercent(item.short_avg_entry_price, item.mark_price, 'short')" :class="['sub-metric', 'price-delta', profitPercentClass(item.short_avg_entry_price, item.mark_price, 'short')]">（[[ formatProfitPercent(item.short_avg_entry_price, item.mark_price, 'short') ]]）</span></td>
+                  <td><a class="btn detail-button" href="/smart-money" title="查看完整指标">查看</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty">暂无该合约的聪明钱快照</div>
+        </section>
+
         <section class="section">
           <div class="section-heading"><h2>交易机会</h2><div class="section-heading-actions"><span v-if="opportunityAsOf" class="section-updated">数据时间：[[ formatTime(opportunityAsOf) ]]</span><button class="btn section-refresh" type="button" @click="loadOpportunity" :disabled="opportunityLoading">[[ opportunityLoading ? '加载中' : '刷新' ]]</button></div></div>
           <div v-if="opportunityLoading" class="empty">正在加载交易机会...</div>
@@ -255,6 +314,8 @@
         const ranges = ['1h', '4h', '24h', '72h', '7d']; const selectedRange = ref('24h'); const series = ref({ market: [], flow: [], funding_rate: [] }); const seriesLoading = ref(false); const seriesError = ref('');
         const priceChartEl = ref(null); const openInterestChartEl = ref(null); const flowChartEl = ref(null); const fundingChartEl = ref(null); const symbolSearchEl = ref(null); const charts = [];
         const summary = computed(() => detail.value?.summary || {});
+        const smartMoney = computed(() => detail.value?.smart_money || []);
+        const smartMoneySnapshotTime = computed(() => smartMoney.value.reduce((latest, item) => Math.max(latest, Number(item.snapshot_time) || 0), 0) || null);
         const requestJson = (url, options = {}) => window.CoinxApi.requestJson(url, { ...options, coinxSuppressGlobalError: true });
         const matrixCoin = computed(() => {
           const current = detail.value || {};
@@ -317,9 +378,28 @@
         const formatRate = value => value == null ? 'N/A' : `${(Number(value) * 100).toFixed(4)}%`;
         const formatScore = value => value == null ? 'N/A' : Number(value).toFixed(1);
         const formatPrice = value => value == null ? 'N/A' : `$${Number(value).toLocaleString('en-US', { maximumFractionDigits: 8 })}`;
+        const formatSmartMoneyPrice = value => { if (value == null || value === '') return '--'; const number = Number(value); return Number.isFinite(number) ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 }).format(number) : String(value); };
+        const formatMetric = value => { if (value == null || value === '') return '--'; const number = Number(value); if (!Number.isFinite(number)) return String(value); const abs = Math.abs(number); const sign = number < 0 ? '-' : ''; const compact = (scaled, suffix) => { const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2; const formatted = digits === 0 ? String(Math.round(scaled)) : scaled.toFixed(digits).replace(/\.?0+$/, ''); return `${sign}${formatted}${suffix}`; }; if (abs >= 1e9) return compact(abs / 1e9, 'B'); if (abs >= 1e6) return compact(abs / 1e6, 'M'); if (abs >= 1e3) return compact(abs / 1e3, 'K'); return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(number); };
+        const formatExact = value => { if (value == null || value === '') return '--'; const number = Number(value); return Number.isFinite(number) ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 12 }).format(number) : String(value); };
+        const formatRatio = value => { if (value == null || value === '') return '--'; const number = Number(value); return Number.isFinite(number) ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(number) : String(value); };
+        const trendValues = trend => (Array.isArray(trend) ? trend : []).map(point => Number(point?.value)).filter(value => Number.isFinite(value));
+        const sparklinePoints = trend => { const values = trendValues(trend); if (values.length < 2) return ''; const min = Math.min(...values); const max = Math.max(...values); const range = max - min || Math.max(Math.abs(max) * 0.001, 1); return values.map((value, index) => { const x = 2 + (index / (values.length - 1)) * 116; const y = 28 - ((value - min) / range) * 26; return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(' '); };
+        const trendTitle = trend => trendValues(trend).length < 2 ? '7天走势：暂无完整数据' : '7天走势（1小时聚合）';
+        const drawdownPercentValue = trend => { const values = trendValues(trend); if (values.length < 2) return null; const peak = Math.max(...values); return peak === 0 ? null : (values[values.length - 1] - peak) / Math.abs(peak) * 100; };
+        const formatDrawdownPercent = trend => { const value = drawdownPercentValue(trend); return value == null ? '--' : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`; };
+        const drawdownClass = trend => { const value = drawdownPercentValue(trend); return value < 0 ? 'metric-negative' : value > 0 ? 'metric-positive' : ''; };
+        const drawdownTitle = trend => { const value = drawdownPercentValue(trend); return value == null ? '7天高点回撤：暂无完整数据' : `7天高点回撤：${value.toFixed(2)}%`; };
+        const pnlValue = (row, positionSide) => { const mark = Number(row?.mark_price); const average = Number(positionSide === 'short' ? row?.short_avg_entry_price : row?.long_avg_entry_price); const quantity = Number(positionSide === 'short' ? row?.short_qty : row?.long_qty); if (![mark, average, quantity].every(Number.isFinite)) return null; return positionSide === 'short' ? (average - mark) * Math.abs(quantity) : (mark - average) * Math.abs(quantity); };
+        const formatPnl = (row, positionSide) => { const value = pnlValue(row, positionSide); if (value == null) return ''; const formatted = formatMetric(Math.abs(value)); return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted; };
+        const pnlClass = (row, positionSide) => { const value = pnlValue(row, positionSide); return value > 0 ? 'metric-positive' : value < 0 ? 'metric-negative' : ''; };
+        const profitPercent = (averagePrice, markPrice, positionSide) => { const average = Number(averagePrice); const mark = Number(markPrice); if (!Number.isFinite(average) || !Number.isFinite(mark) || average === 0) return null; return positionSide === 'short' ? (average - mark) / average * 100 : (mark - average) / average * 100; };
+        const formatProfitPercent = (averagePrice, markPrice, positionSide) => { const value = profitPercent(averagePrice, markPrice, positionSide); return value == null ? '' : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`; };
+        const profitPercentClass = (averagePrice, markPrice, positionSide) => { const value = profitPercent(averagePrice, markPrice, positionSide); return value > 0 ? 'metric-positive' : value < 0 ? 'metric-negative' : ''; };
         const formatCompact = (value, prefix = '') => { if (value == null) return 'N/A'; const number = Number(value); const abs = Math.abs(number); const units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]; const unit = units.find(([limit]) => abs >= limit); return unit ? `${prefix}${(number / unit[0]).toFixed(2)}${unit[1]}` : `${prefix}${number.toFixed(2)}`; };
         const formatSignedCompact = (value, prefix = '') => value == null ? 'N/A' : `${Number(value) > 0 ? '+' : Number(value) < 0 ? '-' : ''}${formatCompact(Math.abs(Number(value)), prefix)}`;
         const formatSignedPrice = value => value == null ? 'N/A' : `${Number(value) > 0 ? '+' : Number(value) < 0 ? '-' : ''}${formatPrice(Math.abs(Number(value)))}`;
+        const smartMoneySideLabel = value => ({ BUY: '偏多', SELL: '偏空' }[value] || '--');
+        const smartMoneySideClass = value => ({ BUY: 'buy', SELL: 'sell' }[value] || '');
         const chartCompact = value => formatCompact(value).replace(/\.00(?=[KMB]?$)/, '');
         const chartMoney = value => value == null ? 'N/A' : `${Number(value) < 0 ? '-' : ''}$${chartCompact(Math.abs(Number(value)))}`;
         let chartSyncGroup = null;
@@ -352,7 +432,7 @@
         onMounted(() => { readRecentSymbols(); loadSymbolOptions(); const requestedSymbol = (new URLSearchParams(location.search).get('symbol') || '').trim().toUpperCase(); symbol.value = requestedSymbol || recentSymbols.value[0] || ''; if (symbol.value) { if (!requestedSymbol) history.replaceState({}, '', `/coin-detail?symbol=${encodeURIComponent(symbol.value)}`); loadData(); loadOpportunity(); loadSeries(); } else { selectionRequired.value = true; } });
         const resize = () => charts.forEach(chart => chart.resize()); window.addEventListener('resize', resize); onBeforeUnmount(() => { window.removeEventListener('resize', resize); disposeCharts(); });
         const formatR = value => value == null ? 'N/A' : `${Number(value).toFixed(2)}R`;
-        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, matrixCoin, statusText, missingExchangeDetails, opportunity, opportunityAsOf, opportunityLoading, opportunityError, tradePlan, tradePlanReady, stopLossDistance, opportunityStateClass, opportunityTrendClass, isCandidateOpportunity, opportunityConclusion, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatCompact, formatSignedCompact, formatSignedPrice, formatR, changeRange, loadData, loadOpportunity, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu };
+        return { symbol, symbolQuery, recentSymbols, showSymbolMenu, filteredSymbols, detail, loading, error, selectionRequired, summary, matrixCoin, statusText, missingExchangeDetails, smartMoney, smartMoneySnapshotTime, smartMoneySideLabel, smartMoneySideClass, opportunity, opportunityAsOf, opportunityLoading, opportunityError, tradePlan, tradePlanReady, stopLossDistance, opportunityStateClass, opportunityTrendClass, isCandidateOpportunity, opportunityConclusion, ranges, selectedRange, series, seriesLoading, seriesError, priceChartEl, openInterestChartEl, flowChartEl, fundingChartEl, symbolSearchEl, hasMarketSeries, hasFlowSeries, hasFundingSeries, formatTime, tone, formatPercent, formatRate, formatScore, formatPrice, formatSmartMoneyPrice, formatMetric, formatExact, formatRatio, formatCompact, formatSignedCompact, formatSignedPrice, sparklinePoints, trendTitle, formatDrawdownPercent, drawdownClass, drawdownTitle, formatPnl, pnlClass, formatProfitPercent, profitPercentClass, formatR, changeRange, loadData, loadOpportunity, switchSymbol, selectFirstSymbol, toggleSymbolMenu, closeSymbolMenu };
       }
     });
     app.component('PeriodMatrix', PeriodMatrix);
