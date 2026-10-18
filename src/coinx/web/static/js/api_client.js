@@ -91,7 +91,7 @@
           'position:fixed',
           'z-index:3000',
           'right:20px',
-          'bottom:20px',
+          'top:20px',
           'max-width:min(420px, calc(100vw - 40px))',
           'padding:11px 14px',
           'border:1px solid',
