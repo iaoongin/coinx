@@ -40,6 +40,13 @@
   /* ==================== 字体 ==================== */
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
   --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-md: 12px;
+  --font-size-base: 15px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 23px;
 
   /* ==================== 布局 ==================== */
   --page-max-width: 1536px;
@@ -71,7 +78,7 @@ html {
 
 body {
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--font-size-base);
   line-height: 1.6;
   color: #ffffff;
   background: var(--bg-primary);
@@ -546,6 +553,11 @@ tbody tr:last-child td {
   color: var(--text-muted);
 }
 
+input::placeholder,
+textarea::placeholder {
+  font-size: var(--font-size-md);
+}
+
 /* ==================== 加载与消息 ==================== */
 .loading {
   text-align: center;
@@ -1010,12 +1022,12 @@ textarea:focus {
 }
 
 @media (max-width: 768px) {
-  /* iOS Safari zooms the viewport when a focused editable control is below 16px. */
+  /* 控件统一继承页面基准字号，避免移动端被浏览器默认字号撑大。 */
   input:not([type='checkbox']):not([type='radio']):not([type='range']),
   select,
   textarea,
   .el-input__inner {
-    font-size: 16px !important;
+    font-size: inherit !important;
   }
 
   :root {
