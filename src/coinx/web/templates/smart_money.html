@@ -13,17 +13,18 @@
     html { color-scheme: dark; }
     body {
       margin: 0;
+      padding: var(--page-padding, 20px);
       overflow-x: hidden;
       background: var(--bg-primary, #101114);
       color: var(--text-primary, #f4f4f5);
       font-family: "Noto Sans SC", sans-serif;
     }
-    .page-frame { width: 100%; max-width: 1500px; box-sizing: border-box; margin: 0 auto; padding: 0 14px 28px; }
+    .page-frame { width: 100%; max-width: var(--page-max-width, 1536px); box-sizing: border-box; margin: 0 auto; padding: 0 0 28px; }
     .page-frame .nav-container { width: 100%; box-sizing: border-box; }
     .shell {
       padding: 20px;
       border: 1px solid var(--border-default, #2d3038);
-      border-radius: 10px;
+      border-radius: var(--page-surface-radius, var(--card-radius-lg, 10px));
       background: var(--bg-card, #17191f);
       box-shadow: var(--shadow-card, 0 12px 32px rgba(0, 0, 0, .22));
     }
@@ -180,6 +181,16 @@
       .control-group { min-width: 0; }
       .search-input { width: min(100%, 260px); }
       .detail-grid { grid-template-columns: 1fr; }
+    }
+    @media (min-width: 1800px) {
+      .table-shell { overflow-x: hidden; }
+      .signal-table { min-width: 0; table-layout: fixed; }
+      .signal-table th,
+      .signal-table td { padding: 6px 5px; }
+      .signal-table th { font-size: 10px; line-height: 1.25; white-space: nowrap; }
+      .signal-table td { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+      .signal-table .trend-cell,
+      .signal-table .detail-button { white-space: nowrap; }
     }
     @keyframes smart-money-spin { to { transform: rotate(360deg); } }
   </style>

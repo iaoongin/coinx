@@ -66,6 +66,16 @@ def test_smart_money_page_is_registered():
     assert '7天高点回撤'.encode('utf-8') in response.data
     assert '<th class="drawdown-header">7天高点回撤</th>'.encode('utf-8') in response.data
     assert 'font-weight: 600; text-align: center;'.encode('utf-8') in response.data
+    assert 'padding: var(--page-padding, 20px);'.encode('utf-8') in response.data
+    assert 'max-width: var(--page-max-width, 1536px);'.encode('utf-8') in response.data
+    assert 'padding: 0 0 28px;'.encode('utf-8') in response.data
+    assert 'padding: 20px;'.encode('utf-8') in response.data
+    assert 'max-width: 1500px;'.encode('utf-8') not in response.data
+    assert 'border-radius: var(--page-surface-radius, var(--card-radius-lg, 10px));'.encode('utf-8') in response.data
+    assert '@media (min-width: 1800px)'.encode('utf-8') in response.data
+    assert '.table-shell { overflow-x: hidden; }'.encode('utf-8') in response.data
+    assert '.signal-table th { font-size: 10px; line-height: 1.25; white-space: nowrap; }'.encode('utf-8') in response.data
+    assert '.signal-table td { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }'.encode('utf-8') in response.data
     assert 'sparklinePoints'.encode('utf-8') in response.data
     assert '多空名义比'.encode('utf-8') in response.data
     assert '净名义'.encode('utf-8') in response.data

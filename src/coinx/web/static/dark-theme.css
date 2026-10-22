@@ -53,6 +53,7 @@
   --page-padding: 20px;
   --card-radius: 12px;
   --card-radius-lg: 16px;
+  --page-surface-radius: var(--card-radius-lg);
   --nav-height: 56px;
 
   /* ==================== 阴影 ==================== */
@@ -129,7 +130,7 @@ body::after {
   max-width: var(--page-max-width);
   margin: 0 auto;
   background: var(--bg-card);
-  border-radius: var(--card-radius-lg);
+  border-radius: var(--page-surface-radius);
   box-shadow: var(--shadow-card);
   border: 1px solid var(--border-default);
   padding: 24px;

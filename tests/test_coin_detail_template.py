@@ -32,6 +32,16 @@ def test_coin_detail_uses_stored_detail_contract_without_placeholder_values():
     smart_money_table = template[smart_money_table_start:template.index('</table>', smart_money_table_start)]
     assert smart_money_table.count('<th>') == 15
     assert smart_money_table.count('<col ') == 15
+    assert '.signal-table { width: 100%; min-width: 1840px; border-collapse: collapse; table-layout: auto;' in template
+    assert '.signal-table th, .signal-table td { padding: 7px 7px;' in template
+    assert '.signal-table td { color: var(--text-secondary);' in template
+    assert '.signal-table { width: 100%; min-width: 1840px; border-collapse: collapse; table-layout: fixed;' not in template
+    assert '@media (min-width: 1800px)' in template
+    assert '.smart-money-section .signal-table { width: 100%; min-width: 0; table-layout: fixed; }' in template
+    assert '.smart-money-section .table-shell { overflow-x: hidden; }' in template
+    assert '.smart-money-section .signal-table col:nth-child(1) { width: 4% !important; }' in template
+    assert '.smart-money-section .signal-table col:nth-child(15) { width: 6% !important; }' in template
+    assert '.smart-money-section .signal-table th { white-space: nowrap; overflow-wrap: normal; }' in template
     assert 'opportunityAsOf.value = result.data?.as_of || null' in template
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;' in template
     assert 'opportunity?.entry_state' in template
