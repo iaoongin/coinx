@@ -50,6 +50,7 @@ from coinx.repositories.market_structure_score import (
     get_market_structure_score_snapshot,
     get_market_structure_score_symbols,
 )
+from coinx.repositories.open_interest import get_open_interest_page
 from coinx.repositories.trade_opportunities import get_trade_opportunity_snapshot
 from coinx.scheduler import (
     format_job_error,
@@ -996,6 +997,40 @@ def get_market_rank():
         logger.error(f'加载行情榜数据失败: {e}')
         logger.exception(e)
         return jsonify({'status': 'error', 'message': f'failed to load market rank data: {str(e)}'}), 500
+
+
+@api_data_bp.route('/api/open-interest')
+def get_open_interest_overview():
+    """Return the latest cross-exchange open-interest overview."""
+    try:
+        def optional_float(name):
+            value = request.args.get(name)
+            return None if value in (None, '') else float(value)
+
+        result = get_open_interest_page(
+            period=request.args.get('period', '5m'),
+            keyword=request.args.get('keyword', ''),
+            min_ratio_percent=optional_float('min_ratio_percent'),
+            max_ratio_percent=optional_float('max_ratio_percent'),
+            min_open_interest=optional_float('min_open_interest'),
+            max_open_interest=optional_float('max_open_interest'),
+            only_with_supply=request.args.get('only_with_supply', '').lower() in {'1', 'true', 'yes'},
+            sort_by=request.args.get('sort_by', 'ratio'),
+            sort_order=request.args.get('sort_order', 'desc'),
+            page=int(request.args.get('page', 1)),
+            page_size=int(request.args.get('page_size', 50)),
+            as_of_ms=request_as_of_ms(),
+        )
+        return jsonify({
+            'status': 'success',
+            'message': 'open interest overview loaded',
+            **result,
+        })
+    except ValueError as exc:
+        return jsonify({'status': 'error', 'message': str(exc)}), 400
+    except Exception as exc:
+        logger.exception('加载持仓量概览失败')
+        return jsonify({'status': 'error', 'message': f'failed to load open interest overview: {str(exc)}'}), 500
 
 
 @api_data_bp.route('/api/market-rank/refresh', methods=['POST'])

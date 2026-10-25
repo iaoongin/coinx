@@ -120,6 +120,7 @@ class MarketOpenInterestHist(Base):
     event_time = Column(BigInteger, nullable=False)
     sum_open_interest = Column(DECIMAL(30, 8))
     sum_open_interest_value = Column(DECIMAL(30, 8))
+    circulating_supply = Column(DECIMAL(30, 8))
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 

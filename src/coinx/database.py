@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import scoped_session, sessionmaker, DeclarativeBase
 from coinx import config
 
@@ -51,6 +51,29 @@ def init_db():
         bind=engine,
         tables=tables_for_initialization(Base.metadata),
     )
+    _ensure_market_open_interest_columns()
+
+
+def _ensure_market_open_interest_columns(bind=None):
+    """Apply additive MySQL columns for deployments without a migration runner."""
+    bind = bind or engine
+    if getattr(bind.dialect, 'name', '') != 'mysql':
+        return
+
+    inspector = inspect(bind)
+    if 'market_open_interest_hist' not in inspector.get_table_names():
+        return
+    columns = {column['name'] for column in inspector.get_columns('market_open_interest_hist')}
+    if 'circulating_supply' in columns:
+        return
+
+    with bind.begin() as connection:
+        connection.execute(text(
+            'ALTER TABLE market_open_interest_hist '
+            'ADD COLUMN circulating_supply DECIMAL(30, 8) DEFAULT NULL '
+            'COMMENT \'流通供应量（Binance/CMC）\' '
+            'AFTER sum_open_interest_value'
+        ))
 
 def get_session():
     """获取一个新的会话"""

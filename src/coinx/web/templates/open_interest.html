@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+  <title>持仓量概览</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  {% include 'components/pwa_head.html' %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: var(--page-padding);
+      font-family: 'Noto Sans SC', sans-serif;
+    }
+
+    #app {
+      max-width: var(--page-max-width);
+      margin: 0 auto;
+    }
+
+    .shell {
+      background: var(--bg-card);
+      border: 1px solid var(--border-default);
+      border-radius: var(--page-surface-radius);
+      box-shadow: var(--shadow-card);
+      padding: 20px;
+      margin-bottom: 20px;
+      animation: fadeInUp 0.5s ease;
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .header-left h1 {
+      margin: 0 0 5px;
+      color: var(--text-primary);
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .header-left h1 span {
+      color: var(--gold-primary);
+    }
+
+    .header-subtitle {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .header-meta {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .filter-group {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .filter-group label {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .filter-input,
+    .filter-select {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 8px 9px;
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font: 12px var(--font-mono);
+    }
+
+    .filter-input:focus,
+    .filter-select:focus {
+      outline: 2px solid rgba(212, 175, 55, 0.28);
+      border-color: var(--gold-primary);
+    }
+
+    .filter-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 8px 13px;
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: var(--gold-primary);
+      border-color: var(--gold-primary);
+      color: #080808;
+    }
+
+    .btn-secondary {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+    }
+
+    .btn:hover {
+      filter: brightness(1.08);
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .checkbox-row input {
+      accent-color: var(--gold-primary);
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      padding: 10px 12px;
+      border-left: 2px solid var(--gold-primary);
+      background: var(--bg-secondary);
+    }
+
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .stat-value {
+      margin-top: 4px;
+      color: var(--text-primary);
+      font: 600 16px var(--font-mono);
+    }
+
+    .stat:nth-child(3) .stat-value {
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+    }
+
+    table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    th {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    td {
+      color: var(--text-primary);
+      font: 12px var(--font-mono);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    tbody tr:hover td {
+      background: var(--bg-hover);
+    }
+
+    th:first-child,
+    td:first-child {
+      text-align: left;
+    }
+
+    .symbol {
+      color: var(--text-primary);
+      font-weight: 700;
+    }
+
+    .symbol a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .symbol a:hover {
+      color: var(--gold-bright);
+    }
+
+    .ratio {
+      color: var(--gold-bright);
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--text-muted);
+    }
+
+    .exchange-list {
+      color: var(--text-secondary);
+      font: 11px var(--font-mono);
+    }
+
+    .empty,
+    .loading,
+    .error {
+      padding: 48px 20px;
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .error {
+      color: var(--negative);
+    }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .pagination-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .pagination .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 980px) {
+      .filters {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      body { padding: 8px; }
+      .shell { padding: 12px; }
+      .header-row { flex-direction: column; gap: 8px; }
+      .header-meta { text-align: left; }
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .filter-actions { grid-column: 1 / -1; }
+      .stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat-value { font-size: 14px; }
+      .pagination { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    {% include 'components/nav.html' %}
+    <section class="shell">
+{% raw %}
+      <div class="header-row">
+        <div class="header-left">
+          <h1><span>CoinX</span> 持仓量概览</h1>
+          <div class="header-subtitle">跨交易所累计持仓量 · Binance / CMC 流通量</div>
+        </div>
+        <div class="header-meta">
+          周期 {{ filters.period }} · {{ snapshotTime ? formatTime(snapshotTime) : '暂无数据' }}
+        </div>
+      </div>
+
+      <form class="filters" @submit.prevent="applyFilters">
+        <div class="filter-group">
+          <label for="oi-period">周期</label>
+          <select id="oi-period" class="filter-select" v-model="filters.period">
+            <option v-for="period in periods" :key="period" :value="period">{{ period }}</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="oi-keyword">交易对</label>
+          <input id="oi-keyword" class="filter-input" v-model.trim="filters.keyword" placeholder="例如 BTC" autocomplete="off">
+        </div>
+        <div class="filter-group">
+          <label for="oi-min-ratio">比例下限 (%)</label>
+          <input id="oi-min-ratio" class="filter-input" v-model="filters.minRatio" type="number" step="any" min="0" placeholder="不限">
+        </div>
+        <div class="filter-group">
+          <label for="oi-max-ratio">比例上限 (%)</label>
+          <input id="oi-max-ratio" class="filter-input" v-model="filters.maxRatio" type="number" step="any" min="0" placeholder="不限">
+        </div>
+        <div class="filter-group">
+          <label for="oi-min-amount">持仓量下限</label>
+          <input id="oi-min-amount" class="filter-input" v-model="filters.minOpenInterest" type="number" step="any" min="0" placeholder="不限">
+        </div>
+        <div class="filter-group">
+          <label for="oi-max-amount">持仓量上限</label>
+          <input id="oi-max-amount" class="filter-input" v-model="filters.maxOpenInterest" type="number" step="any" min="0" placeholder="不限">
+        </div>
+        <div class="filter-group">
+          <label for="oi-sort">排序</label>
+          <select id="oi-sort" class="filter-select" v-model="filters.sortBy">
+            <option value="ratio">持仓量 / 流通量</option>
+            <option value="open_interest">累计持仓量</option>
+            <option value="open_interest_value">累计持仓价值</option>
+            <option value="circulating_supply">流通量</option>
+            <option value="event_time">数据时间</option>
+            <option value="symbol">交易对</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="oi-order">顺序</label>
+          <select id="oi-order" class="filter-select" v-model="filters.sortOrder">
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
+          </select>
+        </div>
+        <div class="filter-actions">
+          <label class="checkbox-row">
+            <input v-model="filters.onlyWithSupply" type="checkbox">
+            仅显示可计算比例
+          </label>
+          <button class="btn btn-primary" type="submit">查询</button>
+          <button class="btn btn-secondary" type="button" @click="resetFilters">重置</button>
+        </div>
+      </form>
+
+      <div class="stats-row">
+        <div class="stat"><div class="stat-label">交易对</div><div class="stat-value">{{ stats.total_symbols || 0 }}</div></div>
+        <div class="stat"><div class="stat-label">有流通量</div><div class="stat-value">{{ stats.with_supply || 0 }}</div></div>
+        <div class="stat"><div class="stat-label">数据来源</div><div class="stat-value">{{ stats.exchanges.length ? stats.exchanges.join(' · ') : '--' }}</div></div>
+        <div class="stat"><div class="stat-label">当前页</div><div class="stat-value">{{ page }} / {{ totalPages }}</div></div>
+      </div>
+
+      <div v-if="loading" class="loading">加载中...</div>
+      <div v-else-if="errorMessage" class="error">{{ errorMessage }}</div>
+      <div v-else-if="!rows.length" class="empty">暂无符合条件的数据</div>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>交易对</th>
+              <th>累计持仓量</th>
+              <th>流通量</th>
+              <th>持仓量 / 流通量</th>
+              <th>累计持仓价值</th>
+              <th>交易所</th>
+              <th>数据时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in rows" :key="row.symbol">
+              <td class="symbol"><a :href="`/coin-detail?symbol=${row.symbol}`">{{ row.symbol }}</a></td>
+              <td>{{ formatAmount(row.total_open_interest) }}</td>
+              <td :class="row.circulating_supply == null ? 'muted' : ''">{{ formatAmount(row.circulating_supply) }}</td>
+              <td class="ratio">{{ formatPercent(row.oi_circulating_percent) }}</td>
+              <td>{{ formatAmount(row.total_open_interest_value) }}</td>
+              <td class="exchange-list">{{ row.exchanges.join(' · ') }}</td>
+              <td class="muted">{{ formatTime(row.latest_event_time) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <span>共 {{ totalCount }} 个交易对</span>
+        <div class="pagination-actions">
+          <button class="btn btn-secondary" type="button" :disabled="page <= 1 || loading" @click="goToPage(page - 1)">上一页</button>
+          <button class="btn btn-secondary" type="button" :disabled="page >= totalPages || loading" @click="goToPage(page + 1)">下一页</button>
+        </div>
+      </div>
+{% endraw %}
+    </section>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const periods = ['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'];
+        const filters = ref({
+          period: '5m',
+          keyword: '',
+          minRatio: '',
+          maxRatio: '',
+          minOpenInterest: '',
+          maxOpenInterest: '',
+          sortBy: 'ratio',
+          sortOrder: 'desc',
+          onlyWithSupply: false,
+        });
+        const rows = ref([]);
+        const stats = ref({ total_symbols: 0, with_supply: 0, exchanges: [] });
+        const page = ref(1);
+        const pageSize = ref(50);
+        const totalCount = ref(0);
+        const snapshotTime = ref(null);
+        const loading = ref(false);
+        const errorMessage = ref('');
+        const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize.value)));
+
+        const formatAmount = (value) => {
+          if (value === null || value === undefined) return 'N/A';
+          const number = Number(value);
+          if (!Number.isFinite(number)) return 'N/A';
+          const abs = Math.abs(number);
+          const units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']];
+          const unit = units.find(([limit]) => abs >= limit);
+          if (unit) return `${(number / unit[0]).toFixed(2)}${unit[1]}`;
+          return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(number);
+        };
+
+        const formatPercent = (value) => {
+          if (value === null || value === undefined) return 'N/A';
+          return `${Number(value).toFixed(4)}%`;
+        };
+
+        const formatTime = (value) => {
+          if (!value) return 'N/A';
+          return new Date(Number(value)).toLocaleString('zh-CN', { hour12: false });
+        };
+
+        const buildQuery = () => {
+          const params = new URLSearchParams({
+            period: filters.value.period,
+            page: String(page.value),
+            page_size: String(pageSize.value),
+            sort_by: filters.value.sortBy,
+            sort_order: filters.value.sortOrder,
+          });
+          if (filters.value.keyword) params.set('keyword', filters.value.keyword);
+          if (filters.value.minRatio !== '') params.set('min_ratio_percent', filters.value.minRatio);
+          if (filters.value.maxRatio !== '') params.set('max_ratio_percent', filters.value.maxRatio);
+          if (filters.value.minOpenInterest !== '') params.set('min_open_interest', filters.value.minOpenInterest);
+          if (filters.value.maxOpenInterest !== '') params.set('max_open_interest', filters.value.maxOpenInterest);
+          if (filters.value.onlyWithSupply) params.set('only_with_supply', 'true');
+          return params.toString();
+        };
+
+        const loadData = async () => {
+          loading.value = true;
+          errorMessage.value = '';
+          try {
+            const response = await fetch(`/api/open-interest?${buildQuery()}`);
+            const result = await response.json();
+            if (!response.ok || result.status !== 'success') {
+              throw new Error(result.message || '加载持仓量数据失败');
+            }
+            rows.value = result.data || [];
+            stats.value = result.stats || { total_symbols: 0, with_supply: 0, exchanges: [] };
+            totalCount.value = result.total_count || 0;
+            pageSize.value = result.page_size || pageSize.value;
+            snapshotTime.value = result.snapshot_time || null;
+          } catch (error) {
+            rows.value = [];
+            totalCount.value = 0;
+            errorMessage.value = error.message || '加载持仓量数据失败';
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const applyFilters = () => {
+          page.value = 1;
+          loadData();
+        };
+
+        const resetFilters = () => {
+          filters.value = {
+            period: '5m', keyword: '', minRatio: '', maxRatio: '', minOpenInterest: '', maxOpenInterest: '',
+            sortBy: 'ratio', sortOrder: 'desc', onlyWithSupply: false,
+          };
+          page.value = 1;
+          loadData();
+        };
+
+        const goToPage = (target) => {
+          if (target < 1 || target > totalPages.value) return;
+          page.value = target;
+          loadData();
+        };
+
+        onMounted(loadData);
+
+        return {
+          periods, filters, rows, stats, page, totalCount, totalPages, snapshotTime, loading, errorMessage,
+          formatAmount, formatPercent, formatTime, applyFilters, resetFilters, goToPage,
+        };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

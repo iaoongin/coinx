@@ -12,6 +12,7 @@ def test_parse_open_interest_hist_maps_common_fields():
             "symbol": "BTCUSDT",
             "sumOpenInterest": "12345.67800000",
             "sumOpenInterestValue": "987654321.12000000",
+            "CMCCirculatingSupply": "20103081.00000000",
             "timestamp": 1711526400000,
         }
     ]
@@ -20,6 +21,7 @@ def test_parse_open_interest_hist_maps_common_fields():
 
     assert records[0]["sum_open_interest"] == 12345.678
     assert records[0]["sum_open_interest_value"] == 987654321.12
+    assert records[0]["circulating_supply"] == 20103081.0
     assert records[0]["event_time"] == 1711526400000
 
 

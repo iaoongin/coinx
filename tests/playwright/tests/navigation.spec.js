@@ -1,11 +1,12 @@
 const { test, expect } = require('./fixtures');
 const { NAV_ITEMS, navLinks, visit } = require('./contracts');
 
-const pages = ['/', '/legacy-home', '/market-rank', '/market-structure-score', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs', '/funding-rate'];
+const pages = ['/', '/legacy-home', '/market-rank', '/open-interest', '/market-structure-score', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs', '/funding-rate'];
 
 const NAV_MENU_BY_PATH = {
   '/legacy-home': '市场',
   '/market-rank': '市场',
+  '/open-interest': '市场',
   '/funding-rate': '市场',
   '/market-structure-score': '分析',
   '/coin-detail': '分析',

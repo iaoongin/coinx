@@ -75,6 +75,7 @@ def parse_open_interest_hist(payload, symbol, period):
             'event_time': int(item['timestamp']),
             'sum_open_interest': _to_float(item.get('sumOpenInterest')),
             'sum_open_interest_value': _to_float(item.get('sumOpenInterestValue')),
+            'circulating_supply': _to_float(item.get('CMCCirculatingSupply')),
         }
         for item in payload
     ]

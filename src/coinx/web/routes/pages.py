@@ -51,6 +51,13 @@ def market_rank():
     return render_template('market_rank.html')
 
 
+@pages_bp.route('/open-interest')
+def open_interest():
+    """跨交易所持仓量与流通量页面。"""
+    logger.info("访问持仓量概览页面")
+    return render_template('open_interest.html')
+
+
 @pages_bp.route('/hedge-calculator')
 def hedge_calculator():
     """对冲计算器页面"""

@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS market_open_interest_hist (
     event_time BIGINT NOT NULL COMMENT '数据时间戳，毫秒',
     sum_open_interest DECIMAL(30, 8) DEFAULT NULL COMMENT '持仓量',
     sum_open_interest_value DECIMAL(30, 8) DEFAULT NULL COMMENT '持仓价值',
+    circulating_supply DECIMAL(30, 8) DEFAULT NULL COMMENT '流通供应量（Binance/CMC）',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_moih_exchange_symbol_period_time (exchange, symbol, period, event_time),

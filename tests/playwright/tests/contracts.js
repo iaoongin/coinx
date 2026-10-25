@@ -2,6 +2,7 @@ const NAV_ITEMS = [
   { name: '首页', href: '/' },
   { name: '旧首页', href: '/legacy-home' },
   { name: '行情榜', href: '/market-rank' },
+  { name: '持仓量', href: '/open-interest' },
   { name: '结构评分', href: '/market-structure-score' },
   { name: '合约详情', href: '/coin-detail' },
   { name: '对冲计算器', href: '/hedge-calculator' },

@@ -16,6 +16,7 @@ CoinX 是一个面向 Binance U 本位合约的币种监控项目，提供定时
 - 每天 0 点同步一次 Binance 最新交易对列表
 - 支持持仓量、持仓价值、24h 涨跌、分周期持仓变化、主力净流入等指标
 - 提供行情榜页面
+- 提供跨交易所持仓量与流通量比例筛选页面
 - 提供跌幅榜页面
 - 提供币种配置页面，可切换交易对跟踪状态
 - 提供 Flask 页面和 JSON API
@@ -239,6 +240,8 @@ http://127.0.0.1:5000
   - 多周期矩阵兼容入口，会重定向到 `/`
 - `/market-rank`
   - 行情榜，支持自动刷新和手动刷新快照
+- `/open-interest`
+  - 跨交易所累计持仓量与 Binance/CMC 流通量比例筛选
 - `/coins-config`
   - 币种配置管理
 - `/coin-detail`
@@ -260,6 +263,8 @@ Automatic RSS polling uses `RSS_ENABLED` and `RSS_POLL_INTERVAL`, and also requi
   - 手动触发一次刷新
 - `GET /api/market-rank`
   - 获取行情榜排行数据，按最新数据库快照排序返回
+- `GET /api/open-interest`
+  - 获取跨交易所累计持仓量、Binance/CMC 流通量及持仓量/流通量比例，支持筛选和分页
 - `POST /api/market-rank/refresh`
   - 手动触发行情榜快照刷新，再供 `/api/market-rank` 读取最新结果
 - `GET /api/coin-detail/<symbol>`

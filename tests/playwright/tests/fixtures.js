@@ -504,6 +504,42 @@ const test = base.extend({
         return;
       }
 
+      if (pathname === '/api/open-interest') {
+        await route.fulfill(jsonResponse({
+          status: 'success',
+          message: 'open interest overview loaded',
+          data: [
+            {
+              symbol: 'BTCUSDT',
+              total_open_interest: 1234567.89,
+              total_open_interest_value: 85432123.45,
+              circulating_supply: 20103081,
+              oi_circulating_percent: 6.1412,
+              exchanges: ['binance', 'bybit'],
+              exchange_count: 2,
+              latest_event_time: 1711526400000,
+            },
+            {
+              symbol: 'ETHUSDT',
+              total_open_interest: 654321.12,
+              total_open_interest_value: 23000000,
+              circulating_supply: null,
+              oi_circulating_percent: null,
+              exchanges: ['binance'],
+              exchange_count: 1,
+              latest_event_time: 1711526400000,
+            },
+          ],
+          total_count: 2,
+          page: 1,
+          page_size: 50,
+          period: searchParams.get('period') || '5m',
+          snapshot_time: 1711526400000,
+          stats: { total_symbols: 2, with_supply: 1, without_supply: 1, exchanges: ['binance', 'bybit'] },
+        }));
+        return;
+      }
+
       if (pathname === '/api/coins-config' && request.method() === 'GET') {
         await route.fulfill(
           jsonResponse({

@@ -24,9 +24,10 @@
     </a>
 
     <div class="nav-menu">
-      <button class="nav-menu-trigger{% if request.path.startswith('/legacy-home') or request.path.startswith('/market-rank') or request.path.startswith('/funding-rate') %} active{% endif %}" type="button" aria-controls="nav-menu-market" aria-expanded="false" aria-haspopup="true">市场</button>
+      <button class="nav-menu-trigger{% if request.path.startswith('/legacy-home') or request.path.startswith('/market-rank') or request.path.startswith('/open-interest') or request.path.startswith('/funding-rate') %} active{% endif %}" type="button" aria-controls="nav-menu-market" aria-expanded="false" aria-haspopup="true">市场</button>
       <div id="nav-menu-market" class="nav-menu-list" aria-label="市场">
         <a class="nav-menu-item{% if request.path.startswith('/market-rank') %} active{% endif %}" href="/market-rank"{% if request.path.startswith('/market-rank') %} aria-current="page"{% endif %}>行情榜</a>
+        <a class="nav-menu-item{% if request.path.startswith('/open-interest') %} active{% endif %}" href="/open-interest"{% if request.path.startswith('/open-interest') %} aria-current="page"{% endif %}>持仓量</a>
         <a class="nav-menu-item{% if request.path.startswith('/funding-rate') %} active{% endif %}" href="/funding-rate"{% if request.path.startswith('/funding-rate') %} aria-current="page"{% endif %}>资金费率</a>
         <a class="nav-menu-item{% if request.path.startswith('/legacy-home') %} active{% endif %}" href="/legacy-home"{% if request.path.startswith('/legacy-home') %} aria-current="page"{% endif %}>旧首页</a>
       </div>

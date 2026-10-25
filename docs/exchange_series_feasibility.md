@@ -54,6 +54,8 @@
 - `open_interest_hist`（历史持仓量）：已实现
   - 支持 `sum_open_interest`（持仓量）
   - 支持 `sum_open_interest_value`（持仓价值）
+  - Binance 返回 `CMCCirculatingSupply` 时保存为 `circulating_supply`（Binance/CMC 流通供应量）
+  - 持仓历史原始数据按交易所分别保存；跨交易所累计只在页面查询层计算
 - `taker_buy_sell_vol`（主动买卖成交量）：已实现
   - 支持 `buy_vol`（主动买量）
   - 支持 `sell_vol`（主动卖量）
@@ -357,6 +359,16 @@ Bybit V5 API **没有**提供合约维度的 taker buy/sell volume 接口。调�
 - Binance 的 `exchangeInfo` 会返回 `rateLimits`，请求响应头也会带 `X-MBX-USED-WEIGHT-*`，适合做全局权重观测。
 - 与 OKX `rubik`、Gate WAF 相比，Binance 当前这组公开接口通常更适合批量修补和全量采集。
 - 项目中的 Binance 相关实现位于 [series.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/binance/series.py) 和 [market.py](/Z:/Resource/Code/project/coinx/src/coinx/collector/binance/market.py)。
+
+### 持仓量概览页面
+
+当前已实施 `/open-interest` 页面及 `GET /api/open-interest` 接口：
+
+- 每个交易对取各交易所指定周期的最新一条 OI 数据后累计展示；原始表仍按 `exchange` 保留明细。
+- `circulating_supply` 只取 Binance `CMCCirculatingSupply`（数据来源标记为 Binance/CMC），不跨交易所相加。
+- `oi_circulating_percent` 按 `累计 sum_open_interest / circulating_supply` 计算，不依赖价格。
+- 流通量缺失时保留记录，但比例返回空值；不会写入零值。
+- 页面支持周期、交易对、比例范围、可计算比例和排序筛选。
 ## 工程限流策略补充
 
 当前工程已经在 `repair` 相关请求层落地统一的轻量限流框架，核心目标是“稳优先”，优先减少批量修补时的 `429/403` 和无效重试，而不是追求极限吞吐。
