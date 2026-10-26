@@ -250,8 +250,29 @@
     }
 
     .exchange-list {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      flex-wrap: nowrap;
+      gap: 14px;
       color: var(--text-secondary);
       font: 11px var(--font-mono);
+      min-width: max-content;
+      white-space: nowrap;
+    }
+
+    .exchange-detail {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .exchange-detail.stale-data .exchange-value {
+      color: var(--negative);
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+      text-decoration-color: var(--negative);
     }
 
     .empty,
@@ -376,6 +397,10 @@
             <input v-model="filters.onlyWithSupply" type="checkbox">
             仅显示可计算比例
           </label>
+          <label class="checkbox-row">
+            <input v-model="filters.onlyTimeAligned" type="checkbox">
+            仅显示时间对齐
+          </label>
           <button class="btn btn-primary" type="submit">查询</button>
           <button class="btn btn-secondary" type="button" @click="resetFilters">重置</button>
         </div>
@@ -411,8 +436,17 @@
               <td :class="row.circulating_supply == null ? 'muted' : ''">{{ formatAmount(row.circulating_supply) }}</td>
               <td class="ratio">{{ formatPercent(row.oi_circulating_percent) }}</td>
               <td>{{ formatAmount(row.total_open_interest_value) }}</td>
-              <td class="exchange-list">{{ row.exchanges.join(' · ') }}</td>
-              <td class="muted">{{ formatTime(row.latest_event_time) }}</td>
+              <td class="exchange-list">
+                <span
+                  v-for="detail in row.exchange_details"
+                  :key="`${row.symbol}-${detail.exchange}`"
+                  :class="['exchange-detail', detail.is_stale ? 'stale-data' : '']"
+                  :title="detail.is_stale ? `数据时间：${formatTime(detail.event_time)}` : ''"
+                >
+                  <span class="exchange-value">{{ detail.exchange }} {{ formatAmount(detail.open_interest) }}</span>
+                </span>
+              </td>
+              <td class="muted">{{ formatTime(row.anchor_event_time || row.latest_event_time) }}</td>
             </tr>
           </tbody>
         </table>
@@ -445,9 +479,10 @@
           sortBy: 'ratio',
           sortOrder: 'desc',
           onlyWithSupply: false,
+          onlyTimeAligned: false,
         });
         const rows = ref([]);
-        const stats = ref({ total_symbols: 0, with_supply: 0, exchanges: [] });
+        const stats = ref({ total_symbols: 0, with_supply: 0, stale_symbols: 0, exchanges: [] });
         const page = ref(1);
         const pageSize = ref(50);
         const totalCount = ref(0);
@@ -491,6 +526,7 @@
           if (filters.value.minOpenInterest !== '') params.set('min_open_interest', filters.value.minOpenInterest);
           if (filters.value.maxOpenInterest !== '') params.set('max_open_interest', filters.value.maxOpenInterest);
           if (filters.value.onlyWithSupply) params.set('only_with_supply', 'true');
+          if (filters.value.onlyTimeAligned) params.set('only_time_aligned', 'true');
           return params.toString();
         };
 
@@ -504,7 +540,7 @@
               throw new Error(result.message || '加载持仓量数据失败');
             }
             rows.value = result.data || [];
-            stats.value = result.stats || { total_symbols: 0, with_supply: 0, exchanges: [] };
+            stats.value = result.stats || { total_symbols: 0, with_supply: 0, stale_symbols: 0, exchanges: [] };
             totalCount.value = result.total_count || 0;
             pageSize.value = result.page_size || pageSize.value;
             snapshotTime.value = result.snapshot_time || null;
@@ -525,7 +561,7 @@
         const resetFilters = () => {
           filters.value = {
             period: '5m', keyword: '', minRatio: '', maxRatio: '', minOpenInterest: '', maxOpenInterest: '',
-            sortBy: 'ratio', sortOrder: 'desc', onlyWithSupply: false,
+            sortBy: 'ratio', sortOrder: 'desc', onlyWithSupply: false, onlyTimeAligned: false,
           };
           page.value = 1;
           loadData();

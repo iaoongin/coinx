@@ -7,8 +7,15 @@ test.describe('持仓量概览测试', () => {
 
     await expect(heading(page, '持仓量概览', 1)).toBeVisible();
     await expect(page.locator('body')).toContainText('BTCUSDT');
-    await expect(page.locator('body')).toContainText('binance · bybit');
+    await expect(page.locator('body')).toContainText('binance');
+    await expect(page.locator('body')).toContainText('bybit');
     await expect(page.locator('body')).toContainText('6.1412%');
+    await expect(page.locator('.quality-note')).toHaveCount(0);
+    await expect(page.locator('body')).not.toContainText('含旧数据');
+    await expect(page.locator('.stale-data')).toHaveCount(1);
+    await expect(page.locator('.stale-data')).toHaveAttribute('title', /数据时间：/);
+    await expect(page.locator('.exchange-time')).toHaveCount(0);
+    await expect(page.locator('.exchange-list')).toHaveCSS('flex-wrap', 'nowrap');
   });
 
   test('筛选控件可以提交查询', async ({ page }) => {

@@ -365,6 +365,7 @@ Bybit V5 API **没有**提供合约维度的 taker buy/sell volume 接口。调�
 当前已实施 `/open-interest` 页面及 `GET /api/open-interest` 接口：
 
 - 每个交易对取各交易所指定周期的最新一条 OI 数据后累计展示；原始表仍按 `exchange` 保留明细。
+- 各交易所最新时间不一致时仍保留交易对和累计值，但旧交易所明细会标记为旧数据并使用删除线；页面另提供“仅显示时间对齐”筛选。
 - `circulating_supply` 只取 Binance `CMCCirculatingSupply`（数据来源标记为 Binance/CMC），不跨交易所相加。
 - `oi_circulating_percent` 按 `累计 sum_open_interest / circulating_supply` 计算，不依赖价格。
 - 流通量缺失时保留记录，但比例返回空值；不会写入零值。

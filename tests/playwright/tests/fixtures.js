@@ -516,6 +516,12 @@ const test = base.extend({
               circulating_supply: 20103081,
               oi_circulating_percent: 6.1412,
               exchanges: ['binance', 'bybit'],
+              exchange_details: [
+                { exchange: 'binance', open_interest: 1234567.89, event_time: 1711526400000, is_stale: false },
+                { exchange: 'bybit', open_interest: 654321.12, event_time: 1711526340000, is_stale: true },
+              ],
+              has_time_mismatch: true,
+              stale_exchanges: ['bybit'],
               exchange_count: 2,
               latest_event_time: 1711526400000,
             },
@@ -526,6 +532,11 @@ const test = base.extend({
               circulating_supply: null,
               oi_circulating_percent: null,
               exchanges: ['binance'],
+              exchange_details: [
+                { exchange: 'binance', open_interest: 654321.12, event_time: 1711526400000, is_stale: false },
+              ],
+              has_time_mismatch: false,
+              stale_exchanges: [],
               exchange_count: 1,
               latest_event_time: 1711526400000,
             },
@@ -535,7 +546,7 @@ const test = base.extend({
           page_size: 50,
           period: searchParams.get('period') || '5m',
           snapshot_time: 1711526400000,
-          stats: { total_symbols: 2, with_supply: 1, without_supply: 1, exchanges: ['binance', 'bybit'] },
+          stats: { total_symbols: 2, with_supply: 1, without_supply: 1, aligned_symbols: 1, stale_symbols: 1, exchanges: ['binance', 'bybit'] },
         }));
         return;
       }

@@ -13,13 +13,15 @@ def test_open_interest_api_returns_aggregated_page(monkeypatch):
             'circulating_supply': 1000.0,
             'oi_circulating_percent': 15.0,
             'exchanges': ['binance', 'okx'],
+            'has_time_mismatch': True,
+            'stale_exchanges': ['okx'],
         }],
         'total_count': 1,
         'page': 1,
         'page_size': 50,
         'period': '5m',
         'snapshot_time': 100,
-        'stats': {'total_symbols': 1, 'with_supply': 1, 'exchanges': ['binance', 'okx']},
+        'stats': {'total_symbols': 1, 'with_supply': 1, 'stale_symbols': 1, 'exchanges': ['binance', 'okx']},
     }
     monkeypatch.setattr(
         'coinx.web.routes.api_data.get_open_interest_page',

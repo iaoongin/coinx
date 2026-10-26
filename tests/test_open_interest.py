@@ -82,7 +82,7 @@ def test_open_interest_page_uses_supply_from_latest_binance_row(db_session):
     assert btc['oi_circulating_percent'] is None
 
 
-def test_open_interest_page_excludes_mismatched_latest_event_times(db_session):
+def test_open_interest_page_marks_mismatched_latest_event_times(db_session):
     db_session.add_all([
         MarketOpenInterestHist(
             exchange='binance', symbol='BTCUSDT', period='5m', event_time=100,
@@ -100,5 +100,41 @@ def test_open_interest_page_excludes_mismatched_latest_event_times(db_session):
     db_session.commit()
 
     result = get_open_interest_page(session=db_session, period='5m')
+
+    btc = next(row for row in result['data'] if row['symbol'] == 'BTCUSDT')
+    assert btc['total_open_interest'] == 150.0
+    assert btc['has_time_mismatch'] is True
+    assert btc['data_quality'] == 'contains_stale_data'
+    assert btc['stale_exchanges'] == ['okx']
+    okx = next(item for item in btc['exchange_details'] if item['exchange'] == 'okx')
+    assert okx['is_stale'] is True
+
+
+def test_open_interest_page_can_filter_to_time_aligned_rows(db_session):
+    db_session.add_all([
+        MarketOpenInterestHist(
+            exchange='binance', symbol='BTCUSDT', period='5m', event_time=100,
+            sum_open_interest=100,
+        ),
+        MarketOpenInterestHist(
+            exchange='okx', symbol='BTCUSDT', period='5m', event_time=95,
+            sum_open_interest=50,
+        ),
+        MarketOpenInterestHist(
+            exchange='binance', symbol='ETHUSDT', period='5m', event_time=100,
+            sum_open_interest=20,
+        ),
+        MarketOpenInterestHist(
+            exchange='bybit', symbol='ETHUSDT', period='5m', event_time=100,
+            sum_open_interest=10,
+        ),
+    ])
+    db_session.commit()
+
+    result = get_open_interest_page(
+        session=db_session,
+        period='5m',
+        only_time_aligned=True,
+    )
 
     assert [row['symbol'] for row in result['data']] == ['ETHUSDT']

@@ -58,6 +58,7 @@ def get_open_interest_page(
     min_open_interest=None,
     max_open_interest=None,
     only_with_supply=False,
+    only_time_aligned=False,
     sort_by='ratio',
     sort_order='desc',
     page=1,
@@ -83,22 +84,32 @@ def get_open_interest_page(
                     'total_open_interest_value': 0.0,
                     'has_open_interest_value': False,
                     'exchanges': set(),
+                    'exchange_details': [],
                     'event_times': set(),
                     'latest_event_time': None,
+                    'binance_event_time': None,
                     'circulating_supply': None,
                     'supply_event_time': None,
                 },
             )
             item['exchanges'].add(row.exchange)
+            item['exchange_details'].append({
+                'exchange': row.exchange,
+                'open_interest': _as_float(row.sum_open_interest),
+                'open_interest_value': _as_float(row.sum_open_interest_value),
+                'event_time': int(row.event_time) if row.event_time is not None else None,
+            })
             if row.event_time is not None:
                 item['event_times'].add(int(row.event_time))
                 item['latest_event_time'] = max(
                     item['latest_event_time'] or int(row.event_time),
                     int(row.event_time),
                 )
-            if row.exchange == 'binance' and row.circulating_supply is not None:
-                item['circulating_supply'] = _as_float(row.circulating_supply)
-                item['supply_event_time'] = int(row.event_time)
+            if row.exchange == 'binance':
+                item['binance_event_time'] = int(row.event_time) if row.event_time is not None else None
+                if row.circulating_supply is not None:
+                    item['circulating_supply'] = _as_float(row.circulating_supply)
+                    item['supply_event_time'] = int(row.event_time)
             if row.sum_open_interest is not None:
                 item['total_open_interest'] += float(row.sum_open_interest)
                 item['has_open_interest'] = True
@@ -111,8 +122,21 @@ def get_open_interest_page(
         for symbol, item in grouped.items():
             if keyword_upper and keyword_upper not in symbol.upper():
                 continue
-            if len(item['event_times']) > 1:
+            latest_event_time = max(item['event_times']) if item['event_times'] else None
+            has_time_mismatch = len(item['event_times']) > 1
+            if only_time_aligned and has_time_mismatch:
                 continue
+            exchange_details = []
+            for detail in sorted(item['exchange_details'], key=lambda value: value['exchange']):
+                detail = {**detail, 'is_stale': (
+                    latest_event_time is not None
+                    and detail['event_time'] is not None
+                    and detail['event_time'] != latest_event_time
+                )}
+                exchange_details.append(detail)
+            stale_exchanges = [
+                detail['exchange'] for detail in exchange_details if detail['is_stale']
+            ]
             supply = item['circulating_supply']
             total_open_interest = item['total_open_interest'] if item['has_open_interest'] else None
             total_open_interest_value = (
@@ -152,9 +176,15 @@ def get_open_interest_page(
                 'oi_circulating_percent': ratio_percent,
                 'exchange_count': len(item['exchanges']),
                 'exchanges': sorted(item['exchanges']),
+                'exchange_details': exchange_details,
+                'anchor_exchange': 'binance' if 'binance' in item['exchanges'] else None,
+                'anchor_event_time': item['binance_event_time'],
                 'latest_event_time': item['latest_event_time'],
                 'supply_event_time': item['supply_event_time'],
                 'supply_source': 'binance_cmc' if supply is not None else None,
+                'has_time_mismatch': has_time_mismatch,
+                'data_quality': 'contains_stale_data' if has_time_mismatch else 'aligned',
+                'stale_exchanges': stale_exchanges,
             })
 
         sort_keys = {
@@ -191,6 +221,8 @@ def get_open_interest_page(
                 'total_symbols': total_count,
                 'with_supply': sum(row['circulating_supply'] is not None for row in result_rows),
                 'without_supply': sum(row['circulating_supply'] is None for row in result_rows),
+                'aligned_symbols': sum(not row['has_time_mismatch'] for row in result_rows),
+                'stale_symbols': sum(row['has_time_mismatch'] for row in result_rows),
                 'exchanges': sorted({exchange for row in result_rows for exchange in row['exchanges']}),
             },
         }
