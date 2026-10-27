@@ -1017,6 +1017,7 @@ def get_open_interest_overview():
             min_market_cap=optional_float('min_market_cap'),
             only_with_supply=request.args.get('only_with_supply', '').lower() in {'1', 'true', 'yes'},
             only_time_aligned=request.args.get('only_time_aligned', '').lower() in {'1', 'true', 'yes'},
+            only_latest_time=request.args.get('only_latest_time', '').lower() in {'1', 'true', 'yes'},
             sort_by=request.args.get('sort_by', 'ratio'),
             sort_order=request.args.get('sort_order', 'desc'),
             page=int(request.args.get('page', 1)),

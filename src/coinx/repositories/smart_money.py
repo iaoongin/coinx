@@ -304,20 +304,19 @@ def _build_price_trend_map(raw_rows):
     }
 
 
-def _attach_price_trends(rows, session=None):
-    """Attach a compact seven-day hourly close series to each page row."""
-    normalized_rows = [dict(row) for row in rows]
-    symbols = list(dict.fromkeys(row.get('symbol') for row in normalized_rows if row.get('symbol')))
-    for row in normalized_rows:
-        row['price_trend'] = []
-    if not symbols:
-        return normalized_rows
+def load_binance_price_trends(symbols, point_count=TREND_POINT_COUNT, session=None):
+    """Load compact hourly Binance close series for the requested symbols."""
+    normalized_symbols = list(dict.fromkeys(symbol for symbol in symbols if symbol))
+    trend_map = {symbol: [] for symbol in normalized_symbols}
+    if not normalized_symbols:
+        return trend_map
 
+    point_count = max(2, int(point_count or TREND_POINT_COUNT))
     try:
         if session is None and is_clickhouse_read():
             repository = get_clickhouse_repository()
             quoted_symbols = ', '.join(
-                f"'{str(symbol).replace(chr(39), chr(39) * 2)}'" for symbol in symbols
+                f"'{str(symbol).replace(chr(39), chr(39) * 2)}'" for symbol in normalized_symbols
             )
             table = f'{repository.database}.market_klines'
             latest = repository.client.query_scalar(
@@ -325,11 +324,11 @@ def _attach_price_trends(rows, session=None):
                 f"WHERE exchange = 'binance' AND period = '5m' AND symbol IN ({quoted_symbols})"
             )
             if latest is None:
-                return normalized_rows
+                return trend_map
             latest_bucket = int(latest) - int(latest) % TREND_BUCKET_MS
-            lower_bound = latest_bucket - (TREND_POINT_COUNT - 1) * TREND_BUCKET_MS
+            lower_bound = latest_bucket - (point_count - 1) * TREND_BUCKET_MS
             raw_rows = repository.aggregate_kline_rows(
-                symbols=symbols,
+                symbols=normalized_symbols,
                 exchange='binance',
                 interval_ms=TREND_BUCKET_MS,
                 lower_bound=lower_bound,
@@ -342,7 +341,7 @@ def _attach_price_trends(rows, session=None):
             try:
                 symbol_params = {
                     f'trend_symbol_{index}': symbol
-                    for index, symbol in enumerate(symbols)
+                    for index, symbol in enumerate(normalized_symbols)
                 }
                 symbol_placeholders = ', '.join(f':{key}' for key in symbol_params)
                 base_params = {
@@ -359,9 +358,9 @@ def _attach_price_trends(rows, session=None):
                     base_params,
                 ).scalar()
                 if latest is None:
-                    return normalized_rows
+                    return trend_map
                 latest_bucket = int(latest) - int(latest) % TREND_BUCKET_MS
-                lower_bound = latest_bucket - (TREND_POINT_COUNT - 1) * TREND_BUCKET_MS
+                lower_bound = latest_bucket - (point_count - 1) * TREND_BUCKET_MS
                 raw_rows = db.execute(
                     text(
                         'SELECT symbol, open_time, close_price FROM market_klines '
@@ -380,15 +379,25 @@ def _attach_price_trends(rows, session=None):
                 if own_session:
                     db.close()
 
-        trend_map = _build_price_trend_map(raw_rows)
-        for row in normalized_rows:
-            row['price_trend'] = trend_map.get(row.get('symbol'), [])
+        built_map = _build_price_trend_map(raw_rows)
+        for symbol in normalized_symbols:
+            trend_map[symbol] = built_map.get(symbol, [])
     except Exception as exc:
         logger.debug(
-            '加载聪明钱价格走势失败: error_type=%s error=%s',
+            '加载 Binance 价格走势失败: error_type=%s error=%s',
             type(exc).__name__,
             str(exc)[:200],
         )
+    return trend_map
+
+
+def _attach_price_trends(rows, session=None):
+    """Attach a compact seven-day hourly close series to each page row."""
+    normalized_rows = [dict(row) for row in rows]
+    symbols = [row.get('symbol') for row in normalized_rows if row.get('symbol')]
+    trend_map = load_binance_price_trends(symbols, session=session)
+    for row in normalized_rows:
+        row['price_trend'] = trend_map.get(row.get('symbol'), [])
     return normalized_rows
 
 

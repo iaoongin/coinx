@@ -367,7 +367,7 @@ Bybit V5 API **没有**提供合约维度的 taker buy/sell volume 接口。调�
 - 每个交易对取各交易所指定周期的最新一条 OI 数据后累计展示；原始表仍按 `exchange` 保留明细。
 - 各交易所最新时间不一致时仍保留交易对和累计值，但旧交易所明细会标记为旧数据并使用删除线；页面另提供“仅显示时间对齐”筛选。
 - `circulating_supply` 只取 Binance `CMCCirculatingSupply`（数据来源标记为 Binance/CMC），不跨交易所相加。
-- `oi_circulating_percent` 按 `累计 sum_open_interest / circulating_supply` 计算，不依赖价格。
+- `oi_circulating_ratio` 按 `累计持仓价值 / 流通市值` 计算，`oi_circulating_percent` 为该比值乘以 100；持仓价值缺失时按页面统一价格估算，避免跨交易所原始持仓量单位不一致导致比例失真。
 - 流通量缺失时保留记录，但比例返回空值；不会写入零值。
 - 页面支持周期、交易对、比例范围、可计算比例和排序筛选。
 ## 工程限流策略补充

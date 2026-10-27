@@ -8,6 +8,7 @@ test.describe('持仓量概览测试', () => {
     await expect(heading(page, '持仓量概览', 1)).toBeVisible();
     await expect(page.locator('#oi-min-ratio')).toHaveValue('0.6');
     await expect(page.locator('#oi-min-market-cap')).toHaveValue('3M');
+    await expect(page.locator('#oi-only-latest')).toBeChecked();
     await expect(page.locator('body')).toContainText('BTCUSDT');
     await expect(page.locator('body')).toContainText('binance');
     await expect(page.locator('body')).toContainText('bybit');
@@ -15,7 +16,7 @@ test.describe('持仓量概览测试', () => {
     await expect(page.locator('body')).toContainText('最新价格');
     await expect(page.locator('body')).toContainText('流通市值');
     await expect(page.locator('body')).toContainText('68,000');
-    await expect(page.locator('body')).toContainText('82.00M');
+    await expect(page.locator('body')).toContainText('82.00B');
     await expect(page.locator('body')).toContainText('交易所持仓价值');
     await expect(page.locator('.ratio-high')).toHaveCount(1);
     await expect(page.locator('.ratio:not(.ratio-high)')).toHaveCount(1);

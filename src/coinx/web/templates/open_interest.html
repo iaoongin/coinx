@@ -206,7 +206,7 @@
 
     table {
       width: 100%;
-      min-width: 920px;
+      min-width: 1060px;
       border-collapse: collapse;
     }
 
@@ -215,6 +215,7 @@
       padding: 11px 12px;
       border-bottom: 1px solid var(--border-subtle);
       text-align: right;
+      vertical-align: middle;
       white-space: nowrap;
     }
 
@@ -228,6 +229,8 @@
     td {
       color: var(--text-primary);
       font: 12px var(--font-mono);
+      height: 52px;
+      box-sizing: border-box;
     }
 
     tbody tr:last-child td {
@@ -262,8 +265,34 @@
       font-weight: 700;
     }
 
+    .price-trend-cell {
+      width: 132px;
+      height: 52px;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    .price-trend-chart {
+      display: block;
+      width: 120px;
+      height: 30px;
+    }
+
+    .price-trend-line {
+      fill: none;
+      stroke: var(--gold-primary);
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
     .muted {
       color: var(--text-muted);
+    }
+
+    .exchange-cell {
+      text-align: left;
+      vertical-align: middle;
     }
 
     .exchange-list {
@@ -272,6 +301,7 @@
       justify-content: flex-start;
       flex-wrap: nowrap;
       gap: 14px;
+      height: 30px;
       color: var(--text-secondary);
       font: 11px var(--font-mono);
       min-width: max-content;
@@ -431,6 +461,10 @@
             <input v-model="filters.onlyTimeAligned" type="checkbox">
             仅显示时间对齐
           </label>
+          <label class="checkbox-row" for="oi-only-latest">
+            <input id="oi-only-latest" v-model="filters.onlyLatestTime" type="checkbox">
+            仅显示最新数据
+          </label>
           <button class="btn btn-primary" type="submit">查询</button>
           <button class="btn btn-secondary" type="button" @click="resetFilters">重置</button>
         </div>
@@ -452,6 +486,7 @@
             <tr>
               <th>交易对</th>
               <th>最新价格</th>
+              <th>24h价格走势</th>
               <th>流通市值</th>
               <th>累计持仓价值</th>
               <th>持仓 / 流通</th>
@@ -463,18 +498,26 @@
             <tr v-for="row in rows" :key="row.symbol">
               <td class="symbol"><a :href="`/coin-detail?symbol=${row.symbol}`">{{ row.symbol }}</a></td>
               <td class="latest-price" :class="row.latest_price == null ? 'muted' : ''">{{ formatPrice(row.latest_price) }}</td>
+              <td class="price-trend-cell" :title="priceTrendTitle(row.price_trend_24h)">
+                <svg v-if="sparklinePoints(row.price_trend_24h)" class="price-trend-chart" viewBox="0 0 120 30" preserveAspectRatio="none" aria-label="24小时价格走势">
+                  <polyline class="price-trend-line" :points="sparklinePoints(row.price_trend_24h)"></polyline>
+                </svg>
+                <span v-else class="muted">N/A</span>
+              </td>
               <td class="market-cap" :class="row.circulating_market_cap == null ? 'muted' : ''">{{ formatAmount(row.circulating_market_cap) }}</td>
               <td>{{ formatAmount(row.total_open_interest_value) }}</td>
               <td :class="['ratio', row.oi_circulating_ratio > 1 ? 'ratio-high' : '']">{{ formatRatio(row.oi_circulating_ratio) }}</td>
-              <td class="exchange-list">
-                <span
-                  v-for="detail in row.exchange_details"
-                  :key="`${row.symbol}-${detail.exchange}`"
-                  :class="['exchange-detail', detail.is_stale ? 'stale-data' : '']"
-                  :title="detail.is_stale ? `数据时间：${formatTime(detail.event_time)}` : ''"
-                >
-                  <span class="exchange-value">{{ detail.exchange }} {{ formatAmount(detail.open_interest_value) }}</span>
-                </span>
+              <td class="exchange-cell">
+                <div class="exchange-list">
+                  <span
+                    v-for="detail in row.exchange_details"
+                    :key="`${row.symbol}-${detail.exchange}`"
+                    :class="['exchange-detail', detail.is_stale ? 'stale-data' : '']"
+                    :title="detail.is_stale ? `数据时间：${formatTime(detail.event_time)}` : ''"
+                  >
+                    <span class="exchange-value">{{ detail.exchange }} {{ formatAmount(detail.open_interest_value) }}</span>
+                  </span>
+                </div>
               </td>
               <td class="muted">{{ formatTime(row.anchor_event_time || row.latest_event_time) }}</td>
             </tr>
@@ -511,6 +554,7 @@
           sortOrder: 'desc',
           onlyWithSupply: false,
           onlyTimeAligned: false,
+          onlyLatestTime: true,
         });
         const rows = ref([]);
         const stats = ref({ total_symbols: 0, with_supply: 0, stale_symbols: 0, exchanges: [] });
@@ -557,6 +601,31 @@
           return new Date(Number(value)).toLocaleString('zh-CN', { hour12: false });
         };
 
+        const trendValues = (trend) => (Array.isArray(trend) ? trend : [])
+          .map((point) => Number(point?.value))
+          .filter((value) => Number.isFinite(value));
+
+        const sparklinePoints = (trend) => {
+          const values = trendValues(trend);
+          if (values.length < 2) return '';
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+          const range = max - min || Math.max(Math.abs(max) * 0.001, 1);
+          const width = 120;
+          const height = 30;
+          const padding = 2;
+          return values.map((value, index) => {
+            const x = padding + (index / (values.length - 1)) * (width - padding * 2);
+            const y = height - padding - ((value - min) / range) * (height - padding * 2);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          }).join(' ');
+        };
+
+        const priceTrendTitle = (trend) => {
+          const values = trendValues(trend);
+          return values.length < 2 ? '24小时价格走势：暂无完整数据' : '24小时价格走势（1小时聚合）';
+        };
+
         const parseCompactAmount = (value) => {
           const normalized = String(value ?? '').trim().toUpperCase().replace(/,/g, '');
           if (!normalized) return null;
@@ -584,6 +653,7 @@
           if (minMarketCap !== null) params.set('min_market_cap', String(minMarketCap));
           if (filters.value.onlyWithSupply) params.set('only_with_supply', 'true');
           if (filters.value.onlyTimeAligned) params.set('only_time_aligned', 'true');
+          if (filters.value.onlyLatestTime) params.set('only_latest_time', 'true');
           return params.toString();
         };
 
@@ -618,7 +688,7 @@
         const resetFilters = () => {
           filters.value = {
             period: '5m', keyword: '', minRatio: '0.6', maxRatio: '', minOpenInterest: '', maxOpenInterest: '', minMarketCap: '3M',
-            sortBy: 'ratio', sortOrder: 'desc', onlyWithSupply: false, onlyTimeAligned: false,
+            sortBy: 'ratio', sortOrder: 'desc', onlyWithSupply: false, onlyTimeAligned: false, onlyLatestTime: true,
           };
           page.value = 1;
           loadData();
@@ -634,7 +704,7 @@
 
         return {
           periods, filters, rows, stats, page, totalCount, totalPages, snapshotTime, loading, errorMessage,
-          formatAmount, formatPrice, formatPercent, formatRatio, formatTime, parseCompactAmount, applyFilters, resetFilters, goToPage,
+          formatAmount, formatPrice, formatPercent, formatRatio, formatTime, sparklinePoints, priceTrendTitle, parseCompactAmount, applyFilters, resetFilters, goToPage,
         };
       },
     }).mount('#app');

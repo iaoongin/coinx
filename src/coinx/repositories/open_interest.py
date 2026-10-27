@@ -6,6 +6,7 @@ from sqlalchemy import and_, func
 
 from coinx.database import get_session
 from coinx.models import MarketOpenInterestHist, MarketTickers
+from coinx.repositories.smart_money import load_binance_price_trends
 
 
 DEFAULT_OPEN_INTEREST_PERIOD = '5m'
@@ -17,8 +18,10 @@ def _as_float(value):
     return float(value) if value is not None else None
 
 
-def _calculate_open_interest_value(open_interest, price):
-    """Calculate a comparable USD OI value with the shared Binance price."""
+def _calculate_open_interest_value(open_interest, price, stored_value=None):
+    """Use native USD OI when available, otherwise estimate with Binance price."""
+    if stored_value not in (None, 0):
+        return float(stored_value)
     if open_interest is None or price in (None, 0):
         return None
     return float(open_interest) * float(price)
@@ -99,6 +102,7 @@ def get_open_interest_page(
     min_market_cap=None,
     only_with_supply=False,
     only_time_aligned=False,
+    only_latest_time=False,
     sort_by='ratio',
     sort_order='desc',
     page=1,
@@ -134,10 +138,7 @@ def get_open_interest_page(
             item['exchange_details'].append({
                 'exchange': row.exchange,
                 'open_interest': _as_float(row.sum_open_interest),
-                # The raw exchange value is intentionally ignored here. The
-                # page uses one Binance price for every exchange so values are
-                # comparable even when an exchange does not provide USD OI.
-                'open_interest_value': None,
+                'open_interest_value': _as_float(row.sum_open_interest_value),
                 'event_time': int(row.event_time) if row.event_time is not None else None,
             })
             if row.event_time is not None:
@@ -184,6 +185,7 @@ def get_open_interest_page(
                 detail['open_interest_value'] = _calculate_open_interest_value(
                     detail.get('open_interest'),
                     latest_price,
+                    detail.get('open_interest_value'),
                 )
                 if detail['open_interest_value'] is not None:
                     total_open_interest_value += detail['open_interest_value']
@@ -196,8 +198,8 @@ def get_open_interest_page(
             total_open_interest = item['total_open_interest'] if item['has_open_interest'] else None
             total_open_interest_value = total_open_interest_value if has_open_interest_value else None
             ratio = (
-                total_open_interest / supply
-                if total_open_interest is not None and supply not in (None, 0)
+                total_open_interest_value / circulating_market_cap
+                if total_open_interest_value is not None and circulating_market_cap not in (None, 0)
                 else None
             )
             ratio_percent = ratio * 100 if ratio is not None else None
@@ -248,6 +250,21 @@ def get_open_interest_page(
                 'stale_exchanges': stale_exchanges,
             })
 
+        if only_latest_time and result_rows:
+            latest_result_times = [
+                row['latest_event_time']
+                for row in result_rows
+                if row['latest_event_time'] is not None
+            ]
+            if latest_result_times:
+                latest_result_time = max(latest_result_times)
+                result_rows = [
+                    row for row in result_rows
+                    if row['latest_event_time'] == latest_result_time
+                ]
+            else:
+                result_rows = []
+
         sort_keys = {
             'ratio': 'oi_circulating_percent',
             'open_interest': 'total_open_interest',
@@ -271,6 +288,13 @@ def get_open_interest_page(
         effective_page_size = min(MAX_PAGE_SIZE, max(1, int(page_size or DEFAULT_PAGE_SIZE)))
         start = (effective_page - 1) * effective_page_size
         page_rows = result_rows[start:start + effective_page_size]
+        price_trend_map = load_binance_price_trends(
+            [row['symbol'] for row in page_rows],
+            point_count=24,
+            session=db,
+        )
+        for row in page_rows:
+            row['price_trend_24h'] = price_trend_map.get(row['symbol'], [])
         snapshot_times = [row['latest_event_time'] for row in page_rows if row['latest_event_time'] is not None]
 
         return {
