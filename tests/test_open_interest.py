@@ -26,19 +26,45 @@ def test_open_interest_page_aggregates_exchanges_and_uses_binance_supply(db_sess
     assert result['data'][0]['symbol'] == 'BTCUSDT'
     btc = next(row for row in result['data'] if row['symbol'] == 'BTCUSDT')
     assert btc['total_open_interest'] == 150.0
-    assert btc['total_open_interest_value'] == 150000.0
+    assert btc['total_open_interest_value'] == 300000.0
     assert btc['latest_price'] == 2000.0
     assert btc['circulating_market_cap'] == 2000000.0
     assert btc['circulating_supply'] == 1000.0
     assert btc['oi_circulating_percent'] == 15.0
     assert btc['exchange_count'] == 2
     assert btc['exchanges'] == ['binance', 'okx']
+    assert {
+        detail['exchange']: detail['open_interest_value']
+        for detail in btc['exchange_details']
+    } == {'binance': 200000.0, 'okx': 100000.0}
 
     eth = next(row for row in result['data'] if row['symbol'] == 'ETHUSDT')
     assert eth['circulating_supply'] is None
     assert eth['circulating_market_cap'] is None
     assert eth['oi_circulating_percent'] is None
     assert result['stats']['without_supply'] == 1
+
+
+def test_open_interest_page_calculates_bybit_value_with_binance_price(db_session):
+    db_session.add_all([
+        MarketOpenInterestHist(
+            exchange='binance', symbol='BTCUSDT', period='5m', event_time=100,
+            sum_open_interest=100, sum_open_interest_value=123456,
+        ),
+        MarketOpenInterestHist(
+            exchange='bybit', symbol='BTCUSDT', period='5m', event_time=100,
+            sum_open_interest=20, sum_open_interest_value=None,
+        ),
+        MarketTickers(symbol='BTCUSDT', last_price=2000, close_time=100),
+    ])
+    db_session.commit()
+
+    result = get_open_interest_page(session=db_session, period='5m')
+
+    btc = result['data'][0]
+    assert btc['total_open_interest_value'] == 240000.0
+    bybit = next(detail for detail in btc['exchange_details'] if detail['exchange'] == 'bybit')
+    assert bybit['open_interest_value'] == 40000.0
 
 
 def test_open_interest_page_applies_ratio_filter_and_keyword(db_session):

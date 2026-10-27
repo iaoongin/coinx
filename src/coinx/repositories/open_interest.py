@@ -17,6 +17,13 @@ def _as_float(value):
     return float(value) if value is not None else None
 
 
+def _calculate_open_interest_value(open_interest, price):
+    """Calculate a comparable USD OI value with the shared Binance price."""
+    if open_interest is None or price in (None, 0):
+        return None
+    return float(open_interest) * float(price)
+
+
 def _latest_rows(session, period, symbol=None, as_of_ms=None):
     model = MarketOpenInterestHist
     filters = [model.period == period]
@@ -114,8 +121,6 @@ def get_open_interest_page(
                     'symbol': row.symbol,
                     'total_open_interest': 0.0,
                     'has_open_interest': False,
-                    'total_open_interest_value': 0.0,
-                    'has_open_interest_value': False,
                     'exchanges': set(),
                     'exchange_details': [],
                     'event_times': set(),
@@ -129,7 +134,10 @@ def get_open_interest_page(
             item['exchange_details'].append({
                 'exchange': row.exchange,
                 'open_interest': _as_float(row.sum_open_interest),
-                'open_interest_value': _as_float(row.sum_open_interest_value),
+                # The raw exchange value is intentionally ignored here. The
+                # page uses one Binance price for every exchange so values are
+                # comparable even when an exchange does not provide USD OI.
+                'open_interest_value': None,
                 'event_time': int(row.event_time) if row.event_time is not None else None,
             })
             if row.event_time is not None:
@@ -146,10 +154,6 @@ def get_open_interest_page(
             if row.sum_open_interest is not None:
                 item['total_open_interest'] += float(row.sum_open_interest)
                 item['has_open_interest'] = True
-            if row.sum_open_interest_value is not None:
-                item['total_open_interest_value'] += float(row.sum_open_interest_value)
-                item['has_open_interest_value'] = True
-
         market_prices = _latest_market_prices(db, list(grouped), as_of_ms=as_of_ms)
         result_rows = []
         keyword_upper = str(keyword or '').strip().upper()
@@ -174,15 +178,23 @@ def get_open_interest_page(
             supply = item['circulating_supply']
             price_data = market_prices.get(symbol, {})
             latest_price = price_data.get('latest_price')
+            total_open_interest_value = 0.0
+            has_open_interest_value = False
+            for detail in exchange_details:
+                detail['open_interest_value'] = _calculate_open_interest_value(
+                    detail.get('open_interest'),
+                    latest_price,
+                )
+                if detail['open_interest_value'] is not None:
+                    total_open_interest_value += detail['open_interest_value']
+                    has_open_interest_value = True
             circulating_market_cap = (
                 latest_price * supply
                 if latest_price not in (None, 0) and supply not in (None, 0)
                 else None
             )
             total_open_interest = item['total_open_interest'] if item['has_open_interest'] else None
-            total_open_interest_value = (
-                item['total_open_interest_value'] if item['has_open_interest_value'] else None
-            )
+            total_open_interest_value = total_open_interest_value if has_open_interest_value else None
             ratio = (
                 total_open_interest / supply
                 if total_open_interest is not None and supply not in (None, 0)
