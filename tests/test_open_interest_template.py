@@ -15,6 +15,7 @@ def test_open_interest_template_contains_filters_and_aggregate_columns():
     assert 'id="oi-max-ratio"' in template
     assert 'id="oi-min-amount"' in template
     assert 'id="oi-max-amount"' in template
+    assert 'id="oi-min-market-cap"' in template
     assert 'id="oi-order"' in template
     assert '仅显示时间对齐' in template
     assert 'stale-data' in template
@@ -24,9 +25,23 @@ def test_open_interest_template_contains_filters_and_aggregate_columns():
     assert '数据时间：${formatTime(detail.event_time)}' in template
     assert 'formatTime(detail.event_time)' in template
     assert '存在时间差异' not in template
-    assert '累计持仓量' in template
-    assert '流通量' in template
-    assert '持仓量 / 流通量' in template
+    assert '最新价格' in template
+    assert '流通市值' in template
+    assert '持仓 / 流通' in template
+    assert 'formatPrice(row.latest_price)' in template
+    assert 'formatAmount(row.circulating_market_cap)' in template
+    assert 'formatRatio(row.oi_circulating_ratio)' in template
+    assert "row.oi_circulating_ratio > 1 ? 'ratio-high' : ''" in template
+    assert 'formatAmount(detail.open_interest_value)' in template
+    assert 'height: 30px' in template
+    assert 'grid-column: span 3' in template
+    assert '持仓流通比例下限' in template
+    assert "minRatio: '0.6'" in template
+    assert "minMarketCap: '3M'" in template
+    assert "min_market_cap'" in template
+    assert 'parseCompactAmount' in template
+    assert 'filter-actions-label' in template
+    assert '>操作</span>' in template
 
 
 def test_open_interest_page_renders_template():

@@ -10,6 +10,9 @@ def test_open_interest_api_returns_aggregated_page(monkeypatch):
         'data': [{
             'symbol': 'BTCUSDT',
             'total_open_interest': 150.0,
+            'total_open_interest_value': 150000.0,
+            'latest_price': 2000.0,
+            'circulating_market_cap': 2000000.0,
             'circulating_supply': 1000.0,
             'oi_circulating_percent': 15.0,
             'exchanges': ['binance', 'okx'],

@@ -79,20 +79,22 @@
       display: flex;
       min-width: 0;
       flex-direction: column;
-      gap: 5px;
+      gap: 4px;
     }
 
     .filter-group label {
       color: var(--text-muted);
       font-size: 11px;
+      line-height: 1.2;
     }
 
     .filter-input,
     .filter-select {
       width: 100%;
       min-width: 0;
+      height: 30px;
       box-sizing: border-box;
-      padding: 8px 9px;
+      padding: 0 9px;
       border: 1px solid var(--border-default);
       border-radius: 6px;
       background: var(--bg-elevated);
@@ -107,13 +109,27 @@
     }
 
     .filter-actions {
-      display: flex;
+      display: grid;
+      grid-template-columns: max-content max-content max-content max-content;
+      grid-template-rows: 13px 30px;
       gap: 8px;
       align-items: center;
+      grid-column: span 3;
+      height: 47px;
+      min-width: 0;
+    }
+
+    .filter-actions-label {
+      grid-column: 1 / -1;
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.2;
     }
 
     .btn {
-      padding: 8px 13px;
+      height: 30px;
+      box-sizing: border-box;
+      padding: 0 13px;
       border: 1px solid var(--border-default);
       border-radius: 6px;
       cursor: pointer;
@@ -141,7 +157,8 @@
       display: flex;
       align-items: center;
       gap: 7px;
-      min-height: 34px;
+      height: 30px;
+      min-height: 30px;
       color: var(--text-secondary);
       font-size: 12px;
       white-space: nowrap;
@@ -240,7 +257,7 @@
       color: var(--gold-bright);
     }
 
-    .ratio {
+    .ratio-high {
       color: var(--gold-bright);
       font-weight: 700;
     }
@@ -317,6 +334,7 @@
       .filters {
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
+      .filter-actions { grid-column: 1 / -1; }
     }
 
     @media (max-width: 640px) {
@@ -325,7 +343,14 @@
       .header-row { flex-direction: column; gap: 8px; }
       .header-meta { text-align: left; }
       .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-      .filter-actions { grid-column: 1 / -1; }
+      .filter-actions {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: 13px 30px 30px;
+        height: auto;
+        min-height: 89px;
+      }
+      .filter-actions .btn { width: 100%; }
       .stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .stat-value { font-size: 14px; }
       .pagination { align-items: flex-start; flex-direction: column; }
@@ -359,11 +384,11 @@
           <input id="oi-keyword" class="filter-input" v-model.trim="filters.keyword" placeholder="例如 BTC" autocomplete="off">
         </div>
         <div class="filter-group">
-          <label for="oi-min-ratio">比例下限 (%)</label>
+          <label for="oi-min-ratio">持仓流通比例下限</label>
           <input id="oi-min-ratio" class="filter-input" v-model="filters.minRatio" type="number" step="any" min="0" placeholder="不限">
         </div>
         <div class="filter-group">
-          <label for="oi-max-ratio">比例上限 (%)</label>
+          <label for="oi-max-ratio">持仓流通比例上限</label>
           <input id="oi-max-ratio" class="filter-input" v-model="filters.maxRatio" type="number" step="any" min="0" placeholder="不限">
         </div>
         <div class="filter-group">
@@ -375,12 +400,16 @@
           <input id="oi-max-amount" class="filter-input" v-model="filters.maxOpenInterest" type="number" step="any" min="0" placeholder="不限">
         </div>
         <div class="filter-group">
+          <label for="oi-min-market-cap">市值下限</label>
+          <input id="oi-min-market-cap" class="filter-input" v-model="filters.minMarketCap" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 3M">
+        </div>
+        <div class="filter-group">
           <label for="oi-sort">排序</label>
           <select id="oi-sort" class="filter-select" v-model="filters.sortBy">
-            <option value="ratio">持仓量 / 流通量</option>
-            <option value="open_interest">累计持仓量</option>
+            <option value="ratio">持仓 / 流通</option>
+            <option value="latest_price">最新价格</option>
+            <option value="circulating_market_cap">流通市值</option>
             <option value="open_interest_value">累计持仓价值</option>
-            <option value="circulating_supply">流通量</option>
             <option value="event_time">数据时间</option>
             <option value="symbol">交易对</option>
           </select>
@@ -393,6 +422,7 @@
           </select>
         </div>
         <div class="filter-actions">
+          <span class="filter-actions-label">操作</span>
           <label class="checkbox-row">
             <input v-model="filters.onlyWithSupply" type="checkbox">
             仅显示可计算比例
@@ -421,21 +451,21 @@
           <thead>
             <tr>
               <th>交易对</th>
-              <th>累计持仓量</th>
-              <th>流通量</th>
-              <th>持仓量 / 流通量</th>
+              <th>最新价格</th>
+              <th>流通市值</th>
               <th>累计持仓价值</th>
-              <th>交易所</th>
+              <th>持仓 / 流通</th>
+              <th>交易所持仓价值</th>
               <th>数据时间</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in rows" :key="row.symbol">
               <td class="symbol"><a :href="`/coin-detail?symbol=${row.symbol}`">{{ row.symbol }}</a></td>
-              <td>{{ formatAmount(row.total_open_interest) }}</td>
-              <td :class="row.circulating_supply == null ? 'muted' : ''">{{ formatAmount(row.circulating_supply) }}</td>
-              <td class="ratio">{{ formatPercent(row.oi_circulating_percent) }}</td>
+              <td class="latest-price" :class="row.latest_price == null ? 'muted' : ''">{{ formatPrice(row.latest_price) }}</td>
+              <td class="market-cap" :class="row.circulating_market_cap == null ? 'muted' : ''">{{ formatAmount(row.circulating_market_cap) }}</td>
               <td>{{ formatAmount(row.total_open_interest_value) }}</td>
+              <td :class="['ratio', row.oi_circulating_ratio > 1 ? 'ratio-high' : '']">{{ formatRatio(row.oi_circulating_ratio) }}</td>
               <td class="exchange-list">
                 <span
                   v-for="detail in row.exchange_details"
@@ -443,7 +473,7 @@
                   :class="['exchange-detail', detail.is_stale ? 'stale-data' : '']"
                   :title="detail.is_stale ? `数据时间：${formatTime(detail.event_time)}` : ''"
                 >
-                  <span class="exchange-value">{{ detail.exchange }} {{ formatAmount(detail.open_interest) }}</span>
+                  <span class="exchange-value">{{ detail.exchange }} {{ formatAmount(detail.open_interest_value) }}</span>
                 </span>
               </td>
               <td class="muted">{{ formatTime(row.anchor_event_time || row.latest_event_time) }}</td>
@@ -472,10 +502,11 @@
         const filters = ref({
           period: '5m',
           keyword: '',
-          minRatio: '',
+          minRatio: '0.6',
           maxRatio: '',
           minOpenInterest: '',
           maxOpenInterest: '',
+          minMarketCap: '3M',
           sortBy: 'ratio',
           sortOrder: 'desc',
           onlyWithSupply: false,
@@ -502,14 +533,38 @@
           return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(number);
         };
 
+        const formatPrice = (value) => {
+          if (value === null || value === undefined) return 'N/A';
+          const number = Number(value);
+          if (!Number.isFinite(number)) return 'N/A';
+          return new Intl.NumberFormat('en-US', { maximumFractionDigits: 8 }).format(number);
+        };
+
         const formatPercent = (value) => {
           if (value === null || value === undefined) return 'N/A';
           return `${Number(value).toFixed(4)}%`;
         };
 
+        const formatRatio = (value) => {
+          if (value === null || value === undefined) return 'N/A';
+          const number = Number(value);
+          if (!Number.isFinite(number)) return 'N/A';
+          return number.toFixed(2);
+        };
+
         const formatTime = (value) => {
           if (!value) return 'N/A';
           return new Date(Number(value)).toLocaleString('zh-CN', { hour12: false });
+        };
+
+        const parseCompactAmount = (value) => {
+          const normalized = String(value ?? '').trim().toUpperCase().replace(/,/g, '');
+          if (!normalized) return null;
+          const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)\s*([KMB])?$/);
+          if (!match) return null;
+          const multipliers = { K: 1e3, M: 1e6, B: 1e9 };
+          const amount = Number(match[1]) * (multipliers[match[2]] || 1);
+          return Number.isFinite(amount) ? amount : null;
         };
 
         const buildQuery = () => {
@@ -521,10 +576,12 @@
             sort_order: filters.value.sortOrder,
           });
           if (filters.value.keyword) params.set('keyword', filters.value.keyword);
-          if (filters.value.minRatio !== '') params.set('min_ratio_percent', filters.value.minRatio);
-          if (filters.value.maxRatio !== '') params.set('max_ratio_percent', filters.value.maxRatio);
+          if (filters.value.minRatio !== '') params.set('min_ratio_percent', String(Number(filters.value.minRatio) * 100));
+          if (filters.value.maxRatio !== '') params.set('max_ratio_percent', String(Number(filters.value.maxRatio) * 100));
           if (filters.value.minOpenInterest !== '') params.set('min_open_interest', filters.value.minOpenInterest);
           if (filters.value.maxOpenInterest !== '') params.set('max_open_interest', filters.value.maxOpenInterest);
+          const minMarketCap = parseCompactAmount(filters.value.minMarketCap);
+          if (minMarketCap !== null) params.set('min_market_cap', String(minMarketCap));
           if (filters.value.onlyWithSupply) params.set('only_with_supply', 'true');
           if (filters.value.onlyTimeAligned) params.set('only_time_aligned', 'true');
           return params.toString();
@@ -560,7 +617,7 @@
 
         const resetFilters = () => {
           filters.value = {
-            period: '5m', keyword: '', minRatio: '', maxRatio: '', minOpenInterest: '', maxOpenInterest: '',
+            period: '5m', keyword: '', minRatio: '0.6', maxRatio: '', minOpenInterest: '', maxOpenInterest: '', minMarketCap: '3M',
             sortBy: 'ratio', sortOrder: 'desc', onlyWithSupply: false, onlyTimeAligned: false,
           };
           page.value = 1;
@@ -577,7 +634,7 @@
 
         return {
           periods, filters, rows, stats, page, totalCount, totalPages, snapshotTime, loading, errorMessage,
-          formatAmount, formatPercent, formatTime, applyFilters, resetFilters, goToPage,
+          formatAmount, formatPrice, formatPercent, formatRatio, formatTime, parseCompactAmount, applyFilters, resetFilters, goToPage,
         };
       },
     }).mount('#app');

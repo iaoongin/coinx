@@ -1,4 +1,4 @@
-from coinx.models import MarketOpenInterestHist
+from coinx.models import MarketOpenInterestHist, MarketTickers
 from coinx.repositories.open_interest import get_open_interest_page
 
 
@@ -17,6 +17,7 @@ def test_open_interest_page_aggregates_exchanges_and_uses_binance_supply(db_sess
             exchange='bybit', symbol='ETHUSDT', period='5m', event_time=100,
             sum_open_interest=20, sum_open_interest_value=40000,
         ),
+        MarketTickers(symbol='BTCUSDT', last_price=2000, close_time=100),
     ])
     db_session.commit()
 
@@ -26,6 +27,8 @@ def test_open_interest_page_aggregates_exchanges_and_uses_binance_supply(db_sess
     btc = next(row for row in result['data'] if row['symbol'] == 'BTCUSDT')
     assert btc['total_open_interest'] == 150.0
     assert btc['total_open_interest_value'] == 150000.0
+    assert btc['latest_price'] == 2000.0
+    assert btc['circulating_market_cap'] == 2000000.0
     assert btc['circulating_supply'] == 1000.0
     assert btc['oi_circulating_percent'] == 15.0
     assert btc['exchange_count'] == 2
@@ -33,6 +36,7 @@ def test_open_interest_page_aggregates_exchanges_and_uses_binance_supply(db_sess
 
     eth = next(row for row in result['data'] if row['symbol'] == 'ETHUSDT')
     assert eth['circulating_supply'] is None
+    assert eth['circulating_market_cap'] is None
     assert eth['oi_circulating_percent'] is None
     assert result['stats']['without_supply'] == 1
 
@@ -138,3 +142,27 @@ def test_open_interest_page_can_filter_to_time_aligned_rows(db_session):
     )
 
     assert [row['symbol'] for row in result['data']] == ['ETHUSDT']
+
+
+def test_open_interest_page_can_filter_by_circulating_market_cap(db_session):
+    db_session.add_all([
+        MarketOpenInterestHist(
+            exchange='binance', symbol='BTCUSDT', period='5m', event_time=100,
+            sum_open_interest=100, circulating_supply=1000,
+        ),
+        MarketOpenInterestHist(
+            exchange='binance', symbol='SOLUSDT', period='5m', event_time=100,
+            sum_open_interest=10, circulating_supply=100,
+        ),
+        MarketTickers(symbol='BTCUSDT', last_price=2000, close_time=100),
+        MarketTickers(symbol='SOLUSDT', last_price=10, close_time=100),
+    ])
+    db_session.commit()
+
+    result = get_open_interest_page(
+        session=db_session,
+        period='5m',
+        min_market_cap=500000,
+    )
+
+    assert [row['symbol'] for row in result['data']] == ['BTCUSDT']

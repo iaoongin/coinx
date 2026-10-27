@@ -5,7 +5,7 @@ from typing import Any, Dict
 from sqlalchemy import and_, func
 
 from coinx.database import get_session
-from coinx.models import MarketOpenInterestHist
+from coinx.models import MarketOpenInterestHist, MarketTickers
 
 
 DEFAULT_OPEN_INTEREST_PERIOD = '5m'
@@ -50,6 +50,38 @@ def _latest_rows(session, period, symbol=None, as_of_ms=None):
     )
 
 
+def _latest_market_prices(session, symbols, as_of_ms=None):
+    if not symbols:
+        return {}
+
+    latest_query = session.query(func.max(MarketTickers.close_time))
+    if as_of_ms is not None:
+        latest_query = latest_query.filter(MarketTickers.close_time <= int(as_of_ms))
+    latest_close_time = latest_query.scalar()
+    if latest_close_time is None:
+        return {}
+
+    rows = (
+        session.query(
+            MarketTickers.symbol,
+            MarketTickers.last_price,
+            MarketTickers.close_time,
+        )
+        .filter(
+            MarketTickers.close_time == latest_close_time,
+            MarketTickers.symbol.in_(symbols),
+        )
+        .all()
+    )
+    return {
+        row.symbol: {
+            'latest_price': _as_float(row.last_price),
+            'event_time': int(row.close_time) if row.close_time is not None else None,
+        }
+        for row in rows
+    }
+
+
 def get_open_interest_page(
     period=DEFAULT_OPEN_INTEREST_PERIOD,
     keyword='',
@@ -57,6 +89,7 @@ def get_open_interest_page(
     max_ratio_percent=None,
     min_open_interest=None,
     max_open_interest=None,
+    min_market_cap=None,
     only_with_supply=False,
     only_time_aligned=False,
     sort_by='ratio',
@@ -117,6 +150,7 @@ def get_open_interest_page(
                 item['total_open_interest_value'] += float(row.sum_open_interest_value)
                 item['has_open_interest_value'] = True
 
+        market_prices = _latest_market_prices(db, list(grouped), as_of_ms=as_of_ms)
         result_rows = []
         keyword_upper = str(keyword or '').strip().upper()
         for symbol, item in grouped.items():
@@ -138,6 +172,13 @@ def get_open_interest_page(
                 detail['exchange'] for detail in exchange_details if detail['is_stale']
             ]
             supply = item['circulating_supply']
+            price_data = market_prices.get(symbol, {})
+            latest_price = price_data.get('latest_price')
+            circulating_market_cap = (
+                latest_price * supply
+                if latest_price not in (None, 0) and supply not in (None, 0)
+                else None
+            )
             total_open_interest = item['total_open_interest'] if item['has_open_interest'] else None
             total_open_interest_value = (
                 item['total_open_interest_value'] if item['has_open_interest_value'] else None
@@ -166,11 +207,19 @@ def get_open_interest_page(
                 total_open_interest is None or total_open_interest > float(max_open_interest)
             ):
                 continue
+            if min_market_cap is not None and (
+                circulating_market_cap is None
+                or circulating_market_cap < float(min_market_cap)
+            ):
+                continue
 
             result_rows.append({
                 'symbol': symbol,
                 'total_open_interest': total_open_interest,
                 'total_open_interest_value': total_open_interest_value,
+                'latest_price': latest_price,
+                'latest_price_event_time': price_data.get('event_time'),
+                'circulating_market_cap': circulating_market_cap,
                 'circulating_supply': supply,
                 'oi_circulating_ratio': ratio,
                 'oi_circulating_percent': ratio_percent,
@@ -191,6 +240,8 @@ def get_open_interest_page(
             'ratio': 'oi_circulating_percent',
             'open_interest': 'total_open_interest',
             'open_interest_value': 'total_open_interest_value',
+            'latest_price': 'latest_price',
+            'circulating_market_cap': 'circulating_market_cap',
             'circulating_supply': 'circulating_supply',
             'event_time': 'latest_event_time',
             'symbol': 'symbol',

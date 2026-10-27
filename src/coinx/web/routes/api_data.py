@@ -1014,6 +1014,7 @@ def get_open_interest_overview():
             max_ratio_percent=optional_float('max_ratio_percent'),
             min_open_interest=optional_float('min_open_interest'),
             max_open_interest=optional_float('max_open_interest'),
+            min_market_cap=optional_float('min_market_cap'),
             only_with_supply=request.args.get('only_with_supply', '').lower() in {'1', 'true', 'yes'},
             only_time_aligned=request.args.get('only_time_aligned', '').lower() in {'1', 'true', 'yes'},
             sort_by=request.args.get('sort_by', 'ratio'),
