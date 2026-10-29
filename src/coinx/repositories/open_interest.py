@@ -20,7 +20,7 @@ def _as_float(value):
 
 def _calculate_open_interest_value(open_interest, price, stored_value=None):
     """Use native USD OI when available, otherwise estimate with Binance price."""
-    if stored_value not in (None, 0):
+    if stored_value is not None:
         return float(stored_value)
     if open_interest is None or price in (None, 0):
         return None

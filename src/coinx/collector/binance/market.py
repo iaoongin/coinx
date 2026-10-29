@@ -14,6 +14,25 @@ def _binance_open_interest_period(interval):
     normalized = str(interval).strip().lower()
     return normalized if normalized in BINANCE_OPEN_INTEREST_PERIODS else BASE_TIME_INTERVAL
 
+
+def _optional_float(value):
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value):
+    if value is None or value == '':
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_futures_kline_latest(symbol, interval):
     """获取期货K线的最新一根，返回字典包含 quoteVolume 与 takerBuyQuoteVolume 等"""
     try:
@@ -206,10 +225,8 @@ def get_open_interest(symbol):
         
         logger.info(f"持仓量数据响应: {data}")
         
-        # 尝试从响应中获取sumOpenInterestValue，如果没有则设为0
-        open_interest_value = 0
-        if 'sumOpenInterestValue' in data:
-            open_interest_value = float(data['sumOpenInterestValue'])
+        # Binance 当前持仓接口可能不返回持仓价值；缺失时保留为空。
+        open_interest_value = _optional_float(data.get('sumOpenInterestValue'))
         
         return {
             'timestamp': int(time.time() * 1000),
@@ -223,7 +240,7 @@ def get_open_interest(symbol):
         return None
     except Exception as e:
         logger.error(f"获取持仓量数据失败: {symbol}, 错误: {e}")
-        # 不再返回模拟数据，直接返回None
+        # 请求失败时返回 None，保留数据缺口。
         return None
 
 def get_open_interest_history(symbol, interval, limit=2):
@@ -266,9 +283,9 @@ def get_open_interest_history(symbol, interval, limit=2):
                 'symbol': symbol,
                 'interval': requested_interval,
                 'openInterest': float(current_item['sumOpenInterest']),
-                'openInterestValue': float(current_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in current_item else 0,
+                'openInterestValue': _optional_float(current_item.get('sumOpenInterestValue')),
                 # 'previous_openInterest': float(previous_item['sumOpenInterest']),
-                # 'previous_openInterestValue': float(previous_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in previous_item else 0,
+                # 'previous_openInterestValue': _optional_float(previous_item.get('sumOpenInterestValue')),
                 'time': current_item['timestamp']
             }
         elif data and len(data) >= 1:
@@ -280,7 +297,7 @@ def get_open_interest_history(symbol, interval, limit=2):
                 'symbol': symbol,
                 'interval': requested_interval,
                 'openInterest': float(current_item['sumOpenInterest']),
-                'openInterestValue': float(current_item.get('sumOpenInterestValue', 0)) if 'sumOpenInterestValue' in current_item else 0,
+                'openInterestValue': _optional_float(current_item.get('sumOpenInterestValue')),
                 # 'previous_openInterest': None,
                 # 'previous_openInterestValue': None,
                 'time': current_item['timestamp']
@@ -292,7 +309,7 @@ def get_open_interest_history(symbol, interval, limit=2):
         return None
     except Exception as e:
         logger.error(f"获取历史持仓量数据失败: {symbol}, {interval}, 错误: {e}")
-        # 不再返回模拟数据，直接返回None
+        # 请求失败时返回 None，保留数据缺口。
         return None
 
 def get_funding_rate(symbol):
@@ -318,13 +335,13 @@ def get_funding_rate(symbol):
         
         return {
             'symbol': symbol,
-            'markPrice': float(data['markPrice']),
-            'indexPrice': float(data['indexPrice']),
-            'estimatedSettlePrice': float(data['estimatedSettlePrice']),
-            'lastFundingRate': float(data['lastFundingRate']),
-            'nextFundingTime': int(data['nextFundingTime']),
-            'interestRate': float(data['interestRate']),
-            'time': int(data['time'])
+            'markPrice': _optional_float(data.get('markPrice')),
+            'indexPrice': _optional_float(data.get('indexPrice')),
+            'estimatedSettlePrice': _optional_float(data.get('estimatedSettlePrice')),
+            'lastFundingRate': _optional_float(data.get('lastFundingRate')),
+            'nextFundingTime': _optional_int(data.get('nextFundingTime')),
+            'interestRate': _optional_float(data.get('interestRate')),
+            'time': _optional_int(data.get('time'))
         }
     except requests.exceptions.RequestException as e:
         logger.error(f"网络请求失败: {symbol}, 错误: {e}")
@@ -359,13 +376,13 @@ def get_all_funding_rates():
                 continue
             result[symbol] = {
                 'symbol': symbol,
-                'markPrice': float(item['markPrice']) if item.get('markPrice') is not None else None,
-                'indexPrice': float(item['indexPrice']) if item.get('indexPrice') is not None else None,
-                'estimatedSettlePrice': float(item['estimatedSettlePrice']) if item.get('estimatedSettlePrice') is not None else None,
-                'lastFundingRate': float(item['lastFundingRate']) if item.get('lastFundingRate') is not None else None,
-                'nextFundingTime': int(item['nextFundingTime']) if item.get('nextFundingTime') else None,
-                'interestRate': float(item['interestRate']) if item.get('interestRate') is not None else None,
-                'time': int(item['time']) if item.get('time') else None,
+                'markPrice': _optional_float(item.get('markPrice')),
+                'indexPrice': _optional_float(item.get('indexPrice')),
+                'estimatedSettlePrice': _optional_float(item.get('estimatedSettlePrice')),
+                'lastFundingRate': _optional_float(item.get('lastFundingRate')),
+                'nextFundingTime': _optional_int(item.get('nextFundingTime')),
+                'interestRate': _optional_float(item.get('interestRate')),
+                'time': _optional_int(item.get('time')),
             }
         logger.info("全量资金费率加载完成: exchange=binance count=%d", len(result))
         return result
@@ -378,30 +395,18 @@ def get_all_funding_rates():
 
 def get_long_short_ratio(symbol, period='5m', limit=30):
     """
-    获取指定币种的多空比数据
-    注意：币安API可能不提供此数据，返回模拟数据
+    获取指定币种的多空比数据。
+
+    当前没有接入可用的公共多空比接口；保留该兼容函数，但不伪造返回值。
     :param symbol: 币种对，如 BTCUSDT
     :param period: 时间周期，如 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
     :param limit: 数据点数量
-    :return: 多空比数据
+    :return: 当前不可用时返回 None
     """
-    try:
-        # 币安API可能不提供多空比数据，返回模拟数据
-        logger.info(f"多空比数据API不可用，返回模拟数据: {symbol}")
-        
-        # 返回模拟的多空比数据
-        return {
-            'symbol': symbol,
-            'period': period,
-            'longShortRatio': 1.25,  # 模拟数据
-            'longAccount': 0.55,      # 55%多头账户
-            'shortAccount': 0.45,     # 45%空头账户
-            'timestamp': int(time.time() * 1000)
-        }
-        
-    except Exception as e:
-        logger.error(f"获取多空比数据失败: {symbol}, {period}, 错误: {e}")
-        return None
+    logger.warning("多空比数据接口未接入，返回空值: symbol=%s period=%s limit=%s", symbol, period, limit)
+    return None
+
+
 def get_exchange_info():
     """
     获取交易所的所有交易对信息 (Exchange Info)

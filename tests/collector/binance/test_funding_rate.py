@@ -71,3 +71,38 @@ class TestParseFundingRate:
         assert result[0]['symbol'] == 'BTCUSDT'
         assert result[0]['funding_rate'] == 0.0001
         assert result[0]['predicted_rate'] is None
+
+    def test_parse_funding_rate_keeps_explicit_zero_and_uses_none_for_missing_fields(self):
+        payload = {
+            'lastFundingRate': '0',
+            'time': 1698768000000,
+        }
+
+        result = parse_funding_rate(payload, 'BTCUSDT', '5m')
+
+        assert result[0]['funding_rate'] == 0
+        assert result[0]['predicted_rate'] is None
+        assert result[0]['next_funding_time'] is None
+        assert result[0]['mark_price'] is None
+
+    def test_parse_funding_rate_skips_record_without_event_time(self):
+        result = parse_funding_rate({'lastFundingRate': '0.001'}, 'BTCUSDT', '5m')
+
+        assert result == []
+
+    def test_parse_funding_rate_skips_record_without_symbol(self):
+        result = parse_funding_rate({'lastFundingRate': '0.001', 'time': 1698768000000}, None, '5m')
+
+        assert result == []
+
+    def test_parse_funding_rate_treats_invalid_optional_values_as_none(self):
+        payload = {
+            'lastFundingRate': 'not-a-number',
+            'markPrice': 'bad-price',
+            'time': 1698768000000,
+        }
+
+        result = parse_funding_rate(payload, 'BTCUSDT', '5m')
+
+        assert result[0]['funding_rate'] is None
+        assert result[0]['mark_price'] is None

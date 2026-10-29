@@ -1,6 +1,32 @@
 """Binance 资金费率采集模块"""
 from coinx.config import BINANCE_BASE_URL
 from coinx.collector.binance.client import get_session, request_with_binance_retry
+from coinx.utils import logger
+
+
+def _optional_float(value):
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value):
+    if value is None or value == '':
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _required_event_time(value):
+    event_time = _optional_int(value)
+    if event_time is None:
+        raise ValueError('Binance funding-rate response is missing time')
+    return event_time
 
 
 def fetch_all_premium_index(session=None):
@@ -21,19 +47,23 @@ def fetch_all_premium_index(session=None):
 
     results = []
     for data in data_list:
-        symbol = data.get('symbol', '')
-        predicted_rate = data.get('nextFundingRate')
-        if predicted_rate is not None:
-            predicted_rate = float(predicted_rate)
+        symbol = data.get('symbol')
+        if not symbol:
+            logger.warning('跳过缺少 symbol 的 Binance 资金费率记录')
+            continue
+        event_time = _optional_int(data.get('time'))
+        if event_time is None:
+            logger.warning('跳过缺少 time 的 Binance 资金费率记录: symbol=%s', symbol)
+            continue
 
         results.append({
             'symbol': symbol,
             'period': '5m',
-            'event_time': int(data.get('time', 0)),
-            'funding_rate': float(data.get('lastFundingRate', 0)),
-            'predicted_rate': predicted_rate,
-            'next_funding_time': int(data.get('nextFundingTime', 0)),
-            'mark_price': float(data.get('markPrice', 0)),
+            'event_time': event_time,
+            'funding_rate': _optional_float(data.get('lastFundingRate')),
+            'predicted_rate': _optional_float(data.get('nextFundingRate')),
+            'next_funding_time': _optional_int(data.get('nextFundingTime')),
+            'mark_price': _optional_float(data.get('markPrice')),
         })
 
     return results
@@ -57,19 +87,19 @@ def fetch_premium_index(symbol, session=None):
     response.raise_for_status()
     data = response.json()
 
-    # 注意: Binance API 不保证返回 nextFundingRate 字段
-    predicted_rate = data.get('nextFundingRate')
-    if predicted_rate is not None:
-        predicted_rate = float(predicted_rate)
+    event_time = _optional_int(data.get('time'))
+    if event_time is None:
+        logger.warning('Binance 资金费率响应缺少 time，跳过记录: symbol=%s', symbol)
+        return None
 
     return {
         'symbol': symbol,
         'period': '5m',
-        'event_time': int(data.get('time', 0)),
-        'funding_rate': float(data.get('lastFundingRate', 0)),
-        'predicted_rate': predicted_rate,
-        'next_funding_time': int(data.get('nextFundingTime', 0)),
-        'mark_price': float(data.get('markPrice', 0)),
+        'event_time': event_time,
+        'funding_rate': _optional_float(data.get('lastFundingRate')),
+        'predicted_rate': _optional_float(data.get('nextFundingRate')),
+        'next_funding_time': _optional_int(data.get('nextFundingTime')),
+        'mark_price': _optional_float(data.get('markPrice')),
     }
 
 
@@ -85,17 +115,20 @@ def parse_funding_rate(payload, symbol, period='5m'):
     Returns:
         list: 解析后的记录列表
     """
-    # 注意: Binance API 不保证返回 nextFundingRate 字段
-    predicted_rate = payload.get('nextFundingRate')
-    if predicted_rate is not None:
-        predicted_rate = float(predicted_rate)
+    if not isinstance(payload, dict) or not symbol:
+        return []
+    try:
+        event_time = _required_event_time(payload.get('time'))
+    except ValueError:
+        logger.warning('Binance 资金费率响应缺少 time，跳过记录: symbol=%s', symbol)
+        return []
 
     return [{
         'symbol': symbol,
         'period': period,
-        'event_time': int(payload.get('time', 0)),
-        'funding_rate': float(payload.get('lastFundingRate', 0)),
-        'predicted_rate': predicted_rate,
-        'next_funding_time': int(payload.get('nextFundingTime', 0)),
-        'mark_price': float(payload.get('markPrice', 0)),
+        'event_time': event_time,
+        'funding_rate': _optional_float(payload.get('lastFundingRate')),
+        'predicted_rate': _optional_float(payload.get('nextFundingRate')),
+        'next_funding_time': _optional_int(payload.get('nextFundingTime')),
+        'mark_price': _optional_float(payload.get('markPrice')),
     }]

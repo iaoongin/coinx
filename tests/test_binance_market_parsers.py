@@ -106,3 +106,49 @@ def test_open_interest_history_falls_back_to_base_period_for_configured_window(m
 
     assert calls[0][1]['period'] == '5m'
     assert result['interval'] == '8h'
+
+
+def test_open_interest_value_missing_is_none(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'symbol': 'BTCUSDT',
+                'openInterest': '100',
+                'time': 1711526400000,
+            }
+
+    monkeypatch.setattr(market, 'get_session', lambda: object())
+    monkeypatch.setattr(market, 'request_with_binance_retry', lambda *args, **kwargs: FakeResponse())
+
+    result = market.get_open_interest('BTCUSDT')
+
+    assert result['openInterest'] == 100
+    assert result['openInterestValue'] is None
+
+
+def test_long_short_ratio_does_not_return_mock_data():
+    assert market.get_long_short_ratio('BTCUSDT') is None
+
+
+def test_all_funding_rates_preserve_explicit_zero_timestamps(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{
+                'symbol': 'BTCUSDT',
+                'nextFundingTime': 0,
+                'time': 0,
+            }]
+
+    monkeypatch.setattr(market, 'get_session', lambda: object())
+    monkeypatch.setattr(market, 'request_with_binance_retry', lambda *args, **kwargs: FakeResponse())
+
+    result = market.get_all_funding_rates()
+
+    assert result['BTCUSDT']['nextFundingTime'] == 0
+    assert result['BTCUSDT']['time'] == 0

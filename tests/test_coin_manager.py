@@ -14,7 +14,7 @@ class _FakeQuery:
         return self._rows
 
 
-def test_load_coins_config_bootstraps_defaults_when_database_is_empty(monkeypatch):
+def test_load_coins_config_returns_empty_when_database_is_empty(monkeypatch):
     added = []
 
     monkeypatch.setattr(coin_manager.os.path, 'exists', lambda path: False)
@@ -23,11 +23,11 @@ def test_load_coins_config_bootstraps_defaults_when_database_is_empty(monkeypatc
 
     coins = coin_manager.load_coins_config()
 
-    assert coins == coin_manager.DEFAULT_TRACKED_COINS
-    assert added == [(symbol, True) for symbol in coin_manager.DEFAULT_TRACKED_COINS]
+    assert coins == []
+    assert added == []
 
 
-def test_load_coins_config_falls_back_to_defaults_when_no_coins_are_tracked(monkeypatch):
+def test_load_coins_config_returns_empty_when_no_coins_are_tracked(monkeypatch):
     added = []
 
     monkeypatch.setattr(coin_manager.os.path, 'exists', lambda path: True)
@@ -37,5 +37,5 @@ def test_load_coins_config_falls_back_to_defaults_when_no_coins_are_tracked(monk
 
     coins = coin_manager.load_coins_config()
 
-    assert coins == coin_manager.DEFAULT_TRACKED_COINS
+    assert coins == []
     assert added == []

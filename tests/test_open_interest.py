@@ -68,6 +68,23 @@ def test_open_interest_page_calculates_bybit_value_with_binance_price(db_session
     assert bybit['open_interest_value'] == 40000.0
 
 
+def test_open_interest_page_preserves_explicit_zero_value(db_session):
+    db_session.add_all([
+        MarketOpenInterestHist(
+            exchange='binance', symbol='BTCUSDT', period='5m', event_time=100,
+            sum_open_interest=100, sum_open_interest_value=0,
+        ),
+        MarketTickers(symbol='BTCUSDT', last_price=2000, close_time=100),
+    ])
+    db_session.commit()
+
+    result = get_open_interest_page(session=db_session, period='5m')
+
+    btc = result['data'][0]
+    assert btc['total_open_interest_value'] == 0.0
+    assert btc['exchange_details'][0]['open_interest_value'] == 0.0
+
+
 def test_open_interest_page_includes_24h_binance_price_trend(db_session):
     db_session.add_all([
         MarketOpenInterestHist(

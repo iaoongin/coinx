@@ -525,7 +525,7 @@ def _exchange_metric(
     ) or (atr_ratio is not None and atr_ratio >= .02):
         risk_score -= 10; reasons.append('短周期波动过大')
     risk_score = max(-30, risk_score)
-    oi_value = _float(getattr(oi_by_time[anchor], 'sum_open_interest_value', None)) or 0.0
+    oi_value = _float(getattr(oi_by_time[anchor], 'sum_open_interest_value', None))
     previous_highs = {
         timeframe: _effective_resistance(
             higher_timeframe_points.get(timeframe) or [],
@@ -623,9 +623,20 @@ def _build_trade_opportunity_snapshot(symbols, exchanges, anchor):
         if not metrics:
             data.append({'symbol': symbol, 'data_status': 'unavailable', 'entry_state': '数据不足'})
             continue
-        total_oi = sum(item['open_interest_value'] for item in metrics)
+        total_oi = sum(
+            item['open_interest_value']
+            for item in metrics
+            if item['open_interest_value'] is not None
+        )
         for metric in metrics:
-            metric['weight'] = metric['open_interest_value'] / total_oi if total_oi else 1 / len(metrics)
+            if total_oi:
+                metric['weight'] = (
+                    metric['open_interest_value'] / total_oi
+                    if metric['open_interest_value'] is not None
+                    else 0
+                )
+            else:
+                metric['weight'] = 1 / len(metrics)
         trend_score = _weighted(metrics, 'trend_score')
         timing_score = _weighted(metrics, 'timing_score')
         risk_score = _weighted(metrics, 'risk_score')

@@ -754,10 +754,38 @@ def _aggregate_weighted_scores(exchange_metrics, sentiment_score, sentiment_stat
 
     trade_signal, operation_advice = _score_signal(total_score)
 
-    current_price = sum((metric['current_price'] or 0) * metric['weight'] for metric in valid_metrics) if valid_metrics else None
-    current_open_interest = sum((metric['open_interest'] or 0) for metric in valid_metrics)
-    current_open_interest_value = sum((metric['open_interest_value'] or 0) for metric in valid_metrics)
-    quote_volume = sum((metric['quote_volume'] or 0) for metric in valid_metrics)
+    current_price_values = [
+        (metric['current_price'], metric['weight'])
+        for metric in valid_metrics
+        if metric.get('current_price') is not None
+    ]
+    current_open_interest_values = [
+        metric['open_interest']
+        for metric in valid_metrics
+        if metric.get('open_interest') is not None
+    ]
+    current_open_interest_value_values = [
+        metric['open_interest_value']
+        for metric in valid_metrics
+        if metric.get('open_interest_value') is not None
+    ]
+    quote_volume_values = [
+        metric['quote_volume']
+        for metric in valid_metrics
+        if metric.get('quote_volume') is not None
+    ]
+    current_price = (
+        sum(value * weight for value, weight in current_price_values)
+        if current_price_values
+        else None
+    )
+    current_open_interest = sum(current_open_interest_values) if current_open_interest_values else None
+    current_open_interest_value = (
+        sum(current_open_interest_value_values)
+        if current_open_interest_value_values
+        else None
+    )
+    quote_volume = sum(quote_volume_values) if quote_volume_values else None
 
     primary_metric = max(valid_metrics, key=lambda metric: metric.get('weight', 0))
 

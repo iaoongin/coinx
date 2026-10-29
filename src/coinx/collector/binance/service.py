@@ -22,13 +22,11 @@ def get_all_coins_list():
         all_coins = get_exchange_info()
         if all_coins:
             return [coin['symbol'] for coin in all_coins]
-        else:
-            # 如果无法从币安获取，使用已知的币种列表
-            return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT']
+        logger.warning('无法从 Binance 获取币种列表，返回空列表')
+        return []
     except Exception as e:
         logger.error(f"获取所有币种列表失败: {e}")
-        # 返回默认列表
-        return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']
+        return []
 
 def update_single_coin_data(symbol):
     """
@@ -43,15 +41,15 @@ def update_single_coin_data(symbol):
             return None
         
         # 获取最新价格并计算持仓价值
-        if current_data and current_data.get('openInterestValue', 0) == 0:
+        if current_data.get('openInterestValue') is None:
             latest_price = get_latest_price(symbol)
-            if latest_price is not None:
-                open_interest = current_data.get('openInterest', 0)
+            open_interest = current_data.get('openInterest')
+            if latest_price is not None and open_interest is not None:
                 calculated_value = open_interest * latest_price
                 current_data['openInterestValue'] = calculated_value
                 logger.info(f"使用最新价格计算 {symbol} 持仓价值: {open_interest} * {latest_price} = {calculated_value}")
             else:
-                logger.warning(f"无法获取 {symbol} 最新价格，持仓价值仍为0")
+                logger.warning(f"无法补齐 {symbol} 持仓价值，保留为空")
         
         # 获取24小时价格变化数据
         price_change_data = get_24hr_ticker(symbol)

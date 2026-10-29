@@ -106,6 +106,28 @@ def test_open_interest_uses_stored_quantity_when_value_is_also_available():
     assert normalized.sum_open_interest_value == point.sum_open_interest_value
 
 
+def test_open_interest_estimation_preserves_explicit_zero_value():
+    point = HomepageOpenInterestPoint(
+        symbol='BTCUSDT',
+        event_time=1,
+        sum_open_interest=632_109_112.0,
+        sum_open_interest_value=0.0,
+    )
+    kline = HomepageKlinePoint(
+        symbol='BTCUSDT',
+        open_time=1,
+        high_price=None,
+        low_price=None,
+        close_price=63_041.9,
+        quote_volume=None,
+        taker_buy_quote_volume=None,
+    )
+
+    normalized = _with_estimated_open_interest_value(point, kline)
+
+    assert normalized.sum_open_interest_value == 0.0
+
+
 def seed_series(
     session,
     symbol,

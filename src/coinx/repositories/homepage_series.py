@@ -296,9 +296,9 @@ def _calc_percent_change(current_value, past_value):
 
 
 def _calc_share_percent(value, total):
-    if total in (None, 0):
+    if value is None or total in (None, 0):
         return None
-    return float(value or 0) / float(total) * 100
+    return float(value) / float(total) * 100
 
 
 def _format_usd_map(values):
@@ -579,8 +579,18 @@ def _merge_time_points(*points):
 
     symbol = existing_points[0].symbol
     event_time = existing_points[0].event_time
-    total_open_interest = sum(float(point.sum_open_interest or 0) for point in existing_points)
-    total_open_interest_value = sum(float(point.sum_open_interest_value or 0) for point in existing_points)
+    open_interest_values = [
+        float(point.sum_open_interest)
+        for point in existing_points
+        if point.sum_open_interest is not None
+    ]
+    open_interest_value_values = [
+        float(point.sum_open_interest_value)
+        for point in existing_points
+        if point.sum_open_interest_value is not None
+    ]
+    total_open_interest = sum(open_interest_values) if open_interest_values else None
+    total_open_interest_value = sum(open_interest_value_values) if open_interest_value_values else None
     return HomepageOpenInterestPoint(
         symbol=symbol,
         event_time=event_time,
@@ -595,7 +605,7 @@ def _with_estimated_open_interest_value(point, reference_kline):
     if reference_kline is None or reference_kline.close_price in (None, 0):
         return point
     price = float(reference_kline.close_price)
-    if point.sum_open_interest_value in (None, 0) and point.sum_open_interest is not None:
+    if point.sum_open_interest_value is None and point.sum_open_interest is not None:
         return HomepageOpenInterestPoint(
             symbol=point.symbol,
             event_time=point.event_time,
@@ -611,8 +621,16 @@ def _build_exchange_open_interest_rows(exchange_points, total_value, total_open_
         if point is None:
             continue
 
-        open_interest = float(point.sum_open_interest or 0)
-        open_interest_value = float(point.sum_open_interest_value or 0)
+        open_interest = (
+            float(point.sum_open_interest)
+            if point.sum_open_interest is not None
+            else None
+        )
+        open_interest_value = (
+            float(point.sum_open_interest_value)
+            if point.sum_open_interest_value is not None
+            else None
+        )
         rows.append(
             {
                 'exchange': exchange,
@@ -744,8 +762,16 @@ def _build_exchange_status_rows(
                 snapshot.get('kline_by_time', {}).get(current_time),
             )
 
-        open_interest = float(current_point.sum_open_interest or 0) if current_point is not None else None
-        open_interest_value = float(current_point.sum_open_interest_value or 0) if current_point is not None else None
+        open_interest = (
+            float(current_point.sum_open_interest)
+            if current_point is not None and current_point.sum_open_interest is not None
+            else None
+        )
+        open_interest_value = (
+            float(current_point.sum_open_interest_value)
+            if current_point is not None and current_point.sum_open_interest_value is not None
+            else None
+        )
         row_status = 'excluded'
         if support_state.get('state') == 'unknown':
             row_status = 'unknown'
@@ -1965,8 +1991,8 @@ def _aggregate_homepage_series_maps(
 
         included_open_interest_rows = _build_exchange_open_interest_rows(
             coverage_map[symbol]['open_interest_by_exchange'].get(anchor_time, {}),
-            aggregate_oi_map[symbol][anchor_time].sum_open_interest_value if anchor_time in aggregate_oi_map[symbol] else 0,
-            aggregate_oi_map[symbol][anchor_time].sum_open_interest if anchor_time in aggregate_oi_map[symbol] else 0,
+            aggregate_oi_map[symbol][anchor_time].sum_open_interest_value if anchor_time in aggregate_oi_map[symbol] else None,
+            aggregate_oi_map[symbol][anchor_time].sum_open_interest if anchor_time in aggregate_oi_map[symbol] else None,
         )
         coverage_map[symbol]['exchange_statuses'] = _build_exchange_status_rows(
             exchanges,
@@ -2239,8 +2265,16 @@ def _build_coin_payload(symbol, oi, kline_by_time, coverage=None, funding_rate=N
 
     current_kline = kline_by_time.get(current_time)
 
-    current_open_interest = float(current_oi.sum_open_interest or 0)
-    current_open_interest_value = float(current_oi.sum_open_interest_value or 0)
+    current_open_interest = (
+        float(current_oi.sum_open_interest)
+        if current_oi.sum_open_interest is not None
+        else None
+    )
+    current_open_interest_value = (
+        float(current_oi.sum_open_interest_value)
+        if current_oi.sum_open_interest_value is not None
+        else None
+    )
     current_price = float(current_kline.close_price) if current_kline and current_kline.close_price is not None else None
     exchange_open_interest = _build_exchange_open_interest_rows(
         ((coverage or {}).get('open_interest_by_exchange') or {}).get(current_time, {}),
@@ -2258,8 +2292,16 @@ def _build_coin_payload(symbol, oi, kline_by_time, coverage=None, funding_rate=N
             changes[interval] = _empty_change()
             continue
 
-        past_open_interest = float(target_oi.sum_open_interest or 0)
-        past_open_interest_value = float(target_oi.sum_open_interest_value or 0)
+        past_open_interest = (
+            float(target_oi.sum_open_interest)
+            if target_oi.sum_open_interest is not None
+            else None
+        )
+        past_open_interest_value = (
+            float(target_oi.sum_open_interest_value)
+            if target_oi.sum_open_interest_value is not None
+            else None
+        )
         past_price = float(target_kline.close_price) if target_kline.close_price is not None else None
         price_change = current_price - past_price if current_price is not None and past_price is not None else None
 
