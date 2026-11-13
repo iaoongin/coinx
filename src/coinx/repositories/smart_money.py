@@ -272,7 +272,11 @@ def _attach_mark_prices(rows, session=None):
     symbols = [row.get('symbol') for row in normalized_rows if row.get('symbol')]
     if not symbols:
         return normalized_rows
-    prices = load_latest_funding_rates(symbols=symbols, session=session)
+    prices = load_latest_funding_rates(
+        symbols=symbols,
+        session=session,
+        lookback_hours=config.SMART_MONEY_MARK_PRICE_LOOKBACK_HOURS,
+    )
     for row in normalized_rows:
         funding = prices.get(row.get('symbol')) or {}
         row['mark_price'] = funding.get('mark_price')
@@ -361,16 +365,35 @@ def load_binance_price_trends(symbols, point_count=TREND_POINT_COUNT, session=No
                     return trend_map
                 latest_bucket = int(latest) - int(latest) % TREND_BUCKET_MS
                 lower_bound = latest_bucket - (point_count - 1) * TREND_BUCKET_MS
+                dialect_name = getattr(getattr(db, 'bind', None), 'dialect', None)
+                dialect_name = getattr(dialect_name, 'name', '')
+                bucket_expression = (
+                    'CAST(open_time / :trend_bucket_ms AS SIGNED)'
+                    if dialect_name == 'mysql'
+                    else 'CAST(open_time / :trend_bucket_ms AS INTEGER)'
+                )
                 raw_rows = db.execute(
                     text(
-                        'SELECT symbol, open_time, close_price FROM market_klines '
+                        'SELECT k.symbol, k.open_time, k.close_price '
+                        'FROM market_klines k '
+                        'JOIN ( '
+                        'SELECT symbol, '
+                        f'{bucket_expression} AS bucket_id, '
+                        'MAX(open_time) AS latest_open_time '
+                        'FROM market_klines '
                         f'WHERE exchange = :trend_exchange AND period = :trend_period '
                         f'AND symbol IN ({symbol_placeholders}) '
                         'AND open_time >= :trend_lower_bound AND open_time <= :trend_upper_bound '
-                        'ORDER BY symbol, open_time'
+                        f'GROUP BY symbol, {bucket_expression}'
+                        ') latest '
+                        'ON latest.symbol = k.symbol '
+                        'AND latest.latest_open_time = k.open_time '
+                        'WHERE k.exchange = :trend_exchange AND k.period = :trend_period '
+                        'ORDER BY k.symbol, k.open_time'
                     ),
                     {
                         **base_params,
+                        'trend_bucket_ms': TREND_BUCKET_MS,
                         'trend_lower_bound': lower_bound,
                         'trend_upper_bound': int(latest),
                     },
@@ -399,6 +422,34 @@ def _attach_price_trends(rows, session=None):
     for row in normalized_rows:
         row['price_trend'] = trend_map.get(row.get('symbol'), [])
     return normalized_rows
+
+
+def _apply_smart_money_price_filters(
+    rows,
+    max_mark_price_spread_percent,
+    max_price_trend_percent,
+    max_price_drawdown_percent,
+    session=None,
+):
+    """Apply mark-price filtering before loading seven-day trends."""
+    filtered_rows = [dict(row) for row in rows]
+    if max_mark_price_spread_percent is not None:
+        filtered_rows = _attach_mark_prices(filtered_rows, session=session)
+        filtered_rows = _filter_rows_by_mark_price_spread(
+            filtered_rows,
+            max_mark_price_spread_percent,
+        )
+    if max_price_trend_percent is not None or max_price_drawdown_percent is not None:
+        filtered_rows = _attach_price_trends(filtered_rows, session=session)
+        filtered_rows = _filter_rows_by_max_price_trend(
+            filtered_rows,
+            max_price_trend_percent,
+        )
+        filtered_rows = _filter_rows_by_max_price_drawdown(
+            filtered_rows,
+            max_price_drawdown_percent,
+        )
+    return filtered_rows
 
 
 def _smart_money_filters(
@@ -642,6 +693,12 @@ def load_smart_money_page(
     max_price_trend_percent = _normalize_max_price_trend_percent(max_price_trend_percent)
     max_price_drawdown_percent = _normalize_max_price_drawdown_percent(max_price_drawdown_percent)
     underlying_type = _normalize_underlying_type(underlying_type)
+    has_mark_price_filter = max_mark_price_spread_percent is not None
+    has_price_trend_filter = (
+        max_price_trend_percent is not None
+        or max_price_drawdown_percent is not None
+    )
+    has_price_filter = has_mark_price_filter or has_price_trend_filter
     sort_column = DISPLAY_SORT_COLUMNS.get(sort_by, 'net_notional')
     order = 'ASC' if str(sort_order).lower() == 'asc' else 'DESC'
     keyword = (keyword or '').strip().upper()
@@ -675,31 +732,35 @@ def load_smart_money_page(
         where_sql = ' AND '.join(filters)
         if snapshot_time is None:
             latest_rows = repository.client.query_rows(
-                f'SELECT max(snapshot_time) AS snapshot_time FROM {table} WHERE {where_sql}'
+                f'SELECT snapshot_time FROM {table} '
+                f"WHERE exchange = '{str(exchange).replace(chr(39), chr(39) * 2)}' "
+                f"AND time_range = '{str(time_range).replace(chr(39), chr(39) * 2)}' "
+                f"AND period = '{str(period).replace(chr(39), chr(39) * 2)}' "
+                'ORDER BY snapshot_time DESC LIMIT 1'
             )
             snapshot_time = latest_rows[0].get('snapshot_time') if latest_rows else None
             if snapshot_time is None:
                 return _smart_money_page_result([], 0, None, [], {})
             where_sql = f'{where_sql} AND snapshot_time = {int(snapshot_time)}'
         offset = (page - 1) * page_size
-        if (
-            max_mark_price_spread_percent is not None
-            or max_price_trend_percent is not None
-            or max_price_drawdown_percent is not None
-        ):
+        if has_price_filter:
             rows = repository.client.query_rows(
                 f"SELECT {', '.join(DISPLAY_COLUMNS)} FROM {table} WHERE {where_sql} "
                 f'ORDER BY {sort_column} {order}, symbol ASC'
             )
-            rows = _attach_mark_prices(rows)
-            if max_price_trend_percent is not None or max_price_drawdown_percent is not None:
-                rows = _attach_price_trends(rows)
-            rows = _filter_rows_by_mark_price_spread(rows, max_mark_price_spread_percent)
-            rows = _filter_rows_by_max_price_trend(rows, max_price_trend_percent)
-            rows = _filter_rows_by_max_price_drawdown(rows, max_price_drawdown_percent)
+            rows = _apply_smart_money_price_filters(
+                rows,
+                max_mark_price_spread_percent,
+                max_price_trend_percent,
+                max_price_drawdown_percent,
+            )
             total_count = len(rows)
             stats = _sum_smart_money_stats(rows)
             rows = rows[offset:offset + page_size]
+            if not has_mark_price_filter:
+                rows = _attach_mark_prices(rows)
+            if not has_price_trend_filter:
+                rows = _attach_price_trends(rows)
         else:
             rows = repository.client.query_rows(
                 f"SELECT {', '.join(DISPLAY_COLUMNS)} FROM {table} WHERE {where_sql} "
@@ -715,7 +776,7 @@ def load_smart_money_page(
             total_count = count_rows[0].get('total_count', 0) if count_rows else 0
             stats = stats_rows[0] if stats_rows else {}
             rows = _attach_mark_prices(rows)
-        if max_price_trend_percent is None and max_price_drawdown_percent is None:
+        if not has_price_filter:
             rows = _attach_price_trends(rows)
         snapshot_rows = repository.client.query_rows(
             f'SELECT DISTINCT snapshot_time FROM {table} WHERE '
@@ -749,9 +810,20 @@ def load_smart_money_page(
         base_where = ' AND '.join(base_filters)
         if snapshot_time is None:
             latest_sql = text(
-                f'SELECT MAX(snapshot_time) FROM market_futures_smart_money_signal WHERE {base_where}'
+                'SELECT snapshot_time FROM market_futures_smart_money_signal '
+                'WHERE exchange = :latest_exchange '
+                'AND time_range = :latest_time_range '
+                'AND period = :latest_period '
+                'ORDER BY snapshot_time DESC LIMIT 1'
             )
-            snapshot_time = db.execute(latest_sql, params).scalar()
+            snapshot_time = db.execute(
+                latest_sql,
+                {
+                    'latest_exchange': exchange,
+                    'latest_time_range': time_range,
+                    'latest_period': period,
+                },
+            ).scalar()
             if snapshot_time is None:
                 return _smart_money_page_result([], 0, None, [], {})
             base_filters.append('snapshot_time = :snapshot_time')
@@ -759,11 +831,7 @@ def load_smart_money_page(
             base_where = ' AND '.join(base_filters)
 
         offset = (page - 1) * page_size
-        if (
-            max_mark_price_spread_percent is not None
-            or max_price_trend_percent is not None
-            or max_price_drawdown_percent is not None
-        ):
+        if has_price_filter:
             rows = db.execute(
                 text(
                     f'SELECT {", ".join(DISPLAY_COLUMNS)} '
@@ -772,15 +840,20 @@ def load_smart_money_page(
                 ),
                 params,
             ).mappings().all()
-            rows = _attach_mark_prices(rows, session=db)
-            if max_price_trend_percent is not None or max_price_drawdown_percent is not None:
-                rows = _attach_price_trends(rows, session=db)
-            rows = _filter_rows_by_mark_price_spread(rows, max_mark_price_spread_percent)
-            rows = _filter_rows_by_max_price_trend(rows, max_price_trend_percent)
-            rows = _filter_rows_by_max_price_drawdown(rows, max_price_drawdown_percent)
+            rows = _apply_smart_money_price_filters(
+                rows,
+                max_mark_price_spread_percent,
+                max_price_trend_percent,
+                max_price_drawdown_percent,
+                session=db,
+            )
             count = len(rows)
             stats = _sum_smart_money_stats(rows)
             rows = rows[offset:offset + page_size]
+            if not has_mark_price_filter:
+                rows = _attach_mark_prices(rows, session=db)
+            if not has_price_trend_filter:
+                rows = _attach_price_trends(rows, session=db)
         else:
             count = db.execute(
                 text(f'SELECT COUNT(*) FROM market_futures_smart_money_signal WHERE {base_where}'),
@@ -803,7 +876,7 @@ def load_smart_money_page(
                 ),
                 params,
             ).mappings().one()
-        if max_price_trend_percent is None and max_price_drawdown_percent is None:
+        if not has_price_filter:
             rows = _attach_price_trends(rows, session=db)
         snapshot_filters, snapshot_params = _smart_money_filters(
             keyword,

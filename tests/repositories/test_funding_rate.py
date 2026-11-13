@@ -218,6 +218,31 @@ class TestLoadLatestFundingRates:
         assert result['BTCUSDT']['event_time'] == 1000
         assert result['BTCUSDT']['funding_rate'] == 0.001
 
+    def test_load_latest_funding_rates_can_limit_live_lookback(self, db_session, monkeypatch):
+        now_ms = 1_700_000_000_000
+        monkeypatch.setattr(funding_rate_repository.time, 'time', lambda: now_ms / 1000)
+        save_funding_rates([
+            {
+                'symbol': 'BTCUSDT', 'period': '5m',
+                'event_time': now_ms - 7 * 60 * 60 * 1000,
+                'mark_price': 100.0, 'exchange': 'binance',
+            },
+            {
+                'symbol': 'ETHUSDT', 'period': '5m',
+                'event_time': now_ms - 5 * 60 * 60 * 1000,
+                'mark_price': 200.0, 'exchange': 'binance',
+            },
+        ], session=db_session)
+
+        result = load_latest_funding_rates(
+            ['BTCUSDT', 'ETHUSDT'],
+            session=db_session,
+            lookback_hours=6,
+        )
+
+        assert 'BTCUSDT' not in result
+        assert result['ETHUSDT']['mark_price'] == 200.0
+
 
 class TestLoadFundingRateHistory:
     """Test load_funding_rate_history function"""

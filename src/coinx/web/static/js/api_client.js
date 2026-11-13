@@ -257,7 +257,7 @@
           : '网络连接失败，请检查网络后重试',
       });
       emitError(normalized, suppressToast);
-      throw error;
+      throw normalized;
     } finally {
       requestSignal.cleanup();
     }
@@ -270,6 +270,7 @@
     try {
       response = await window.fetch(input, options);
     } catch (error) {
+      if (error instanceof CoinxApiError) throw error;
       throw buildError({
         kind: error?.name === 'AbortError' ? 'timeout' : 'network',
         url,

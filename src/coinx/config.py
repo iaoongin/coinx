@@ -340,6 +340,12 @@ SMART_MONEY_SCOPE_MIN_NET_NOTIONAL = get_env(
 )
 SMART_MONEY_REQUEST_TIMEOUT_SECONDS = get_env('SMART_MONEY_REQUEST_TIMEOUT_SECONDS', 20, int)
 SMART_MONEY_RETENTION_DAYS = get_env('SMART_MONEY_RETENTION_DAYS', 90, int)
+# Only scan this recent window when the Smart Money page needs current mark prices.
+SMART_MONEY_MARK_PRICE_LOOKBACK_HOURS = get_env(
+    'SMART_MONEY_MARK_PRICE_LOOKBACK_HOURS',
+    6,
+    int,
+)
 
 # 资金费率配置
 FUNDING_RATE_COLLECT_ENABLED = get_env('FUNDING_RATE_COLLECT_ENABLED', True, bool)

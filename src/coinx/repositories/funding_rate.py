@@ -111,13 +111,20 @@ def save_funding_rates(records, session=None):
             db.close()
 
 
-def load_latest_funding_rates(symbols=None, session=None, as_of_ms=None, exchange='binance'):
+def load_latest_funding_rates(
+    symbols=None,
+    session=None,
+    as_of_ms=None,
+    exchange='binance',
+    lookback_hours=None,
+):
     """
     加载指定币种的最新资金费率（批量查询优化）
 
     Args:
         symbols: 交易对列表；None 时加载全部币种
         session: 数据库 session（可选）
+        lookback_hours: 实时查询时限制最新记录的回溯小时数；None 表示不限制。
 
     Returns:
         dict: {symbol: {predicted_rate, funding_rate, next_funding_time, mark_price}}
@@ -154,6 +161,18 @@ def load_latest_funding_rates(symbols=None, session=None, as_of_ms=None, exchang
         if as_of_ms is not None:
             as_of_clause = ' AND event_time <= :as_of_ms'
             params['as_of_ms'] = int(as_of_ms)
+        lookback_clause = ''
+        if lookback_hours is not None and as_of_ms is None:
+            try:
+                normalized_lookback_hours = max(int(lookback_hours), 0)
+            except (TypeError, ValueError):
+                normalized_lookback_hours = 0
+            if normalized_lookback_hours:
+                params['latest_lower_bound'] = (
+                    int(time.time() * 1000)
+                    - normalized_lookback_hours * 60 * 60 * 1000
+                )
+                lookback_clause = ' AND event_time >= :latest_lower_bound'
         latest_sql = text(f"""
             SELECT m.symbol, m.event_time, m.funding_rate, m.predicted_rate,
                    m.next_funding_time, m.mark_price
@@ -162,7 +181,7 @@ def load_latest_funding_rates(symbols=None, session=None, as_of_ms=None, exchang
                 SELECT symbol, MAX(event_time) AS event_time
                 FROM market_funding_rate
                 WHERE period = :period AND exchange = :exchange
-                  {symbol_clause}{as_of_clause}
+                  {symbol_clause}{as_of_clause}{lookback_clause}
                 GROUP BY symbol
             ) latest
               ON latest.symbol = m.symbol AND latest.event_time = m.event_time
