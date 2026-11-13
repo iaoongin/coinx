@@ -22,17 +22,23 @@ def test_task_jobs_page_renders():
     assert 'border-radius: var(--page-surface-radius);'.encode('utf-8') in response.data
     assert 'SCHEDULER_ENABLED=false'.encode('utf-8') in response.data
     assert '部分成功'.encode('utf-8') in response.data
+    assert '已超时'.encode('utf-8') in response.data
+    assert "return normalized === 'timeout' ? 'error' : normalized;".encode('utf-8') in response.data
     assert '限流等待'.encode('utf-8') in response.data
     assert '冷却剩余'.encode('utf-8') in response.data
-    assert '执行记录'.encode('utf-8') in response.data
+    assert '运行日志'.encode('utf-8') in response.data
     assert '下一页'.encode('utf-8') in response.data
     assert '/runs?limit=5&offset='.encode('utf-8') in response.data
     assert 'history-modal'.encode('utf-8') in response.data
     assert 'formatRunDetail'.encode('utf-8') in response.data
+    assert 'cleanup_scopes'.encode('utf-8') in response.data
+    assert 'batch_deleted_count'.encode('utf-8') in response.data
+    assert 'query_duration_ms'.encode('utf-8') in response.data
+    assert "run?.job_id === 'cleanup_data_job'".encode('utf-8') in response.data
     assert 'summary-content'.encode('utf-8') in response.data
     assert 'summary-modal'.encode('utf-8') in response.data
     assert 'history-summary-line'.encode('utf-8') in response.data
     assert 'window.CoinxToast'.encode('utf-8') in response.data
     assert 'coinxSuppressGlobalError'.encode('utf-8') in response.data
     assert ':class="[\'message-box\', flash.type]"'.encode('utf-8') not in response.data
-    assert "openErrorDetail('历史摘要'".encode('utf-8') in response.data
+    assert "openErrorDetail('运行摘要'".encode('utf-8') in response.data

@@ -716,7 +716,7 @@
                     <button class="btn" @click="runAction(job.id, 'run')" :disabled="isJobActionLoading(job.id) || !job.registered || (schedulerEnabled && !schedulerRunning)">[[ isActionLoading(job.id, 'run') ? '执行中...' : '立即执行' ]]</button>
                     <button class="btn" @click="runAction(job.id, 'pause')" :disabled="isJobActionLoading(job.id) || !job.registered || !schedulerRunning || job.paused">[[ isActionLoading(job.id, 'pause') ? '处理中...' : '暂停' ]]</button>
                     <button class="btn" @click="runAction(job.id, 'resume')" :disabled="isJobActionLoading(job.id) || !job.registered || !schedulerRunning || !job.paused">[[ isActionLoading(job.id, 'resume') ? '处理中...' : '恢复' ]]</button>
-                    <button class="btn" @click="openJobHistory(job)" :disabled="historyLoading[job.id] || isJobActionLoading(job.id)">[[ historyLoading[job.id] ? '加载中...' : '历史' ]]</button>
+                    <button class="btn" @click="openJobHistory(job)" :disabled="historyLoading[job.id] || isJobActionLoading(job.id)">[[ historyLoading[job.id] ? '加载中...' : '运行日志' ]]</button>
                   </div>
                 </td>
               </tr>
@@ -731,16 +731,16 @@
         [[ schedulerEnabled ? '没有匹配到任务。可以调整筛选条件，或确认调度器是否已经启动。' : '没有匹配到任务定义。' ]]
       </div>
       <div v-if="historyModalJob" class="history-modal-backdrop" @click.self="closeJobHistory">
-        <section class="history-modal" role="dialog" aria-modal="true" aria-label="任务执行历史">
+        <section class="history-modal" role="dialog" aria-modal="true" aria-label="任务运行日志">
           <div class="history-modal-header">
             <div>
               <h2 style="margin:0;font-size:17px;">[[ historyModalJob.display_name || historyModalJob.name ]]</h2>
-              <p class="history-heading">执行记录</p>
+              <p class="history-heading">运行日志</p>
             </div>
             <button class="btn" @click="closeJobHistory">关闭</button>
           </div>
           <div v-if="historyLoading[historyModalJob.id]" class="cell-mono">加载中...</div>
-          <div v-else-if="!activeJobHistory.length" class="cell-mono">暂无持久化执行记录</div>
+          <div v-else-if="!activeJobHistory.length" class="cell-mono">暂无持久化运行日志</div>
           <table v-else class="history-table">
             <colgroup>
               <col style="width:11%;"><col style="width:19%;"><col style="width:19%;"><col style="width:31%;"><col style="width:20%;">
@@ -754,14 +754,14 @@
                 <td class="history-summary-cell">
                   <div v-if="formatRunSummary(run) !== '--'" class="history-summary-line">
                     <span class="cell-mono history-summary-text" :title="formatRunSummary(run)">[[ compactText(formatRunSummary(run), 180) ]]</span>
-                    <button v-if="progressEvents(run).length || isLongText(formatRunSummary(run), 180)" class="btn summary-detail-button" @click="openErrorDetail('历史摘要', formatRunDetail(run), true)">详情</button>
+                    <button v-if="progressEvents(run).length || isLongText(formatRunSummary(run), 180)" class="btn summary-detail-button" @click="openErrorDetail('运行摘要', formatRunDetail(run), true)">详情</button>
                   </div>
                   <span v-else class="cell-mono">--</span>
                 </td>
                 <td class="error-cell">
                   <div v-if="run.last_error" class="cell-stack error-stack">
                     <span class="cell-mono error-summary" :title="run.last_error">[[ compactText(run.last_error) ]]</span>
-                    <button v-if="run.last_error_detail || isLongText(run.last_error)" class="btn error-detail-button" @click="openErrorDetail('历史错误', run.last_error_detail || run.last_error, !!run.last_error_detail)">详情</button>
+                    <button v-if="run.last_error_detail || isLongText(run.last_error)" class="btn error-detail-button" @click="openErrorDetail('运行错误', run.last_error_detail || run.last_error, !!run.last_error_detail)">详情</button>
                   </div>
                   <span v-else class="cell-mono">--</span>
                 </td>
@@ -776,15 +776,15 @@
         </section>
       </div>
       <div v-if="errorDetail" class="error-modal-backdrop" @click.self="closeErrorDetail">
-        <section :class="['error-modal', { 'summary-modal': errorDetail.title === '历史摘要' }]" role="dialog" aria-modal="true" :aria-label="errorDetail.title">
+        <section :class="['error-modal', { 'summary-modal': errorDetail.title === '运行摘要' }]" role="dialog" aria-modal="true" :aria-label="errorDetail.title">
           <div class="error-modal-header">
             <div>
               <h2 style="margin:0;font-size:17px;">[[ errorDetail.title ]]</h2>
-              <p class="history-heading">[[ errorDetail.title === '历史摘要' ? '完整摘要信息' : (errorDetail.complete ? '完整错误信息' : '错误摘要（历史记录未保留完整详情）') ]]</p>
+              <p class="history-heading">[[ errorDetail.title === '运行摘要' ? '完整摘要信息' : (errorDetail.complete ? '完整错误信息' : '错误摘要（运行日志未保留完整详情）') ]]</p>
             </div>
             <button class="btn" @click="closeErrorDetail">关闭</button>
           </div>
-          <pre :class="['error-content', { 'summary-content': errorDetail.title === '历史摘要' }]">[[ errorDetail.message ]]</pre>
+          <pre :class="['error-content', { 'summary-content': errorDetail.title === '运行摘要' }]">[[ errorDetail.message ]]</pre>
         </section>
       </div>
     </div>
@@ -893,6 +893,7 @@
           const normalized = String(status).toLowerCase();
           if (normalized === 'running') return '运行中';
           if (normalized === 'success') return '成功';
+          if (normalized === 'timeout') return '已超时';
           if (normalized === 'error') return '失败';
           if (normalized === 'partial' || normalized === 'partial_success') return '部分成功';
           if (normalized === 'skipped') return '跳过';
@@ -908,6 +909,7 @@
           if (job.paused) return 'paused';
           const normalized = String(job.runtime?.last_status || '').toLowerCase();
           if (normalized === 'error') return 'error';
+          if (normalized === 'timeout') return 'error';
           if (normalized === 'partial' || normalized === 'partial_success') return 'partial';
           if (normalized === 'success') return 'success';
           return 'ready';
@@ -965,19 +967,34 @@
           return '就绪';
         };
 
-        const runStatusClass = (run) => String(run?.status || 'ready').toLowerCase();
+        const runStatusClass = (run) => {
+          const normalized = String(run?.status || 'ready').toLowerCase();
+          return normalized === 'timeout' ? 'error' : normalized;
+        };
 
         const progressEvents = (run) => {
           const events = Array.isArray(run?.last_summary?.progress_events)
             ? run.last_summary.progress_events
             : [];
-          return events.slice(-8).reverse();
+          return (run?.job_id === 'cleanup_data_job' ? events : events.slice(-8)).slice().reverse();
         };
 
         const formatProgressEvent = (event) => {
           const parts = [event?.message || event?.stage || '状态更新'];
           if (event?.batch_index && event?.batch_count) {
             parts.push(`批次 ${event.batch_index}/${event.batch_count}`);
+          }
+          if (event?.batch_deleted_count !== undefined) parts.push(`本批删除 ${event.batch_deleted_count} 条`);
+          if (event?.deleted_count !== undefined && event?.stage !== 'table_started') parts.push(`累计删除 ${event.deleted_count} 条`);
+          for (const [key, label] of [
+            ['batch_duration_ms', '批次耗时'],
+            ['query_duration_ms', '查询'],
+            ['delete_duration_ms', '删除'],
+            ['commit_duration_ms', '提交'],
+            ['total_duration_ms', '总耗时'],
+            ['remaining_duration_ms', '预计剩余'],
+          ]) {
+            if (event?.[key] !== undefined && event[key] !== null) parts.push(`${label} ${formatDuration(event[key])}`);
           }
           if (event?.remaining_task_count !== undefined) {
             parts.push(`剩余缺口任务 ${event.remaining_task_count}`);
@@ -1003,6 +1020,20 @@
         const formatRunSummary = (run) => {
           const summary = run?.last_summary;
           if (!summary) return '--';
+          if (Array.isArray(summary.cleanup_scopes)) {
+            const scopeParts = summary.cleanup_scopes.map((scope) => {
+              const label = scope.label || scope.scope || '数据';
+              if (scope.status === 'error') return `${label}失败`;
+              if (scope.deleted_count === null || scope.deleted_count === undefined) {
+                return `${label}已提交`;
+              }
+              return `${label} ${Number(scope.deleted_count).toLocaleString('zh-CN')} 条`;
+            });
+            const total = summary.total_deleted_count === null || summary.total_deleted_count === undefined
+              ? ''
+              : ` / 总计 ${Number(summary.total_deleted_count).toLocaleString('zh-CN')} 条`;
+            return `${summary.message || '数据清理完成'}${scopeParts.length ? ` / ${scopeParts.join(' / ')}` : ''}${total}`;
+          }
           const parts = [];
           for (const [key, label] of [
             ['saved_count', '保存'],
@@ -1081,7 +1112,7 @@
               coinxSuppressGlobalError: true,
             });
             const result = await response.json();
-            if (result.status !== 'success') throw new Error(result.message || '加载任务执行记录失败');
+            if (result.status !== 'success') throw new Error(result.message || '加载运行日志失败');
             jobHistory.value = { ...jobHistory.value, [jobId]: result.data?.runs || [] };
             jobHistoryMeta.value = {
               ...jobHistoryMeta.value,
@@ -1093,7 +1124,7 @@
             };
           } catch (error) {
             console.error(error);
-            showToast(`加载任务历史失败: ${error.message}`, 'error');
+            showToast(`加载运行日志失败: ${error.message}`, 'error');
           } finally {
             if (!silent) historyLoading.value = { ...historyLoading.value, [jobId]: false };
           }

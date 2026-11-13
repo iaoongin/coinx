@@ -48,6 +48,7 @@ def initialize_database_schema():
 def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
     from coinx.write_backend import is_clickhouse_write, market_write_health
     initialize_database_schema()
+    initialize_job_run_history()
     if is_clickhouse_write():
         write_health = market_write_health()
         logger.info('ClickHouse market write preflight: %s', write_health)
@@ -68,7 +69,6 @@ def start_runtime_services(with_startup_repair=True, startup_delay_seconds=1):
             'repair_thread': None,
             'tracked_coins': [],
         }
-    initialize_job_run_history()
     logger.info('开始启动运行时服务')
     try:
         from coinx.rss_monitor import ensure_rss_schema

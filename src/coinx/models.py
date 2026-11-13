@@ -111,6 +111,7 @@ class MarketOpenInterestHist(Base):
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_moih_exchange_symbol_period_time'),
         Index('idx_moih_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
+        Index('idx_moih_event_time', 'event_time'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -131,6 +132,7 @@ class MarketKline(Base):
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'open_time', name='uk_mk_exchange_symbol_period_open_time'),
         Index('idx_mk_symbol_period_exchange_open_time', 'symbol', 'period', 'exchange', 'open_time'),
+        Index('idx_mk_close_time', 'close_time'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -158,6 +160,7 @@ class MarketTakerBuySellVol(Base):
     __table_args__ = (
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_mtbsv_exchange_symbol_period_time'),
         Index('idx_mtbsv_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
+        Index('idx_mtbsv_event_time', 'event_time'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -186,6 +189,7 @@ class MarketFundingRate(Base):
         ),
         Index('idx_funding_symbol_period', 'symbol', 'period'),
         Index('idx_funding_symbol_time', 'symbol', 'event_time'),
+        Index('idx_funding_event_time', 'event_time'),
         {'comment': '资金费率历史'}
     )
 
@@ -350,6 +354,7 @@ class ScheduledJobRun(Base):
         Index('idx_scheduled_job_runs_job_started', 'job_id', 'started_at'),
         Index('idx_scheduled_job_runs_job_started_id', 'job_id', 'started_at', 'id'),
         Index('idx_scheduled_job_runs_started_at', 'started_at'),
+        Index('idx_scheduled_job_runs_status_heartbeat', 'status', 'heartbeat_at'),
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -358,6 +363,7 @@ class ScheduledJobRun(Base):
     summary_json = Column(JSON)
     error_message = Column(String(500))
     started_at = Column(BigInteger, nullable=False)
+    heartbeat_at = Column(BigInteger)
     completed_at = Column(BigInteger)
     duration_ms = Column(Integer)
     created_at = Column(DateTime, default=datetime.now)

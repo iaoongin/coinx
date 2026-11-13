@@ -88,8 +88,7 @@ TASK_JOB_LABELS = {
     'collect_funding_rates_job': '资金费率采集',
     'collect_smart_money_signals_job': '合约聪明钱采集',
     'update_coins_config_job': '币种配置刷新',
-    'cleanup_market_data_job': '行情数据清理',
-    'cleanup_task_run_history_job': '任务历史清理',
+    'cleanup_data_job': '数据清理',
 }
 
 

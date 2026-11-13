@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS market_open_interest_hist (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_moih_exchange_symbol_period_time (exchange, symbol, period, event_time),
-    KEY idx_moih_symbol_period_exchange_time (symbol, period, exchange, event_time)
+    KEY idx_moih_symbol_period_exchange_time (symbol, period, exchange, event_time),
+    KEY idx_moih_event_time (event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所持仓量历史数据表';
 
 -- 多交易所K线历史数据表
@@ -126,7 +127,8 @@ CREATE TABLE IF NOT EXISTS market_klines (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_mk_exchange_symbol_period_open_time (exchange, symbol, period, open_time),
-    KEY idx_mk_symbol_period_exchange_open_time (symbol, period, exchange, open_time)
+    KEY idx_mk_symbol_period_exchange_open_time (symbol, period, exchange, open_time),
+    KEY idx_mk_close_time (close_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所K线历史数据表';
 
 -- 多交易所主动买入卖出量历史数据表
@@ -142,7 +144,8 @@ CREATE TABLE IF NOT EXISTS market_taker_buy_sell_vol (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_mtbsv_exchange_symbol_period_time (exchange, symbol, period, event_time),
-    KEY idx_mtbsv_symbol_period_exchange_time (symbol, period, exchange, event_time)
+    KEY idx_mtbsv_symbol_period_exchange_time (symbol, period, exchange, event_time),
+    KEY idx_mtbsv_event_time (event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所主动买入卖出量历史数据表';
 
 -- 资金费率历史表
@@ -160,7 +163,8 @@ CREATE TABLE IF NOT EXISTS market_funding_rate (
     updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
     UNIQUE KEY uk_funding_exchange_symbol_period_time (exchange, symbol, period, event_time),
     INDEX idx_funding_symbol_period (symbol, period),
-    INDEX idx_funding_symbol_time (symbol, event_time)
+    INDEX idx_funding_symbol_time (symbol, event_time),
+    INDEX idx_funding_event_time (event_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='资金费率历史';
 
 -- 通知渠道：Apprise URL 仅保存为应用层 Fernet 密文。
@@ -303,10 +307,12 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
     summary_json JSON NULL COMMENT '任务执行摘要',
     error_message VARCHAR(500) NULL COMMENT '错误或中断原因',
     started_at BIGINT NOT NULL COMMENT '开始时间戳（毫秒）',
+    heartbeat_at BIGINT NULL COMMENT '最近心跳时间戳（毫秒）',
     completed_at BIGINT NULL COMMENT '结束时间戳（毫秒）',
     duration_ms INT NULL COMMENT '执行耗时（毫秒）',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
     KEY idx_scheduled_job_runs_job_started (job_id, started_at),
     KEY idx_scheduled_job_runs_job_started_id (job_id, started_at, id),
-    KEY idx_scheduled_job_runs_started_at (started_at)
+    KEY idx_scheduled_job_runs_started_at (started_at),
+    KEY idx_scheduled_job_runs_status_heartbeat (status, heartbeat_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务执行记录';

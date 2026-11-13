@@ -1,3 +1,6 @@
+import time
+
+import coinx.repositories.job_runs as job_runs_module
 from coinx.models import ScheduledJobRun
 from coinx.repositories.job_runs import (
     INTERRUPTED_ERROR_MESSAGE,
@@ -6,6 +9,7 @@ from coinx.repositories.job_runs import (
     finish_job_run,
     get_job_runs,
     get_latest_job_runtime_metadata,
+    heartbeat_running_job,
     recover_interrupted_job_runs,
     update_job_run,
 )
@@ -87,6 +91,35 @@ def test_update_job_run_persists_inflight_summary_without_finishing(db_session):
     assert run['status'] == 'running'
     assert run['last_finished_at_ms'] is None
     assert run['last_summary']['stage'] == 'batch_2'
+    assert db_session.get(ScheduledJobRun, run_id).heartbeat_at > 1_000
+
+
+def test_stale_running_job_serializes_as_timeout(monkeypatch, db_session):
+    monkeypatch.setattr(job_runs_module, 'TASK_RUN_STALE_TIMEOUT_SECONDS', 1)
+    run_id = create_job_run('stale-job', started_at=1_000, session=db_session)
+    run = db_session.get(ScheduledJobRun, run_id)
+    run.heartbeat_at = int(time.time() * 1000) - 2_000
+    db_session.commit()
+
+    serialized = get_job_runs('stale-job', session=db_session)[0]
+
+    assert serialized['status'] == 'timeout'
+    assert serialized['last_status'] == 'timeout'
+    assert serialized['last_error'] == '任务执行超时，未收到心跳'
+    assert serialized['running'] is False
+    assert serialized['last_duration_ms'] is not None
+
+
+def test_heartbeat_does_not_reopen_finished_run(db_session):
+    run_id = create_job_run('job', started_at=1_000, session=db_session)
+    assert heartbeat_running_job(run_id, 1_500, session=db_session) is True
+    db_session.expire_all()
+    assert db_session.get(ScheduledJobRun, run_id).heartbeat_at == 1_500
+    finish_job_run(run_id, 'success', completed_at=2_000, session=db_session)
+    assert heartbeat_running_job(run_id, 2_500, session=db_session) is False
+    db_session.expire_all()
+    assert db_session.get(ScheduledJobRun, run_id).status == 'success'
+    assert db_session.get(ScheduledJobRun, run_id).heartbeat_at == 2_000
 
 
 def test_recover_interrupted_runs_marks_them_as_errors(db_session):

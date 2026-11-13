@@ -178,6 +178,34 @@ def test_job_progress_updates_memory_and_persists_bounded_event(monkeypatch):
     ]
 
 
+def test_cleanup_progress_persists_batch_details_and_keeps_recent_events(monkeypatch):
+    updates = []
+    monkeypatch.setattr(scheduler_module, 'JOB_METADATA', {})
+    monkeypatch.setattr(scheduler_module, 'create_job_run', lambda *_args, **_kwargs: 9)
+    monkeypatch.setattr(
+        scheduler_module, 'update_job_run',
+        lambda run_id, **kwargs: updates.append(kwargs['summary']) or True,
+    )
+    scheduler_module._mark_job_started('cleanup_data_job')
+    for batch in range(1, 43):
+        scheduler_module._record_cleanup_progress(
+            'market_klines', batch, 42, batch * 10,
+            stage='batch_finished', batch_deleted_count=10,
+            query_duration_ms=12, delete_duration_ms=34, commit_duration_ms=56,
+            remaining_duration_ms=0,
+        )
+
+    events = updates[-1]['progress_events']
+    assert len(events) == 40
+    assert events[0]['batch_index'] == 3
+    assert events[-1]['batch_index'] == 42
+    assert events[-1]['batch_deleted_count'] == 10
+    assert events[-1]['deleted_count'] == 420
+    assert events[-1]['query_duration_ms'] == 12
+    assert events[-1]['delete_duration_ms'] == 34
+    assert events[-1]['commit_duration_ms'] == 56
+
+
 def test_job_run_persistence_failure_does_not_block_metadata(monkeypatch):
     monkeypatch.setattr(scheduler_module, 'JOB_METADATA', {})
     monkeypatch.setattr(scheduler_module, 'create_job_run', lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError('db down')))

@@ -39,6 +39,7 @@ from .config import (
     SMART_MONEY_INTERVAL,
     SMART_MONEY_RETENTION_DAYS,
     SMART_MONEY_TIME_RANGES,
+    TASK_RUN_STALE_TIMEOUT_SECONDS,
     TASK_RUN_HISTORY_RETENTION_DAYS,
     DATABASE_URI,
 )
@@ -54,13 +55,16 @@ from .repositories.job_runs import (
     delete_expired_job_runs,
     ensure_job_run_schema,
     finish_job_run,
+    heartbeat_running_job,
     recover_interrupted_job_runs,
+    STALE_RUN_ERROR_MESSAGE,
     update_job_run,
 )
 from .repositories.retention import (
     cleanup_expired_market_data,
     cleanup_expired_smart_money_data,
 )
+from .repositories.retention_optimize import optimize_cleaned_tables
 from .repositories.market_tickers import get_market_scope_symbols_from_tickers
 from .repositories.market_structure_score import get_market_structure_score_symbols
 from .collector.timing import format_duration_ms
@@ -115,6 +119,17 @@ def _restore_persisted_paused_jobs(paused_job_ids):
             logger.exception('恢复任务暂停状态失败: job_id=%s', job_id)
 
 
+def _remove_obsolete_cleanup_jobs():
+    """Remove cleanup jobs superseded by the unified data-cleanup job."""
+    for job_id in ('cleanup_market_data_job', 'cleanup_task_run_history_job'):
+        try:
+            if scheduler.get_job(job_id) is not None:
+                scheduler.remove_job(job_id)
+                logger.info('已移除旧清理任务: job_id=%s', job_id)
+        except Exception:
+            logger.exception('移除旧清理任务失败: job_id=%s', job_id)
+
+
 def _update_job_metadata(job_id, **fields):
     with JOB_METADATA_LOCK:
         metadata = JOB_METADATA.setdefault(job_id, {})
@@ -155,6 +170,7 @@ def _mark_job_started(job_id):
         last_status='running',
         last_summary=None,
         last_error=None,
+        last_heartbeat_at_ms=started_at_ms,
         run_id=None,
     )
     try:
@@ -193,6 +209,7 @@ def _mark_job_progress(job_id, stage, message, **details):
                 'running': True,
                 'last_status': 'running',
                 'last_summary': summary,
+                'last_heartbeat_at_ms': event['timestamp_ms'],
                 'last_updated_at_ms': event['timestamp_ms'],
             }
         )
@@ -204,6 +221,21 @@ def _mark_job_progress(job_id, stage, message, **details):
         except Exception:
             logger.exception('任务运行进度记录更新失败: job_id=%s run_id=%s stage=%s', job_id, run_id, stage)
     return snapshot
+
+
+def _heartbeat_job(job_id):
+    current_ms = int(time.time() * 1000)
+    with JOB_METADATA_LOCK:
+        metadata = JOB_METADATA.get(job_id)
+        if not metadata or not metadata.get('running'):
+            return
+        metadata['last_heartbeat_at_ms'] = current_ms
+        run_id = metadata.get('run_id')
+    if run_id is not None:
+        try:
+            heartbeat_running_job(run_id, current_ms)
+        except Exception:
+            logger.exception('任务心跳更新失败: job_id=%s run_id=%s', job_id, run_id)
 
 
 def _mark_job_finished(job_id, status='success', summary=None, error=None, started_at=None):
@@ -246,6 +278,7 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
         last_status=status,
         last_summary=runtime_summary,
         last_error=error_message,
+        last_heartbeat_at_ms=finished_at_ms,
         last_updated_at_ms=finished_at_ms,
     )
     run_id = metadata.get('run_id')
@@ -337,14 +370,44 @@ if RSS_ENABLED:
             logger.exception(exc)
 
 
+def _normalize_runtime_metadata(metadata):
+    runtime = dict(metadata or {})
+    if not runtime.get('running'):
+        return runtime
+    heartbeat_at = (
+        runtime.get('last_heartbeat_at_ms')
+        or runtime.get('last_updated_at_ms')
+        or runtime.get('last_started_at_ms')
+    )
+    if heartbeat_at is None:
+        return runtime
+    timeout_ms = max(1, int(TASK_RUN_STALE_TIMEOUT_SECONDS)) * 1000
+    current_ms = int(time.time() * 1000)
+    if current_ms - heartbeat_at <= timeout_ms:
+        return runtime
+    runtime.update(
+        {
+            'running': False,
+            'last_status': 'timeout',
+            'last_error': runtime.get('last_error') or STALE_RUN_ERROR_MESSAGE,
+            'last_duration_ms': max(0, current_ms - (runtime.get('last_started_at_ms') or current_ms)),
+            'last_heartbeat_at_ms': heartbeat_at,
+        }
+    )
+    return runtime
+
+
 def get_job_runtime_metadata(job_id):
     with JOB_METADATA_LOCK:
-        return dict(JOB_METADATA.get(job_id) or {})
+        return _normalize_runtime_metadata(JOB_METADATA.get(job_id) or {})
 
 
 def get_all_job_runtime_metadata():
     with JOB_METADATA_LOCK:
-        return {job_id: dict(metadata) for job_id, metadata in JOB_METADATA.items()}
+        return {
+            job_id: _normalize_runtime_metadata(metadata)
+            for job_id, metadata in JOB_METADATA.items()
+        }
 
 
 _REPAIR_STAGE_SUMMARY_FIELDS = (
@@ -1056,62 +1119,220 @@ def scheduled_coins_config_update():
         logger.exception(e)
 
 
-@scheduled_job('cron', hour=0, minute=20, id='cleanup_market_data_job')
-def scheduled_cleanup_market_data():
-    """Remove market records outside the market retention window."""
-    started_at = time.perf_counter()
-    _mark_job_started('cleanup_market_data_job')
-    try:
-        market_deleted = cleanup_expired_market_data(MARKET_DATA_RETENTION_DAYS)
-        smart_money_deleted = cleanup_expired_smart_money_data(SMART_MONEY_RETENTION_DAYS)
-        _mark_job_finished(
-            'cleanup_market_data_job',
-            status='success',
-            summary={
-                'status': 'success',
-                'market_deleted_count': market_deleted,
-                'smart_money_deleted_count': smart_money_deleted,
-                'market_retention_days': MARKET_DATA_RETENTION_DAYS,
-                'smart_money_retention_days': SMART_MONEY_RETENTION_DAYS,
-            },
-            started_at=started_at,
-        )
-        logger.info(
-            '定时行情数据清理完成: market_deleted=%s market_retention_days=%s',
-            market_deleted,
-            MARKET_DATA_RETENTION_DAYS,
-        )
-    except Exception as e:
-        _mark_job_finished('cleanup_market_data_job', status='error', error=e, started_at=started_at)
-        logger.error('定时行情数据清理失败: %s', e)
-        logger.exception(e)
+def _record_cleanup_progress(table_name, batch_number, total_batches, deleted_count, **details):
+    stage = details.pop('stage', 'batch_finished' if batch_number else 'counting')
+    if stage == 'table_started':
+        message = f'表开始 | {table_name}'
+    elif stage == 'table_finished':
+        message = f'表完成 | {table_name}'
+    elif batch_number:
+        message = f'进行中 | {table_name}'
+    else:
+        message = f'表准备完成 | {table_name}'
+    _mark_job_progress(
+        'cleanup_data_job',
+        stage,
+        message,
+        table_name=table_name,
+        batch_index=batch_number or None,
+        batch_count=total_batches,
+        deleted_count=deleted_count,
+        **details,
+    )
 
 
-@scheduled_job('cron', hour=0, minute=25, id='cleanup_task_run_history_job')
-def scheduled_cleanup_task_run_history():
-    """Remove task execution records outside the task-history retention window."""
-    started_at = time.perf_counter()
-    _mark_job_started('cleanup_task_run_history_job')
-    try:
-        deleted = delete_expired_job_runs(TASK_RUN_HISTORY_RETENTION_DAYS)
-        _mark_job_finished(
-            'cleanup_task_run_history_job',
-            status='success',
-            summary={
-                'status': 'success',
-                'deleted_count': deleted,
-                'task_history_retention_days': TASK_RUN_HISTORY_RETENTION_DAYS,
-            },
-            started_at=started_at,
-        )
-        logger.info(
-            '定时任务历史清理完成: deleted=%s task_history_retention_days=%s',
+def _cleanup_run_logs(retention_days, progress_callback=None):
+    table_started_at = time.perf_counter()
+    logger.info('')
+    logger.info('[数据清理] 表开始 | scheduled_job_runs | 共 1 批')
+    logger.info('')
+    if progress_callback:
+        progress_callback('scheduled_job_runs', 0, 1, 0, stage='table_started')
+    deleted = delete_expired_job_runs(retention_days)
+    batch_duration_ms = (time.perf_counter() - table_started_at) * 1000
+    if progress_callback:
+        progress_callback(
+            'scheduled_job_runs',
+            1,
+            1,
             deleted,
-            TASK_RUN_HISTORY_RETENTION_DAYS,
+            stage='batch_finished',
+            batch_deleted_count=deleted,
+            batch_duration_ms=batch_duration_ms,
+            total_duration_ms=batch_duration_ms,
+            remaining_duration_ms=0,
         )
+    logger.info(
+        '[数据清理] 进行中 | scheduled_job_runs | 第 1/1 批 | 本批 %d 条 | 累计 %d 条 | 批次耗时 %s | 总耗时 %s | 预计剩余 0ms',
+        deleted,
+        deleted,
+        format_duration_ms(batch_duration_ms),
+        format_duration_ms(batch_duration_ms),
+    )
+    logger.info('')
+    logger.info(
+        '[数据清理] 表完成 | scheduled_job_runs | 删除 %d 条 | 共 1 批 | 耗时 %s',
+        deleted,
+        format_duration_ms((time.perf_counter() - table_started_at) * 1000),
+    )
+    if progress_callback:
+        progress_callback(
+            'scheduled_job_runs', 0, 1, deleted, stage='table_finished',
+            total_duration_ms=(time.perf_counter() - table_started_at) * 1000,
+        )
+    return {'scheduled_job_runs': deleted}
+
+
+def _cleanup_scope(scope, label, retention_days, cleanup, progress_callback=None):
+    try:
+        if progress_callback is None:
+            deleted = cleanup(retention_days)
+        else:
+            deleted = cleanup(retention_days, progress_callback=progress_callback)
+        table_counts = deleted if isinstance(deleted, dict) else {'records': deleted}
+        numeric_counts = [
+            value for value in table_counts.values()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        deleted_count = sum(numeric_counts) if len(numeric_counts) == len(table_counts) else None
+        return {
+            'scope': scope,
+            'label': label,
+            'status': 'success',
+            'retention_days': retention_days,
+            'deleted_count': deleted_count,
+            'table_deleted_counts': table_counts,
+        }
+    except Exception as exc:
+        logger.exception('数据清理阶段失败: scope=%s', scope)
+        return {
+            'scope': scope,
+            'label': label,
+            'status': 'error',
+            'retention_days': retention_days,
+            'deleted_count': None,
+            'table_deleted_counts': {},
+            'error': format_job_error(exc),
+        }
+
+
+@scheduled_job('cron', hour=0, minute=20, id='cleanup_data_job')
+def scheduled_cleanup_data():
+    """Clean retained market data, Smart Money snapshots, and run logs."""
+    started_at = time.perf_counter()
+    job_id = 'cleanup_data_job'
+    _mark_job_started(job_id)
+    _mark_job_progress(job_id, 'cleanup_started', '数据清理开始')
+    logger.info('')
+    logger.info(
+        '[数据清理] 开始 | 行情保留 %d 天 | 聪明钱保留 %d 天 | 运行日志保留 %d 天',
+        MARKET_DATA_RETENTION_DAYS,
+        SMART_MONEY_RETENTION_DAYS,
+        TASK_RUN_HISTORY_RETENTION_DAYS,
+    )
+    logger.info('')
+    try:
+        scopes = [
+            _cleanup_scope(
+                'market_data',
+                '行情',
+                MARKET_DATA_RETENTION_DAYS,
+                cleanup_expired_market_data,
+                progress_callback=_record_cleanup_progress,
+            ),
+            _cleanup_scope(
+                'smart_money',
+                '聪明钱',
+                SMART_MONEY_RETENTION_DAYS,
+                cleanup_expired_smart_money_data,
+                progress_callback=_record_cleanup_progress,
+            ),
+            _cleanup_scope(
+                'run_logs',
+                '运行日志',
+                TASK_RUN_HISTORY_RETENTION_DAYS,
+                _cleanup_run_logs,
+                progress_callback=_record_cleanup_progress,
+            ),
+        ]
+        failed_scopes = [scope for scope in scopes if scope['status'] == 'error']
+        successful_scopes = [scope for scope in scopes if scope['status'] == 'success']
+        optimize_results = []
+        optimize_errors = []
+        if failed_scopes:
+            _mark_job_progress(job_id, 'optimize_skipped', '清理存在失败，跳过表优化')
+        else:
+            table_names = [
+                name for scope in scopes for name in scope['table_deleted_counts']
+            ]
+            try:
+                optimize_results = optimize_cleaned_tables(
+                    table_names,
+                    progress_callback=lambda stage, message, **details: _mark_job_progress(
+                        job_id, stage, message, **details,
+                    ),
+                    heartbeat_callback=lambda: _heartbeat_job(job_id),
+                )
+                optimize_errors = [
+                    {'scope': 'optimize', 'label': result['table_name'], 'error': result['reason']}
+                    for result in optimize_results if result['status'] == 'error'
+                ]
+            except Exception as exc:
+                logger.exception('数据清理表优化检查失败')
+                optimize_errors = [{'scope': 'optimize', 'label': '表优化', 'error': format_job_error(exc)}]
+                _mark_job_progress(job_id, 'optimize_error', f'优化检查失败 | {format_job_error(exc)}')
+        status = 'error' if not successful_scopes else ('partial' if failed_scopes or optimize_errors else 'success')
+        known_counts = [scope['deleted_count'] for scope in successful_scopes]
+        total_deleted_count = sum(known_counts) if all(value is not None for value in known_counts) else None
+        summary = {
+            'status': status,
+            'message': {
+                'success': '数据清理完成',
+                'partial': '数据清理部分完成',
+                'error': '数据清理失败',
+            }[status],
+            'total_deleted_count': total_deleted_count,
+            'cleanup_scopes': scopes,
+            'optimize_results': optimize_results,
+            'errors': [
+                {'scope': scope['scope'], 'label': scope['label'], 'error': scope['error']}
+                for scope in failed_scopes
+            ] + optimize_errors,
+            'market_retention_days': MARKET_DATA_RETENTION_DAYS,
+            'smart_money_retention_days': SMART_MONEY_RETENTION_DAYS,
+            'run_logs_retention_days': TASK_RUN_HISTORY_RETENTION_DAYS,
+        }
+        _mark_job_finished(
+            job_id,
+            status=status,
+            summary=summary,
+            error=failed_scopes[0].get('error') if failed_scopes else (optimize_errors[0]['error'] if optimize_errors else None),
+            started_at=started_at,
+        )
+        logger.info('')
+        logger.info(
+            '[数据清理] %s | 行情 %s 条 | 聪明钱 %s 条 | 运行日志 %s 条 | 总计 %s 条 | 总耗时 %s',
+            {
+                'success': '完成',
+                'partial': '部分完成',
+                'error': '失败',
+            }.get(status, status),
+            next((scope['deleted_count'] for scope in scopes if scope['scope'] == 'market_data'), '--'),
+            next((scope['deleted_count'] for scope in scopes if scope['scope'] == 'smart_money'), '--'),
+            next((scope['deleted_count'] for scope in scopes if scope['scope'] == 'run_logs'), '--'),
+            total_deleted_count if total_deleted_count is not None else '--',
+            format_duration_ms((time.perf_counter() - started_at) * 1000),
+        )
+        logger.info('')
     except Exception as e:
-        _mark_job_finished('cleanup_task_run_history_job', status='error', error=e, started_at=started_at)
-        logger.error('定时任务历史清理失败: %s', e)
+        _mark_job_finished(job_id, status='error', error=e, started_at=started_at)
+        logger.info('')
+        logger.error(
+            '[数据清理] 失败 | 错误=%s | 总耗时 %s',
+            str(e),
+            format_duration_ms((time.perf_counter() - started_at) * 1000),
+        )
+        logger.info('')
         logger.exception(e)
 
 
@@ -1125,6 +1346,7 @@ def start_scheduler():
         paused_job_ids = _get_persisted_paused_job_ids()
         scheduler.start(paused=True)
         try:
+            _remove_obsolete_cleanup_jobs()
             _restore_persisted_paused_jobs(paused_job_ids)
         finally:
             scheduler.resume()

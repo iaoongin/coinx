@@ -32,6 +32,7 @@
 | 调度任务运行记录 | `success` | 成功 | 本次任务完成，未发现未处理结果 |
 | 调度任务运行记录 | `partial` | 部分成功 | 本次任务已执行结束，但仍有跳过项、缺口、未写入记录或部分失败 |
 | 调度任务运行记录 | `error` | 失败 | 任务执行过程发生异常或服务中断 |
+| 调度任务运行记录 | `timeout` | 已超时 | 超过 `TASK_RUN_STALE_TIMEOUT_SECONDS` 未更新心跳；页面按超时展示，原始记录仍保留用于排查 |
 | 单个采集项 | `success` | 成功 | 当前币种、交易所和序列类型的数据已采集并写入 |
 | 单个采集项 | `skipped` | 跳过 | 因接口能力、无数据或预检结果等原因未执行写入 |
 | 单个采集项 | `error` | 失败 | 当前采集项请求或处理失败 |
@@ -39,6 +40,8 @@
 `partial_success` 是修补阶段内部汇总状态，合并到调度任务运行记录后统一为 `partial`，页面统一显示为“部分成功”。“历史缺口未全部补齐”等文字属于结果原因说明，不是独立状态值。
 
 任务控制状态（例如 `paused`、`ready`、`offline`）描述的是调度器或任务注册状态，不代表本次运行结果。
+
+长任务在每个可观测进度点更新心跳。服务启动时会把上次遗留的 `running` 记录标记为 `error`；页面读取到超过心跳阈值但尚未完成的记录时显示为 `timeout`，避免服务中断或任务卡住后长期显示为“运行中”。
 
 ## 任务清单
 
@@ -48,6 +51,7 @@
 | `repair_market_rolling_job` | `scheduled_repair_market_rolling` | 滚动修补 | `interval`，每 `REPAIR_TRACKED_INTERVAL` 秒 | 滚动修补市场币种最新序列 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
 | `repair_market_history_job` | `scheduled_repair_market_history` | 历史补齐 | `interval`，每 `REPAIR_HISTORY_INTERVAL` 秒 | 按 `REPAIR_HISTORY_SYMBOL_BATCH_SIZE` 分批补市场币种历史缺口，并按记录数或时间增量刷写 | 跟踪币 + 成交额前 N | `klines`（历史 K 线）、`open_interest_hist`（历史持仓量）、`taker_buy_sell_vol`（主动买卖成交量，按交易所能力） | 是 |
 | `update_coins_config_job` | `scheduled_coins_config_update` | 配置刷新 | `cron`，每天 `00:00` | 刷新跟踪币配置 | 币种配置 | 跟踪币配置列表 | 否 |
+| `cleanup_data_job` | `scheduled_cleanup_data` | 数据清理 | `cron`，每天 `00:20` | 清理超过保留期限的行情数据、聪明钱快照和运行日志 | 全部已落库数据 | 行情数据 15 天、聪明钱 15 天、运行日志 15 天 | 否 |
 
 ## 启动期补全任务
 
@@ -113,6 +117,31 @@
 - 这个任务不是数据修补任务
 - 但它会影响数据修补任务的目标币池
 
+### 5. `cleanup_data_job`
+
+- 任务类型：数据清理
+- 主要作用：统一删除超过保留期限的数据
+- 触发方式：每天 `00:20`
+- 保留策略：
+  - 行情数据：15 天
+  - 聪明钱快照：15 天
+  - 运行日志：15 天
+- 清理范围：
+  - 行情快照、ticker、K 线、持仓量、主动买卖成交量、资金费率
+  - 合约聪明钱快照
+  - `scheduled_job_runs` 任务运行记录
+
+说明：
+
+- 三类数据在同一个任务中按各自数据表清理。
+- 聪明钱快照不再纳入普通行情清理列表，避免保留策略重复执行。
+- 某一类清理失败时，其他类别继续执行，最终状态记录为“部分成功”。
+- 全部清理成功后，按表的 `DATA_FREE / (DATA_LENGTH + INDEX_LENGTH + DATA_FREE)` 检查空闲比例；超过 `DATA_CLEANUP_OPTIMIZE_FREE_PERCENT`（默认 10%）的独立表空间才考虑执行 `OPTIMIZE TABLE`。这是估算值，可能漏掉页内碎片。
+- 优化前使用无缓存的 MySQL 统计，并检查数据盘和临时盘空间；每个盘需至少有表数据及索引估算大小的 1.2 倍，加上 `DATA_CLEANUP_OPTIMIZE_RESERVE_GB`（默认 5 GiB）。这只是保守估算，不保证重建一定有足够空间。
+- `DATA_CLEANUP_OPTIMIZE_DATADIR_PATH` 须指向应用可读取的 MySQL 数据目录映射，程序通过 `auto.cnf` 核对服务端 UUID；`DATA_CLEANUP_OPTIMIZE_TMPDIR_PATH` 须由部署人员显式指定为 MySQL 临时目录所在磁盘的映射。两者默认未配置，未配置或无法确认时跳过优化。部署人员负责确认临时盘映射实际对应 MySQL 的 `tmpdir` / `innodb_tmpdir`，多临时盘应分别评估；外部 MySQL 不可使用应用本地磁盘冒充数据库磁盘。
+- MySQL 用户需要有读取 `information_schema.INNODB_TABLES` 的 `PROCESS` 权限，以及执行目标表 `OPTIMIZE TABLE` 所需的表权限；无法读取表空间信息时跳过该表。
+- 优化逐表执行；跳过、失败和完成记录到运行日志。清理有失败时跳过全部优化，优化失败时任务记为“部分成功”。
+
 ## 已移除的重复任务
 
 以下任务已被统一能力覆盖，因此不再保留：
@@ -121,6 +150,8 @@
 |---|---|---|
 | `repair_tracked_rolling_job` | 只修跟踪币最新点 | `repair_market_rolling_job` |
 | `repair_top_volume_job` | 只修成交额前 N 最新点 | `repair_market_rolling_job` |
+| `cleanup_market_data_job` | 清理行情数据和聪明钱数据 | `cleanup_data_job` |
+| `cleanup_task_run_history_job` | 清理任务运行日志 | `cleanup_data_job` |
 
 说明：
 
@@ -152,6 +183,7 @@
 - 一个统一滚动修补任务：`repair_market_rolling_job`
 - 一个统一历史补齐任务：`repair_market_history_job`
 - 一个配置刷新任务：`update_coins_config_job`
+- 一个统一数据清理任务：`cleanup_data_job`
 - 一个启动即执行一次的市场补全任务：`start_startup_repair`
 
 这样就能快速区分：

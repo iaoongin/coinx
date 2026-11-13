@@ -50,7 +50,7 @@ market_futures_smart_money_signal  market_futures_smart_money_stats
 | 采集周期 | `15m` |
 | 重点合约详情 | Phase 1 不启用，后续再配置 |
 | 请求并发 | 全局 1-2 个，带随机间隔；不要按币种大并发 |
-| 保存周期 | 默认 90 天，按独立配置控制 |
+| 保存周期 | 默认 15 天，按独立配置控制 |
 | 历史补齐 | 不支持接口级补齐；接口只返回当前状态，失败时保留缺口 |
 | 写入后端 | 复用 `MARKET_BACKEND`：MySQL 或 ClickHouse |
 
@@ -100,7 +100,7 @@ SMART_MONEY_TIME_RANGES=30m,ALL
 SMART_MONEY_FOCUS_ENABLED=false
 SMART_MONEY_FOCUS_INTERVAL=300
 SMART_MONEY_FOCUS_SYMBOLS=BTCUSDT,ETHUSDT
-SMART_MONEY_RETENTION_DAYS=90
+SMART_MONEY_RETENTION_DAYS=15
 SMART_MONEY_REQUEST_TIMEOUT_SECONDS=20
 SMART_MONEY_MAX_WORKERS=1
 SMART_MONEY_JITTER_SECONDS=3
@@ -545,17 +545,17 @@ smart_money.snapshot_time <= as_of_ms
 
 ## 8. 保留和容量估算
 
-设每个窗口返回 `N` 个 symbol，15 分钟采集、90 天的列表表容量为：
+设每个窗口返回 `N` 个 symbol，15 分钟采集、15 天的列表表容量为：
 
 ```text
-N symbols × 2 windows × 96 snapshots/day × 90 days
+N symbols × 2 windows × 96 snapshots/day × 15 days
 ```
 
 以当前约 745 行计算：
 
 ```text
-745 symbols × 2 windows × 96 snapshots/day × 90 days
-= 12,873,600 rows
+745 symbols × 2 windows × 96 snapshots/day × 15 days
+= 2,145,600 rows
 ```
 
 这还不包含 `overview`、`stats` 详情表、重试重复写入和索引开销。
@@ -564,8 +564,8 @@ N symbols × 2 windows × 96 snapshots/day × 90 days
 
 - ClickHouse 作为长期查询和历史分析主存储；
 - MySQL 保持同样的数据表以兼容当前市场写入切换和小规模部署；
-- `raw_json` 保留 30-90 天，若 MySQL 体积压力明显，可后续将 raw payload 单独迁移到 ClickHouse；
-- 沿用 `MARKET_DATA_RETENTION_DAYS` 或新增 `SMART_MONEY_RETENTION_DAYS`，不把该表遗漏在清理任务之外；
+- `raw_json` 与聪明钱快照统一保留 15 天，若 MySQL 体积压力明显，可后续将 raw payload 单独迁移到 ClickHouse；
+- 使用 `SMART_MONEY_RETENTION_DAYS=15`，并由统一数据清理任务处理，不把该表遗漏在清理任务之外；
 - 不做历史接口补采，因为上游没有按时间查询能力。
 
 ## 9. 分阶段实施
@@ -577,7 +577,7 @@ N symbols × 2 windows × 96 snapshots/day × 90 days
 - 增加 15m 全量列表定时任务；
 - 支持 MySQL、ClickHouse 两种写入后端；
 - 记录各窗口返回行数、失败信息和详情采集摘要；
-- 增加 90 天清理。
+- 增加 15 天清理，并与行情数据、运行日志合并到统一数据清理任务。
 
 验收：连续运行 24 小时，成功率、重复数、失败数和表行数可核对；同一周期手动重跑不产生重复业务记录。
 
