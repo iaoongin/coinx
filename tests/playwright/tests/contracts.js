@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { name: '对冲计算器', href: '/hedge-calculator' },
   { name: '币种配置', href: '/coins-config' },
   { name: '任务管理', href: '/task-jobs' },
+  { name: '数据存储', href: '/database-stats' },
   { name: '资金费率', href: '/funding-rate' },
 ];
 

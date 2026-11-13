@@ -248,6 +248,8 @@ http://127.0.0.1:5000
   - 单币详情
 - `/notification-management`
   - 通知渠道与告警规则管理；规则详情按需查看状态、评估记录和投递记录
+- `/database-stats`
+  - MySQL 数据存储统计页面
 
 ### RSS monitoring
 
@@ -275,6 +277,8 @@ Automatic RSS polling uses `RSS_ENABLED` and `RSS_POLL_INTERVAL`, and also requi
   - 切换币种跟踪状态
 - `POST /api/coins-config/update-from-binance`
   - 从 Binance 同步最新交易对列表
+- `GET /api/database-stats`
+  - 获取当前 MySQL 各表行数估算、数据空间、索引空间和空闲空间
 
 ## Project Structure
 

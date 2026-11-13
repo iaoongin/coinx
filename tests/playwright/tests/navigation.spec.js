@@ -1,7 +1,7 @@
 const { test, expect } = require('./fixtures');
 const { NAV_ITEMS, navLinks, visit } = require('./contracts');
 
-const pages = ['/', '/legacy-home', '/market-rank', '/open-interest', '/market-structure-score', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs', '/funding-rate'];
+const pages = ['/', '/legacy-home', '/market-rank', '/open-interest', '/market-structure-score', '/hedge-calculator', '/coins-config', '/coin-detail?symbol=BTCUSDT', '/task-jobs', '/database-stats', '/funding-rate'];
 
 const NAV_MENU_BY_PATH = {
   '/legacy-home': '市场',
@@ -13,6 +13,7 @@ const NAV_MENU_BY_PATH = {
   '/hedge-calculator': '分析',
   '/coins-config': '管理',
   '/task-jobs': '管理',
+  '/database-stats': '管理',
 };
 
 async function revealNavItem(page, item) {
@@ -214,6 +215,7 @@ test.describe('导航栏契约', () => {
     await expect(page.locator('.nav-menu-list[aria-label="市场"]')).toContainText('旧首页');
     await expect(page.locator('.nav-menu-list[aria-label="分析"]')).toContainText('结构评分');
     await expect(page.locator('.nav-menu-list[aria-label="管理"]')).toContainText('币种配置');
+    await expect(page.locator('.nav-menu-list[aria-label="管理"]')).toContainText('数据存储');
   });
 
   test('导航链接文本和 href 稳定', async ({ page }) => {

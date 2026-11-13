@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS market_futures_smart_money_signal (
     UNIQUE KEY uk_fsm_signal_scope (exchange, time_range, symbol, period, snapshot_time),
     KEY idx_fsm_signal_symbol_time (symbol, time_range, period, snapshot_time),
     KEY idx_fsm_signal_snapshot_time (snapshot_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='币安合约聪明钱 signal/list 全量列表快照';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='聪明钱快照';
 
 -- 行情快照原始数据表
 CREATE TABLE IF NOT EXISTS market_tickers (
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS market_tickers (
     KEY idx_close_time (close_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='行情快照原始数据表';
 
--- 多交易所持仓量历史数据表
+-- 持仓量历史
 CREATE TABLE IF NOT EXISTS market_open_interest_hist (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
     exchange VARCHAR(20) NOT NULL COMMENT '交易所标识，例如 binance、okx',
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS market_open_interest_hist (
     UNIQUE KEY uk_moih_exchange_symbol_period_time (exchange, symbol, period, event_time),
     KEY idx_moih_symbol_period_exchange_time (symbol, period, exchange, event_time),
     KEY idx_moih_event_time (event_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所持仓量历史数据表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='持仓量历史';
 
 -- 多交易所K线历史数据表
 CREATE TABLE IF NOT EXISTS market_klines (
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS market_klines (
     KEY idx_mk_close_time (close_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所K线历史数据表';
 
--- 多交易所主动买入卖出量历史数据表
+-- 主动买卖历史
 CREATE TABLE IF NOT EXISTS market_taker_buy_sell_vol (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
     exchange VARCHAR(20) NOT NULL COMMENT '交易所标识，例如 binance、okx',
@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS market_taker_buy_sell_vol (
     UNIQUE KEY uk_mtbsv_exchange_symbol_period_time (exchange, symbol, period, event_time),
     KEY idx_mtbsv_symbol_period_exchange_time (symbol, period, exchange, event_time),
     KEY idx_mtbsv_event_time (event_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多交易所主动买入卖出量历史数据表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='主动买卖历史';
 
 -- 资金费率历史表
 CREATE TABLE IF NOT EXISTS market_funding_rate (
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS notification_channels (
     key_version VARCHAR(30) NOT NULL DEFAULT 'v1' COMMENT '配置加密密钥版本',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='加密通知渠道配置';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通知渠道';
 
 CREATE TABLE IF NOT EXISTS alert_rules (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS alert_states (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '状态更新时间',
     UNIQUE KEY uk_alert_state (rule_id, subject_key, dimension_key),
     KEY idx_alert_states_rule (rule_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警状态与去重';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警状态';
 
 CREATE TABLE IF NOT EXISTS notification_deliveries (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS alert_evaluation_metrics (
     created_at DATETIME NULL COMMENT '指标记录创建时间',
     UNIQUE KEY uk_alert_evaluation_metric_run (run_id),
     KEY idx_alert_evaluation_metrics_run (run_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警评估耗时指标';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警评估指标';
 
 -- RSS订阅源配置与文章记录，属于MySQL控制面数据，不迁移到ClickHouse。
 CREATE TABLE IF NOT EXISTS rss_subscriptions (

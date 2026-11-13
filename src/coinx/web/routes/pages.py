@@ -99,6 +99,13 @@ def task_jobs():
     return render_template('task_jobs.html')
 
 
+@pages_bp.route('/database-stats')
+def database_stats():
+    """数据库存储统计页面"""
+    logger.info("访问数据库存储统计页面")
+    return render_template('database_stats.html')
+
+
 @pages_bp.route('/notification-management')
 def notification_management():
     """告警与通知管理页面。"""

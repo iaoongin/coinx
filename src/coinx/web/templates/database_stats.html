@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#101114">
+  <title>数据存储 - CoinX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  {% include 'components/pwa_head.html' %}
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    html { color-scheme: dark; }
+
+    body {
+      margin: 0;
+      padding: var(--page-padding, 20px);
+      overflow-x: hidden;
+      background: var(--bg-primary, #101114);
+      color: var(--text-primary, #f4f4f5);
+      font-family: var(--font-sans);
+    }
+
+    .page-frame {
+      width: 100%;
+      max-width: var(--page-max-width);
+      box-sizing: border-box;
+      margin: 0 auto;
+      padding-bottom: 28px;
+    }
+
+    .page-frame .nav-container { width: 100%; box-sizing: border-box; }
+
+    .shell {
+      padding: 20px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--page-surface-radius);
+      background: var(--bg-card);
+      box-shadow: var(--shadow-card);
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .eyebrow {
+      color: var(--gold-primary);
+      font-family: var(--font-mono);
+      font-size: var(--font-size-sm);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1 { margin: 6px 0 5px; font-size: var(--font-size-2xl); line-height: 1.25; }
+
+    .subtitle {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: var(--font-size-md);
+    }
+
+    .header-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: var(--font-size-sm);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .refresh-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--border-default);
+      border-radius: 7px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      cursor: pointer;
+      font: 600 12px var(--font-sans);
+    }
+
+    .refresh-button:hover { border-color: var(--border-strong); color: var(--gold-bright); }
+    .refresh-button:disabled { cursor: wait; opacity: .6; }
+    .refresh-icon { width: 14px; height: 14px; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .stat {
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .02);
+    }
+
+    .stat-label { color: var(--text-muted); font-size: var(--font-size-sm); }
+    .stat-value { margin-top: 5px; color: var(--text-primary); font: 700 var(--font-size-lg) var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stat-value.accent { color: var(--gold-bright); }
+
+    .notice {
+      margin-bottom: 18px;
+      padding: 9px 11px;
+      border-left: 2px solid var(--gold-primary);
+      background: var(--gold-subtle);
+      color: var(--text-secondary);
+      font-size: var(--font-size-sm);
+      line-height: 1.6;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .section-heading h2 { margin: 0; font-size: var(--font-size-lg); }
+    .section-heading span { color: var(--text-muted); font-size: var(--font-size-sm); }
+    .table-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .search-input {
+      width: min(320px, 100%);
+      height: 32px;
+      box-sizing: border-box;
+      padding: 0 10px;
+      border: 1px solid var(--border-default);
+      border-radius: 7px;
+      outline: none;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font: 12px var(--font-sans);
+    }
+
+    .search-input:focus { border-color: var(--gold-primary); box-shadow: 0 0 0 3px var(--gold-dim); }
+    .table-count { color: var(--text-muted); font: 11px var(--font-mono); }
+
+    .table-shell { overflow: hidden; border: 1px solid var(--border-default); border-radius: 8px; background: rgba(255, 255, 255, .015); }
+    .table-scroll { overflow-x: auto; }
+    .storage-table { width: 100%; min-width: 1040px; border-collapse: collapse; table-layout: fixed; }
+    .storage-table th { padding: 10px 9px; border-bottom: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-muted); font: 600 11px var(--font-mono); text-align: left; white-space: nowrap; }
+    .storage-table td { padding: 10px 9px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; vertical-align: top; }
+    .storage-table th:first-child, .storage-table th:nth-child(2), .storage-table td:first-child, .storage-table td:nth-child(2) { text-align: left; }
+    .storage-table th:nth-child(n+3), .storage-table td.number-cell { text-align: right; }
+    .storage-table tbody tr:hover { background: rgba(255, 255, 255, .025); }
+    .storage-table tbody tr:last-child td { border-bottom: 0; }
+    .table-name { overflow: hidden; color: var(--text-secondary); font: 600 13px var(--font-sans); letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
+    .table-comment { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .number-cell { color: var(--text-primary); font-family: var(--font-mono); text-align: right; white-space: nowrap; }
+    .sort-button { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+    .sort-button:hover { color: var(--gold-bright); }
+    .sort-icon { display: inline-block; min-width: 10px; color: var(--gold-primary); font-family: var(--font-sans); font-size: 12px; line-height: 1; opacity: 0; }
+    .sort-icon.active { opacity: 1; }
+    .sort-button:hover .sort-icon { opacity: .75; }
+
+    .empty-state, .error-state { padding: 36px 16px; color: var(--text-muted); text-align: center; }
+    .error-state { color: var(--negative); }
+
+    @media (max-width: 1100px) {
+      .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      body { padding: 10px; }
+      .shell { padding: 14px; }
+      .page-header { flex-direction: column; }
+      .header-meta { align-items: flex-start; text-align: left; white-space: normal; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat:last-child { grid-column: 1 / -1; }
+      .table-toolbar { align-items: stretch; flex-direction: column; }
+      .search-input { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-frame">
+    {% include 'components/nav.html' %}
+
+    <main id="app" class="shell">
+      <header class="page-header">
+        <div>
+          <div class="eyebrow">MySQL Storage</div>
+          <h1>数据存储</h1>
+          <p class="subtitle">查看当前数据库各表的行数估算与空间占用。</p>
+        </div>
+        <div class="header-meta">
+          <span v-if="stats">数据库：[[ stats.database || '--' ]]</span>
+          <span v-if="stats">更新于：[[ formatTime(stats.refreshed_at_ms) ]]</span>
+          <span v-if="stats">查询耗时：[[ formatDuration(stats.query_duration_ms) ]]</span>
+          <button class="refresh-button" type="button" @click="loadStats" :disabled="loading" aria-label="刷新数据存储统计" title="刷新数据存储统计">
+            <svg class="refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 11a8.1 8.1 0 0 0-15.5-2A8 8 0 0 0 12 20a8 8 0 0 0 7.5-5"></path>
+              <path d="M20 4v7h-7"></path>
+            </svg>
+            [[ loading ? '加载中' : '刷新' ]]
+          </button>
+        </div>
+      </header>
+
+      <div class="notice">
+        行数来自 MySQL <code>information_schema.TABLES</code>，InnoDB 下属于估算值；占用空间为数据空间与索引空间之和，空闲空间仅作为碎片参考。
+      </div>
+
+      <div v-if="loading && !stats" class="empty-state">正在读取数据库统计...</div>
+      <div v-else-if="errorMessage" class="error-state">[[ errorMessage ]]</div>
+      <template v-else-if="stats">
+        <section class="stats-grid" aria-label="存储摘要">
+          <div class="stat"><div class="stat-label">表总数</div><div class="stat-value accent">[[ formatNumber(stats.summary.table_count) ]]</div></div>
+          <div class="stat"><div class="stat-label">估算总行数</div><div class="stat-value">[[ formatNumber(stats.summary.estimated_rows) ]]</div></div>
+          <div class="stat"><div class="stat-label">数据空间</div><div class="stat-value">[[ formatBytes(stats.summary.data_bytes) ]]</div></div>
+          <div class="stat"><div class="stat-label">索引空间</div><div class="stat-value">[[ formatBytes(stats.summary.index_bytes) ]]</div></div>
+          <div class="stat"><div class="stat-label">已用 / 空闲</div><div class="stat-value">[[ formatBytes(stats.summary.used_bytes) ]] / [[ formatBytes(stats.summary.free_bytes) ]]</div></div>
+        </section>
+
+        <section aria-labelledby="table-heading">
+          <div class="section-heading">
+            <h2 id="table-heading">表明细</h2>
+            <span>空闲率 = 空闲空间 /（已用空间 + 空闲空间）</span>
+          </div>
+          <div class="table-toolbar">
+            <input v-model.trim="keyword" class="search-input" type="search" placeholder="搜索表名或表注释" aria-label="搜索表名或表注释">
+            <span class="table-count">显示 [[ filteredTables.length ]] / [[ stats.tables.length ]] 张表</span>
+          </div>
+          <div v-if="filteredTables.length" class="table-shell">
+            <div class="table-scroll">
+              <table class="storage-table">
+                <colgroup>
+                  <col style="width: 18%;"><col style="width: 18%;"><col style="width: 15%;"><col style="width: 11%;"><col style="width: 12%;"><col style="width: 12%;"><col style="width: 8%;"><col style="width: 6%;">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th :aria-sort="ariaSort('table_name')"><button class="sort-button" type="button" @click="setSort('table_name')">表名 <span class="sort-icon" :class="{ active: sortKey === 'table_name' }" aria-hidden="true">[[ sortMark('table_name') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('table_comment')"><button class="sort-button" type="button" @click="setSort('table_comment')">表注释 <span class="sort-icon" :class="{ active: sortKey === 'table_comment' }" aria-hidden="true">[[ sortMark('table_comment') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('used_bytes')"><button class="sort-button" type="button" @click="setSort('used_bytes')">已用空间 <span class="sort-icon" :class="{ active: sortKey === 'used_bytes' }" aria-hidden="true">[[ sortMark('used_bytes') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('estimated_rows')"><button class="sort-button" type="button" @click="setSort('estimated_rows')">行数 <span class="sort-icon" :class="{ active: sortKey === 'estimated_rows' }" aria-hidden="true">[[ sortMark('estimated_rows') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('data_bytes')"><button class="sort-button" type="button" @click="setSort('data_bytes')">数据空间 <span class="sort-icon" :class="{ active: sortKey === 'data_bytes' }" aria-hidden="true">[[ sortMark('data_bytes') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('index_bytes')"><button class="sort-button" type="button" @click="setSort('index_bytes')">索引空间 <span class="sort-icon" :class="{ active: sortKey === 'index_bytes' }" aria-hidden="true">[[ sortMark('index_bytes') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('free_bytes')"><button class="sort-button" type="button" @click="setSort('free_bytes')">空闲空间 <span class="sort-icon" :class="{ active: sortKey === 'free_bytes' }" aria-hidden="true">[[ sortMark('free_bytes') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('free_percent')"><button class="sort-button" type="button" @click="setSort('free_percent')">空闲率 <span class="sort-icon" :class="{ active: sortKey === 'free_percent' }" aria-hidden="true">[[ sortMark('free_percent') ]]</span></button></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="table in filteredTables" :key="table.table_name">
+                    <td><div class="table-name" :title="table.table_name">[[ table.table_name ]]</div></td>
+                    <td><div class="table-comment" :title="table.table_comment || '--'">[[ table.table_comment || '--' ]]</div></td>
+                    <td class="number-cell">[[ formatBytes(table.used_bytes) ]]</td>
+                    <td class="number-cell">[[ formatNumber(table.estimated_rows) ]]</td>
+                    <td class="number-cell">[[ formatBytes(table.data_bytes) ]]</td>
+                    <td class="number-cell">[[ formatBytes(table.index_bytes) ]]</td>
+                    <td class="number-cell">[[ formatBytes(table.free_bytes) ]]</td>
+                    <td class="number-cell">[[ formatPercent(table.free_percent) ]]</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div v-else class="empty-state">没有匹配的表。</div>
+        </section>
+      </template>
+    </main>
+  </div>
+
+  <script>
+    const { createApp, computed, onMounted, ref } = Vue;
+
+    createApp({
+      delimiters: ['[[', ']]'],
+      setup() {
+        const stats = ref(null);
+        const loading = ref(false);
+        const errorMessage = ref('');
+        const keyword = ref('');
+        const sortKey = ref('used_bytes');
+        const sortDirection = ref('desc');
+
+        const formatNumber = (value) => value === null || value === undefined ? '--' : Number(value).toLocaleString('zh-CN');
+        const formatBytes = (value) => {
+          if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
+          const bytes = Number(value);
+          if (bytes < 1024) return `${bytes} B`;
+          const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+          let amount = bytes;
+          let unitIndex = -1;
+          while (amount >= 1024 && unitIndex < units.length - 1) {
+            amount /= 1024;
+            unitIndex += 1;
+          }
+          const digits = amount >= 100 ? 0 : amount >= 10 ? 1 : 2;
+          return `${amount.toFixed(digits)} ${units[unitIndex]}`;
+        };
+        const formatPercent = (value) => value === null || value === undefined ? '--' : `${Number(value).toFixed(2)}%`;
+        const formatTime = (value) => value ? new Date(value).toLocaleString('zh-CN') : '--';
+        const formatDuration = (value) => value === null || value === undefined ? '--' : `${Number(value).toFixed(0)}ms`;
+
+        const isMissing = (value) => value === null || value === undefined || value === '';
+        const compareSortValues = (leftValue, rightValue) => {
+          if (typeof leftValue === 'string' || typeof rightValue === 'string') {
+            return String(leftValue).localeCompare(String(rightValue), 'zh-CN', { numeric: true, sensitivity: 'base' });
+          }
+          return Number(leftValue) - Number(rightValue);
+        };
+
+        const filteredTables = computed(() => {
+          if (!stats.value) return [];
+          const term = keyword.value.toLowerCase();
+          return [...stats.value.tables]
+            .filter((table) => !term || `${table.table_name} ${table.table_comment}`.toLowerCase().includes(term))
+            .sort((left, right) => {
+              const leftValue = left[sortKey.value];
+              const rightValue = right[sortKey.value];
+              const leftMissing = isMissing(leftValue);
+              const rightMissing = isMissing(rightValue);
+              if (leftMissing || rightMissing) {
+                if (leftMissing && rightMissing) return left.table_name.localeCompare(right.table_name);
+                return leftMissing ? 1 : -1;
+              }
+              const comparison = compareSortValues(leftValue, rightValue);
+              if (comparison === 0) return left.table_name.localeCompare(right.table_name);
+              return sortDirection.value === 'desc' ? -comparison : comparison;
+            });
+        });
+
+        const sortMark = (key) => sortKey.value === key ? (sortDirection.value === 'desc' ? '↓' : '↑') : '';
+        const ariaSort = (key) => sortKey.value === key ? (sortDirection.value === 'desc' ? 'descending' : 'ascending') : 'none';
+        const setSort = (key) => {
+          if (sortKey.value === key) sortDirection.value = sortDirection.value === 'desc' ? 'asc' : 'desc';
+          else { sortKey.value = key; sortDirection.value = 'desc'; }
+        };
+
+        const loadStats = async () => {
+          loading.value = true;
+          errorMessage.value = '';
+          try {
+            const response = await fetch('/api/database-stats', { coinxSuppressGlobalError: true });
+            const result = await response.json();
+            if (result.status !== 'success') throw new Error(result.message || '加载数据库统计失败');
+            stats.value = result.data;
+          } catch (error) {
+            errorMessage.value = error.message || '加载数据库统计失败';
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        onMounted(loadStats);
+        return {
+          stats, loading, errorMessage, keyword, filteredTables,
+          formatNumber, formatBytes, formatPercent, formatTime, formatDuration,
+          sortKey, sortMark, ariaSort, setSort, loadStats,
+        };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

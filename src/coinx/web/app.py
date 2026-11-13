@@ -33,6 +33,7 @@ try:
     from coinx.web.routes.api_smart_money import api_smart_money_bp
     from coinx.web.routes.api_notifications import api_notifications_bp
     from coinx.web.routes.api_rss import api_rss_bp
+    from coinx.web.routes.api_database_stats import api_database_stats_bp
 except ImportError:
     # 如果在当前目录运行，可能需要使用相对导入路径
     from routes.auth import auth_bp
@@ -43,6 +44,7 @@ except ImportError:
     from routes.api_smart_money import api_smart_money_bp
     from routes.api_notifications import api_notifications_bp
     from routes.api_rss import api_rss_bp
+    from routes.api_database_stats import api_database_stats_bp
 
 
 def create_app():
@@ -86,6 +88,7 @@ def create_app():
     app.register_blueprint(api_smart_money_bp)
     app.register_blueprint(api_notifications_bp)
     app.register_blueprint(api_rss_bp)
+    app.register_blueprint(api_database_stats_bp)
 
     @app.teardown_appcontext
     def shutdown_session(exception=None):

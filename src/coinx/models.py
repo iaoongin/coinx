@@ -25,6 +25,7 @@ SQLITE_BIGINT_PK = BigInteger().with_variant(Integer, 'sqlite')
 class Coin(Base):
 
     __tablename__ = 'coins'
+    __table_args__ = {'comment': '币种配置表'}
 
     symbol = Column(String(50), primary_key=True)
     is_tracking = Column(Boolean, default=True)
@@ -59,6 +60,7 @@ class Coin(Base):
 class MarketSnapshot(Base):
 
     __tablename__ = 'market_snapshots'
+    __table_args__ = {'comment': '市场数据快照表'}
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     batch_id = Column(String(50), nullable=False, index=True)
@@ -80,6 +82,7 @@ class MarketTickers(Base):
     __table_args__ = (
         Index('idx_mt_symbol', 'symbol'),
         Index('idx_mt_close_time', 'close_time'),
+        {'comment': '行情快照原始数据表'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -112,6 +115,7 @@ class MarketOpenInterestHist(Base):
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_moih_exchange_symbol_period_time'),
         Index('idx_moih_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
         Index('idx_moih_event_time', 'event_time'),
+        {'comment': '持仓量历史'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -133,6 +137,7 @@ class MarketKline(Base):
         UniqueConstraint('exchange', 'symbol', 'period', 'open_time', name='uk_mk_exchange_symbol_period_open_time'),
         Index('idx_mk_symbol_period_exchange_open_time', 'symbol', 'period', 'exchange', 'open_time'),
         Index('idx_mk_close_time', 'close_time'),
+        {'comment': '多交易所K线历史数据表'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -161,6 +166,7 @@ class MarketTakerBuySellVol(Base):
         UniqueConstraint('exchange', 'symbol', 'period', 'event_time', name='uk_mtbsv_exchange_symbol_period_time'),
         Index('idx_mtbsv_symbol_period_exchange_time', 'symbol', 'period', 'exchange', 'event_time'),
         Index('idx_mtbsv_event_time', 'event_time'),
+        {'comment': '主动买卖历史'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -190,7 +196,7 @@ class MarketFundingRate(Base):
         Index('idx_funding_symbol_period', 'symbol', 'period'),
         Index('idx_funding_symbol_time', 'symbol', 'event_time'),
         Index('idx_funding_event_time', 'event_time'),
-        {'comment': '资金费率历史'}
+        {'comment': '资金费率历史'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -223,6 +229,7 @@ class MarketFuturesSmartMoneySignal(Base):
             'symbol', 'time_range', 'period', 'snapshot_time',
         ),
         Index('idx_fsm_signal_snapshot_time', 'snapshot_time'),
+        {'comment': '聪明钱快照'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -250,6 +257,7 @@ class MarketFuturesSmartMoneySignal(Base):
 
 class NotificationChannel(Base):
     __tablename__ = 'notification_channels'
+    __table_args__ = {'comment': '通知渠道'}
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False, unique=True)
@@ -263,6 +271,7 @@ class NotificationChannel(Base):
 
 class AlertRule(Base):
     __tablename__ = 'alert_rules'
+    __table_args__ = {'comment': '告警规则'}
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     name = Column(String(120), nullable=False, unique=True)
@@ -279,7 +288,10 @@ class AlertRule(Base):
 
 class AlertRuleChannel(Base):
     __tablename__ = 'alert_rule_channels'
-    __table_args__ = (UniqueConstraint('rule_id', 'channel_id', name='uk_alert_rule_channel'),)
+    __table_args__ = (
+        UniqueConstraint('rule_id', 'channel_id', name='uk_alert_rule_channel'),
+        {'comment': '规则与渠道关联'},
+    )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     rule_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
@@ -289,7 +301,10 @@ class AlertRuleChannel(Base):
 
 class AlertState(Base):
     __tablename__ = 'alert_states'
-    __table_args__ = (UniqueConstraint('rule_id', 'subject_key', 'dimension_key', name='uk_alert_state'),)
+    __table_args__ = (
+        UniqueConstraint('rule_id', 'subject_key', 'dimension_key', name='uk_alert_state'),
+        {'comment': '告警状态'},
+    )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     rule_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
@@ -306,6 +321,7 @@ class AlertState(Base):
 
 class NotificationDelivery(Base):
     __tablename__ = 'notification_deliveries'
+    __table_args__ = {'comment': '通知发送记录'}
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     rule_id = Column(SQLITE_BIGINT_PK, nullable=True, index=True)
@@ -321,6 +337,7 @@ class NotificationDelivery(Base):
 
 class AlertEvaluationRun(Base):
     __tablename__ = 'alert_evaluation_runs'
+    __table_args__ = {'comment': '告警规则评估记录'}
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     rule_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
@@ -338,7 +355,10 @@ class AlertEvaluationMetric(Base):
     """Persist timing details separately so existing run rows need no migration."""
 
     __tablename__ = 'alert_evaluation_metrics'
-    __table_args__ = (UniqueConstraint('run_id', name='uk_alert_evaluation_metric_run'),)
+    __table_args__ = (
+        UniqueConstraint('run_id', name='uk_alert_evaluation_metric_run'),
+        {'comment': '告警评估指标'},
+    )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     run_id = Column(SQLITE_BIGINT_PK, nullable=False, index=True)
@@ -355,6 +375,7 @@ class ScheduledJobRun(Base):
         Index('idx_scheduled_job_runs_job_started_id', 'job_id', 'started_at', 'id'),
         Index('idx_scheduled_job_runs_started_at', 'started_at'),
         Index('idx_scheduled_job_runs_status_heartbeat', 'status', 'heartbeat_at'),
+        {'comment': '定时任务执行记录'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -376,6 +397,7 @@ class RssSubscription(Base):
     __table_args__ = (
         Index('idx_rss_subscriptions_enabled', 'enabled'),
         Index('idx_rss_subscriptions_monitor_enabled', 'monitor_enabled'),
+        {'comment': 'RSS订阅源配置'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
@@ -401,6 +423,7 @@ class RssArticle(Base):
         UniqueConstraint('subscription_id', 'guid', name='uk_rss_article_subscription_guid'),
         Index('idx_rss_articles_subscription_published', 'subscription_id', 'published_at'),
         Index('idx_rss_articles_published', 'published_at'),
+        {'comment': 'RSS文章记录'},
     )
 
     id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)

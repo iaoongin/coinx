@@ -417,6 +417,64 @@ const test = base.extend({
         return;
       }
 
+      if (pathname === '/api/database-stats') {
+        await route.fulfill(jsonResponse({
+          status: 'success',
+          message: '数据库存储统计加载成功',
+          data: {
+            database: 'coinx',
+            refreshed_at_ms: 1711526400000,
+            query_duration_ms: 8,
+            summary: {
+              table_count: 3,
+              estimated_rows: 1234567,
+              estimated_row_tables: 3,
+              data_bytes: 2147483648,
+              index_bytes: 536870912,
+              used_bytes: 2684354560,
+              free_bytes: 134217728,
+              total_bytes: 2818572288,
+              free_percent: 4.76,
+              largest_table_name: 'market_klines',
+              largest_table_used_bytes: 2147483648,
+            },
+            tables: [
+              {
+                table_name: 'market_klines',
+                table_comment: '多交易所K线历史数据表',
+                estimated_rows: 900000,
+                data_bytes: 1717986918,
+                index_bytes: 429496730,
+                used_bytes: 2147483648,
+                free_bytes: 67108864,
+                free_percent: 3.03,
+              },
+              {
+                table_name: 'market_futures_smart_money_signal',
+                table_comment: '聪明钱快照',
+                estimated_rows: 300000,
+                data_bytes: 322122547,
+                index_bytes: 80530636,
+                used_bytes: 402653183,
+                free_bytes: 33554432,
+                free_percent: 7.69,
+              },
+              {
+                table_name: 'scheduled_job_runs',
+                table_comment: '定时任务执行记录',
+                estimated_rows: 134567,
+                data_bytes: 107374183,
+                index_bytes: 26843546,
+                used_bytes: 134217729,
+                free_bytes: 33554432,
+                free_percent: 20,
+              },
+            ],
+          },
+        }));
+        return;
+      }
+
       if (pathname === '/api/funding-rate/history/BTCUSDT') {
         await route.fulfill(jsonResponse({
           status: 'success',
