@@ -19,6 +19,7 @@ from coinx.models import (
     AlertRule,
     AlertRuleChannel,
     AlertState,
+    MarketCoinglassGlobalAsset,
     MarketFundingRate,
     MarketFuturesSmartMoneySignal,
     MarketKline,
@@ -31,6 +32,7 @@ from coinx.models import (
 )
 
 TEST_TABLES = [
+    MarketCoinglassGlobalAsset.__table__,
     MarketFundingRate.__table__,
     MarketFuturesSmartMoneySignal.__table__,
     MarketOpenInterestHist.__table__,

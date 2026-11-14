@@ -31,6 +31,7 @@ try:
     from coinx.web.routes.api_config import api_config_bp
     from coinx.web.routes.api_funding_rate import api_funding_rate_bp
     from coinx.web.routes.api_smart_money import api_smart_money_bp
+    from coinx.web.routes.api_coinglass_global_assets import api_coinglass_global_assets_bp
     from coinx.web.routes.api_notifications import api_notifications_bp
     from coinx.web.routes.api_rss import api_rss_bp
     from coinx.web.routes.api_database_stats import api_database_stats_bp
@@ -42,6 +43,7 @@ except ImportError:
     from routes.api_config import api_config_bp
     from routes.api_funding_rate import api_funding_rate_bp
     from routes.api_smart_money import api_smart_money_bp
+    from routes.api_coinglass_global_assets import api_coinglass_global_assets_bp
     from routes.api_notifications import api_notifications_bp
     from routes.api_rss import api_rss_bp
     from routes.api_database_stats import api_database_stats_bp
@@ -86,6 +88,7 @@ def create_app():
     app.register_blueprint(api_config_bp)
     app.register_blueprint(api_funding_rate_bp)
     app.register_blueprint(api_smart_money_bp)
+    app.register_blueprint(api_coinglass_global_assets_bp)
     app.register_blueprint(api_notifications_bp)
     app.register_blueprint(api_rss_bp)
     app.register_blueprint(api_database_stats_bp)

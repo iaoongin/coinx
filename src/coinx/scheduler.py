@@ -42,6 +42,8 @@ from .config import (
     TASK_RUN_STALE_TIMEOUT_SECONDS,
     TASK_RUN_HISTORY_RETENTION_DAYS,
     DATABASE_URI,
+    COINGLASS_GLOBAL_ASSETS_ENABLED,
+    COINGLASS_GLOBAL_ASSETS_INTERVAL,
 )
 from .repositories.funding_rate import collect_funding_rates
 from .repositories.smart_money import (
@@ -49,6 +51,7 @@ from .repositories.smart_money import (
     collect_and_save_smart_money_signals,
     get_smart_money_scope_symbols,
 )
+from .repositories.coinglass_global_assets import collect_and_save_global_assets
 from .repositories.homepage_series import HOMEPAGE_REQUIRED_SERIES_TYPES
 from .repositories.job_runs import (
     create_job_run,
@@ -305,6 +308,7 @@ def _mark_job_finished(job_id, status='success', summary=None, error=None, start
 def _evaluate_market_notifications(event_type):
     try:
         from .notifications import (
+            EVENT_COINGLASS_GLOBAL_ASSET,
             EVENT_FUNDING_RATE,
             EVENT_PRICE_VOLUME,
             EVENT_TRADE_OPPORTUNITY,
@@ -312,6 +316,7 @@ def _evaluate_market_notifications(event_type):
             evaluate_scheduled_rules,
         )
         event_types = {
+            'coinglass_global_assets': EVENT_COINGLASS_GLOBAL_ASSET,
             'funding_rate': EVENT_FUNDING_RATE,
             'price_volume': EVENT_PRICE_VOLUME,
             'trade_opportunity': EVENT_TRADE_OPPORTUNITY,
@@ -1096,6 +1101,47 @@ if SMART_MONEY_ENABLED:
             )
             error_message = format_job_error(e)
             logger.error('聪明钱全量列表采集失败: %s', error_message)
+
+
+if COINGLASS_GLOBAL_ASSETS_ENABLED:
+    @scheduled_job(
+        'interval',
+        seconds=COINGLASS_GLOBAL_ASSETS_INTERVAL,
+        id='collect_coinglass_global_assets_job',
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(),
+    )
+    def scheduled_collect_coinglass_global_assets():
+        """Persist one complete CoinGlass global-assets snapshot."""
+        started_at = time.perf_counter()
+        _mark_job_started('collect_coinglass_global_assets_job')
+        try:
+            summary = collect_and_save_global_assets()
+            _mark_job_finished(
+                'collect_coinglass_global_assets_job',
+                status=summary.get('status') or 'success',
+                summary=summary,
+                started_at=started_at,
+            )
+            if summary.get('status') in {'success', 'partial'}:
+                _evaluate_market_notifications('coinglass_global_assets')
+            logger.info(
+                'CoinGlass 全球资产采集完成: status=%s pages=%s written=%s snapshot_time=%s',
+                summary.get('status'),
+                summary.get('pages'),
+                summary.get('written_count'),
+                summary.get('snapshot_time'),
+            )
+        except Exception as exc:
+            _mark_job_finished(
+                'collect_coinglass_global_assets_job',
+                status='error',
+                error=exc,
+                started_at=started_at,
+            )
+            logger.error('CoinGlass 全球资产采集失败: %s', format_job_error(exc))
+            logger.exception(exc)
 
 
 @scheduled_job('cron', hour=0, minute=0, id='update_coins_config_job')

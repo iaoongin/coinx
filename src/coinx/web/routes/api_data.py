@@ -87,6 +87,7 @@ TASK_JOB_LABELS = {
     'repair_market_history_job': '低频历史补齐',
     'collect_funding_rates_job': '资金费率采集',
     'collect_smart_money_signals_job': '合约聪明钱采集',
+    'collect_coinglass_global_assets_job': 'CoinGlass 全球资产采集',
     'update_coins_config_job': '币种配置刷新',
     'cleanup_data_job': '数据清理',
 }

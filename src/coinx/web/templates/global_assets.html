@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>全球资产 · CoinX</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dark-theme.css') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='brand/coinx-mark.svg') }}">
+  {% include 'components/pwa_head.html' %}
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    html { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: var(--page-padding);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Noto Sans SC', sans-serif;
+    }
+    .page-frame { max-width: var(--page-max-width); margin: 0 auto; }
+    .page-frame .nav-container { width: 100%; }
+    #app { max-width: var(--page-max-width); margin: 14px auto 0; }
+    .shell {
+      overflow: hidden;
+      border: 1px solid var(--border-default);
+      border-radius: var(--page-surface-radius);
+      background: var(--bg-card);
+      box-shadow: var(--shadow-card);
+    }
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 20px 22px 16px;
+      border-bottom: 1px solid var(--border-default);
+      background: linear-gradient(110deg, rgba(212,175,55,.09), transparent 50%);
+    }
+    .eyebrow { margin: 0 0 7px; color: var(--gold-primary); font: 600 11px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+    .subtitle { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+    .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .sync-time { color: var(--text-muted); font: 11px var(--font-mono); white-space: nowrap; }
+    .btn, select, input {
+      min-height: 34px;
+      border: 1px solid var(--border-default);
+      border-radius: 5px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font: inherit;
+    }
+    .btn { padding: 6px 11px; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .btn:hover:not(:disabled) { border-color: var(--gold-primary); background: var(--bg-hover); }
+    .btn-primary { border-color: var(--gold-primary); background: var(--gold-primary); color: #17120a; }
+    .btn:disabled { opacity: .48; cursor: wait; }
+    input, select { width: 100%; padding: 6px 9px; }
+    input:focus-visible, select:focus-visible, .btn:focus-visible { outline: 2px solid var(--gold-primary); outline-offset: 2px; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--border-default);
+    }
+    .stat { min-width: 0; padding: 13px 18px; border-right: 1px solid var(--border-default); }
+    .stat:last-child { border-right: 0; }
+    .stat-label { color: var(--text-muted); font-size: 11px; }
+    .stat-value { overflow: hidden; margin-top: 5px; color: var(--text-primary); font: 700 18px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    .toolbar { display: grid; grid-template-columns: minmax(170px, 1.5fr) repeat(4, minmax(120px, 1fr)) auto; align-items: end; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--border-default); }
+    .toolbar input, .toolbar select, .toolbar .btn { height: 34px; min-height: 34px; font: 12px var(--font-mono); }
+    .toolbar input, .toolbar select { padding: 0 9px; }
+    .toolbar-action { display: grid; grid-template-rows: 13px 34px; gap: 4px; min-width: 0; align-self: end; }
+    .toolbar-action .field-label { margin-bottom: 0; line-height: 1.2; }
+    .toolbar-action .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 34px; min-height: 34px; padding: 0 11px; }
+    .field { min-width: 0; }
+    .field-label { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 11px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; min-width: 1320px; border-collapse: collapse; font-size: 12px; }
+    thead { position: sticky; top: 0; z-index: 1; }
+    th { padding: 10px 9px; background: var(--bg-card); color: var(--text-muted); font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none; }
+    th:hover { color: var(--text-primary); background: var(--bg-hover); }
+    td { padding: 9px; border-top: 1px solid var(--border-subtle); text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    tbody tr:hover td { background: var(--bg-hover); }
+    .symbol { color: var(--text-primary); font: 700 13px var(--font-mono); }
+    .mono { font-family: var(--font-mono); }
+    .positive { color: var(--green-primary); }
+    .negative { color: var(--red-primary); }
+    .neutral { color: var(--text-secondary); }
+    .loading, .empty { padding: 42px 20px; color: var(--text-muted); text-align: center; }
+    .error { margin: 14px 18px 0; padding: 10px 12px; border-left: 3px solid var(--danger); background: rgba(255,120,120,.08); color: #ffb4b4; font-size: 12px; }
+    .pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 18px; border-top: 1px solid var(--border-default); color: var(--text-muted); font-size: 12px; }
+    .pagination-actions { display: flex; gap: 6px; }
+    .pagination .btn { min-height: 30px; }
+    @media (max-width: 900px) {
+      body { padding: 8px; }
+      #app { margin-top: 8px; }
+      .page-header { display: block; padding: 16px 14px 13px; }
+      .header-actions { justify-content: flex-start; margin-top: 12px; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stat:nth-child(2) { border-right: 0; }
+      .stat:nth-child(-n+2) { border-bottom: 1px solid var(--border-default); }
+      .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
+      .field:first-child, .toolbar-action { grid-column: 1 / -1; }
+      .pagination { align-items: stretch; flex-direction: column; padding: 12px; }
+      .pagination-actions { justify-content: space-between; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-frame">{% include 'components/nav.html' %}</div>
+  <main id="app">
+    <section class="shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">CoinGlass / Global Assets</p>
+          <h1>全球资产</h1>
+          <p class="subtitle">持仓、市值、价格、资金费率、成交额与爆仓快照</p>
+        </div>
+        <div class="header-actions">
+          <span class="sync-time">快照：[[ snapshotLabel ]]</span>
+          <button class="btn btn-primary" type="button" :disabled="refreshing" @click="refreshData">[[ refreshing ? '采集中…' : '刷新数据' ]]</button>
+        </div>
+      </header>
+      <div class="stats">
+        <div class="stat"><div class="stat-label">当前资产数</div><div class="stat-value">[[ totalCount.toLocaleString() ]]</div></div>
+        <div class="stat"><div class="stat-label">市值合计</div><div class="stat-value">[[ formatAmount(stats.market_cap) ]]</div></div>
+        <div class="stat"><div class="stat-label">持仓合计</div><div class="stat-value">[[ formatAmount(stats.open_interest) ]]</div></div>
+        <div class="stat"><div class="stat-label">24小时爆仓</div><div class="stat-value">[[ formatAmount(stats.h24_liquidation) ]]</div></div>
+      </div>
+      <div v-if="errorMessage" class="error">[[ errorMessage ]]</div>
+      <section class="toolbar" aria-label="全球资产筛选">
+        <div class="field"><label class="field-label" for="asset-keyword">资产搜索</label><input id="asset-keyword" v-model.trim="keyword" @keyup.enter="search" placeholder="例如 BTC、ETH"></div>
+        <div class="field"><label class="field-label" for="asset-min-market-cap">市值下限</label><input id="asset-min-market-cap" v-model.number="minMarketCap" type="number" min="0" step="1000000"></div>
+        <div class="field"><label class="field-label" for="asset-min-ratio">持仓/市值下限</label><input id="asset-min-ratio" v-model.number="minOiMarketCapRatio" type="number" min="0" step="0.01"></div>
+        <div class="field"><label class="field-label" for="asset-min-h1-oi">持仓变化 1h 下限 (%)</label><input id="asset-min-h1-oi" v-model.number="minH1OiChange" type="number" step="1"></div>
+        <div class="field"><label class="field-label" for="asset-min-h4-oi">持仓变化 4h 下限 (%)</label><input id="asset-min-h4-oi" v-model.number="minH4OiChange" type="number" step="1"></div>
+        <div class="field"><label class="field-label" for="asset-min-h24-oi">持仓变化 24h 下限 (%)</label><input id="asset-min-h24-oi" v-model.number="minH24OiChange" type="number" step="1"></div>
+        <div class="field"><label class="field-label" for="asset-snapshot">历史快照</label><select id="asset-snapshot" v-model="snapshotSelection" @change="load(1)"><option value="">最新快照</option><option v-for="value in snapshots" :key="value" :value="String(value)">[[ formatTime(value) ]]</option></select></div>
+        <div class="field"><label class="field-label" for="asset-sort">排序字段</label><select id="asset-sort" v-model="sortBy" @change="load(1)"><option value="oi_market_cap_ratio">持仓/市值</option><option value="market_cap">市值</option><option value="open_interest">持仓</option><option value="h24_volume">24小时成交额</option><option value="h24_liquidation">24小时爆仓</option><option value="h24_price_change">价格变化(24h)</option><option value="h24_oi_change">持仓变化(24h)</option></select></div>
+        <div class="field"><label class="field-label" for="asset-order">排序方向</label><select id="asset-order" v-model="sortOrder" @change="load(1)"><option value="desc">从高到低</option><option value="asc">从低到高</option></select></div>
+        <div class="field"><label class="field-label" for="asset-page-size">每页条数</label><select id="asset-page-size" v-model.number="pageSize" @change="load(1)"><option :value="10">10</option><option :value="50">50</option><option :value="100">100</option><option :value="200">200</option></select></div>
+        <div class="toolbar-action"><span class="field-label">操作</span><button class="btn" type="button" @click="search">查询</button></div>
+      </section>
+      <div v-if="loading" class="loading">正在加载全球资产…</div>
+      <div v-else-if="!rows.length" class="empty">暂无符合当前筛选条件的数据</div>
+      <div v-else class="table-wrap">
+        <table>
+          <thead><tr>
+            <th @click="sort('symbol')">资产</th><th @click="sort('oi_market_cap_ratio')">持仓/市值</th><th @click="sort('h1_oi_change')">持仓变化(1h)</th><th @click="sort('h4_oi_change')">持仓变化(4h)</th><th @click="sort('h24_oi_change')">持仓变化(24h)</th><th @click="sort('market_cap')">市值</th><th @click="sort('open_interest')">持仓</th><th @click="sort('price')">价格</th><th @click="sort('h24_price_change')">价格变化(24h)</th><th @click="sort('avg_funding_rate')">资金费率</th><th @click="sort('h24_volume')">24小时成交额</th><th @click="sort('h24_volume_change')">成交额变化(24h)</th><th @click="sort('h24_liquidation')">24小时爆仓</th>
+          </tr></thead>
+          <tbody><tr v-for="row in rows" :key="row.symbol + '-' + row.snapshot_time">
+            <td class="symbol">[[ row.symbol ]]</td><td class="mono">[[ formatRatio(row.oi_market_cap_ratio) ]]</td><td :class="trendClass(row.h1_oi_change)">[[ formatPercent(row.h1_oi_change) ]]</td><td :class="trendClass(row.h4_oi_change)">[[ formatPercent(row.h4_oi_change) ]]</td><td :class="trendClass(row.h24_oi_change)">[[ formatPercent(row.h24_oi_change) ]]</td><td class="mono">[[ formatAmount(row.market_cap) ]]</td><td class="mono">[[ formatAmount(row.open_interest) ]]</td><td class="mono">[[ formatPrice(row.price) ]]</td><td :class="trendClass(row.h24_price_change)">[[ formatPercent(row.h24_price_change) ]]</td><td :class="trendClass(row.avg_funding_rate)">[[ formatFunding(row.avg_funding_rate) ]]</td><td class="mono">[[ formatAmount(row.h24_volume) ]]</td><td :class="trendClass(row.h24_volume_change)">[[ formatPercent(row.h24_volume_change) ]]</td><td class="mono">[[ formatAmount(row.h24_liquidation) ]]</td>
+          </tr></tbody>
+        </table>
+      </div>
+      <footer class="pagination" v-if="totalCount">
+        <span>第 [[ page ]] / [[ pageCount ]] 页，共 [[ totalCount.toLocaleString() ]] 条</span>
+        <div class="pagination-actions"><button class="btn" type="button" :disabled="page <= 1 || loading" @click="load(page - 1)">上一页</button><button class="btn" type="button" :disabled="page >= pageCount || loading" @click="load(page + 1)">下一页</button></div>
+      </footer>
+    </section>
+  </main>
+  <script>
+      const { createApp, ref, computed, onMounted } = Vue;
+      const defaults = {
+        {% set asset_defaults = global_assets_defaults | default({}, true) %}
+        page_size: {{ asset_defaults.page_size | default(10, true) | int }},
+        sort_by: {{ asset_defaults.sort_by | default('oi_market_cap_ratio', true) | tojson }},
+        sort_order: {{ asset_defaults.sort_order | default('desc', true) | tojson }},
+        min_market_cap: {{ asset_defaults.min_market_cap | default(3000000, true) }},
+        min_oi_market_cap_ratio: {{ asset_defaults.min_oi_market_cap_ratio | default(0.6, true) }},
+        min_h1_oi_change: {{ asset_defaults.min_h1_oi_change | default(None) | tojson }},
+        min_h4_oi_change: {{ asset_defaults.min_h4_oi_change | default(None) | tojson }},
+        min_h24_oi_change: {{ asset_defaults.min_h24_oi_change | default(20, true) }}
+      };
+    createApp({ delimiters: ['[[', ']]'], setup() {
+      const rows = ref([]), snapshots = ref([]), snapshotSelection = ref(''), keyword = ref('');
+      const minMarketCap = ref(defaults.min_market_cap), minOiMarketCapRatio = ref(defaults.min_oi_market_cap_ratio), minH1OiChange = ref(defaults.min_h1_oi_change), minH4OiChange = ref(defaults.min_h4_oi_change), minH24OiChange = ref(defaults.min_h24_oi_change);
+      const sortBy = ref(defaults.sort_by), sortOrder = ref(defaults.sort_order), page = ref(1), pageSize = ref(defaults.page_size);
+      const totalCount = ref(0), stats = ref({ market_cap: 0, open_interest: 0, h24_volume: 0, h24_liquidation: 0 });
+      const loading = ref(false), refreshing = ref(false), errorMessage = ref('');
+      const pageCount = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize.value)));
+      const formatTime = value => value ? new Date(Number(value)).toLocaleString('zh-CN') : '--';
+      const formatNumber = (value, digits = 2) => { if (value === null || value === undefined || value === '') return '--'; const n = Number(value); return Number.isFinite(n) ? new Intl.NumberFormat('zh-CN', { maximumFractionDigits: digits }).format(n) : '--'; };
+      const formatAmount = value => { if (value === null || value === undefined) return '--'; const n = Number(value), a = Math.abs(n); if (!Number.isFinite(n)) return '--'; const compact = (scaled, suffix) => `${n < 0 ? '-' : ''}${formatNumber(scaled, scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2)}${suffix}`; if (a >= 1e12) return compact(a / 1e12, 'T'); if (a >= 1e9) return compact(a / 1e9, 'B'); if (a >= 1e6) return compact(a / 1e6, 'M'); if (a >= 1e3) return compact(a / 1e3, 'K'); return formatNumber(n, 2); };
+      const formatPrice = value => formatNumber(value, 8);
+      const formatPercent = value => value === null || value === undefined ? '--' : `${Number(value) > 0 ? '+' : ''}${formatNumber(value, 2)}%`;
+      const formatFunding = value => value === null || value === undefined ? '--' : `${Number(value) > 0 ? '+' : ''}${formatNumber(value, 4)}%`;
+      const formatRatio = value => value === null || value === undefined ? '--' : formatNumber(value, 8);
+      const trendClass = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : 'neutral';
+      const snapshotLabel = computed(() => snapshotSelection.value ? formatTime(snapshotSelection.value) : (snapshots.value.length ? formatTime(snapshots.value[0]) : '--'));
+      const load = async targetPage => { loading.value = true; errorMessage.value = ''; const nextPage = Math.min(Math.max(Number(targetPage) || 1, 1), pageCount.value || 1); const params = new URLSearchParams({ page: String(nextPage), page_size: String(pageSize.value), keyword: keyword.value, sort_by: sortBy.value, sort_order: sortOrder.value, min_market_cap: String(minMarketCap.value ?? ''), min_oi_market_cap_ratio: String(minOiMarketCapRatio.value ?? ''), min_h1_oi_change: String(minH1OiChange.value ?? ''), min_h4_oi_change: String(minH4OiChange.value ?? ''), min_h24_oi_change: String(minH24OiChange.value ?? '') }); if (snapshotSelection.value) params.set('snapshot_time', snapshotSelection.value); try { const response = await fetch(`/api/global-assets?${params}`); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '加载全球资产失败'); rows.value = result.data || []; snapshots.value = result.snapshots || []; totalCount.value = Number(result.total_count || 0); stats.value = result.stats || stats.value; page.value = nextPage; } catch (error) { rows.value = []; totalCount.value = 0; errorMessage.value = error.message || '加载全球资产失败'; } finally { loading.value = false; } };
+      const search = () => load(1);
+      const sort = field => { if (sortBy.value === field) sortOrder.value = sortOrder.value === 'desc' ? 'asc' : 'desc'; else { sortBy.value = field; sortOrder.value = 'desc'; } load(1); };
+      const refreshData = async () => { refreshing.value = true; errorMessage.value = ''; try { const response = await fetch('/api/global-assets/refresh', { method: 'POST' }); const result = await response.json(); if (!response.ok || result.status !== 'success') throw new Error(result.message || '刷新失败'); snapshotSelection.value = ''; await load(1); } catch (error) { errorMessage.value = error.message || '刷新失败'; } finally { refreshing.value = false; } };
+      onMounted(() => load(1));
+      return { rows, snapshots, snapshotSelection, keyword, minMarketCap, minOiMarketCapRatio, minH1OiChange, minH4OiChange, minH24OiChange, sortBy, sortOrder, page, pageSize, totalCount, stats, loading, refreshing, errorMessage, pageCount, snapshotLabel, formatTime, formatAmount, formatPrice, formatPercent, formatFunding, formatRatio, trendClass, load, search, sort, refreshData };
+    }}).mount('#app');
+  </script>
+</body>
+</html>

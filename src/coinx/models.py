@@ -255,6 +255,35 @@ class MarketFuturesSmartMoneySignal(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
+class MarketCoinglassGlobalAsset(Base):
+    """CoinGlass global asset metrics captured at one snapshot time."""
+
+    __tablename__ = 'market_coinglass_global_asset'
+    __table_args__ = (
+        UniqueConstraint('symbol', 'snapshot_time', name='uk_cg_global_asset_symbol_time'),
+        Index('idx_cg_global_asset_snapshot_time', 'snapshot_time'),
+        Index('idx_cg_global_asset_symbol_time', 'symbol', 'snapshot_time'),
+        {'comment': 'CoinGlass全球资产快照'},
+    )
+
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
+    symbol = Column(String(40), nullable=False)
+    snapshot_time = Column(BigInteger, nullable=False)
+    oi_market_cap_ratio = Column(DECIMAL(20, 8))
+    h1_oi_change = Column(DECIMAL(20, 8))
+    h4_oi_change = Column(DECIMAL(20, 8))
+    h24_oi_change = Column(DECIMAL(20, 8))
+    market_cap = Column(DECIMAL(38, 12))
+    open_interest = Column(DECIMAL(38, 12))
+    price = Column(DECIMAL(38, 18))
+    h24_price_change = Column(DECIMAL(20, 8))
+    avg_funding_rate = Column(DECIMAL(20, 12))
+    h24_volume = Column(DECIMAL(38, 12))
+    h24_volume_change = Column(DECIMAL(20, 8))
+    h24_liquidation = Column(DECIMAL(38, 12))
+    created_at = Column(DateTime, default=datetime.now)
+
+
 class NotificationChannel(Base):
     __tablename__ = 'notification_channels'
     __table_args__ = {'comment': '通知渠道'}

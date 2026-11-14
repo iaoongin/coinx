@@ -9,6 +9,7 @@ from coinx.database import get_session
 from coinx.models import (
     MarketFundingRate,
     MarketFuturesSmartMoneySignal,
+    MarketCoinglassGlobalAsset,
     MarketKline,
     MarketOpenInterestHist,
     MarketSnapshot,
@@ -25,6 +26,7 @@ MYSQL_RETENTION_TARGETS = (
     (MarketKline, MarketKline.close_time),
     (MarketTakerBuySellVol, MarketTakerBuySellVol.event_time),
     (MarketFundingRate, MarketFundingRate.event_time),
+    (MarketCoinglassGlobalAsset, MarketCoinglassGlobalAsset.snapshot_time),
 )
 
 CLICKHOUSE_RETENTION_TARGETS = (

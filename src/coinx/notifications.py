@@ -27,6 +27,7 @@ from coinx.models import (
     NotificationDelivery,
 )
 from coinx.repositories.funding_rate import load_latest_funding_rates
+from coinx.repositories.coinglass_global_assets import load_latest_global_assets
 from coinx.repositories.trade_opportunities import get_trade_opportunity_snapshot
 from coinx.read_backend import get_clickhouse_repository, is_clickhouse_read
 from coinx.utils import logger
@@ -37,6 +38,7 @@ EVENT_PRICE_VOLUME = 'market.price_volume.threshold'
 EVENT_JOB_FAILURE = 'system.job.failure'
 EVENT_TRADE_OPPORTUNITY = 'market.trade_opportunity.actionable'
 EVENT_PRICE_OI_OUTFLOW_RETEST = 'market.price_oi_outflow.retest'
+EVENT_COINGLASS_GLOBAL_ASSET = 'market.coinglass_global_asset.threshold'
 TRADE_OPPORTUNITY_TRIGGER_CONFIRMATIONS = 2
 TRADE_OPPORTUNITY_RECOVERY_CONFIRMATIONS = 3
 TRADE_OPPORTUNITY_BETTER_ENTRY_THRESHOLD = 0.5
@@ -49,6 +51,11 @@ STRUCTURE_RETEST_MIN_OI_INCREASE_PERCENT = 1.0
 STRUCTURE_RETEST_MIN_OUTFLOW_RATIO_PERCENT = 0.5
 STRUCTURE_RETEST_MIN_OUTFLOW_INCREASE_PERCENT = 20.0
 PRICE_VOLUME_DEFAULT_SCOPE_LIMIT = 100
+COINGLASS_ASSET_METRICS = {
+    'oi_market_cap_ratio', 'h1_oi_change', 'h4_oi_change', 'h24_oi_change',
+    'market_cap', 'open_interest', 'price', 'h24_price_change',
+    'avg_funding_rate', 'h24_volume', 'h24_volume_change', 'h24_liquidation',
+}
 
 EVENT_SCOPE = {
     EVENT_FUNDING_RATE: 'all_market',
@@ -56,6 +63,7 @@ EVENT_SCOPE = {
     EVENT_JOB_FAILURE: 'system_jobs',
     EVENT_TRADE_OPPORTUNITY: 'trade_opportunities',
     EVENT_PRICE_OI_OUTFLOW_RETEST: 'structure_retests',
+    EVENT_COINGLASS_GLOBAL_ASSET: 'global_assets',
 }
 
 EVALUATION_RUN_LOCK = threading.Lock()
@@ -712,6 +720,35 @@ def validate_rule_payload(payload):
             'recovery_confirmations': recovery_confirmations,
         }
         scope = {}
+    elif event_type == EVENT_COINGLASS_GLOBAL_ASSET:
+        metric = str(params.get('metric', 'h24_liquidation')).strip()
+        if metric not in COINGLASS_ASSET_METRICS:
+            raise NotificationConfigError('invalid CoinGlass metric')
+        threshold = _positive_number(params.get('threshold'), 'threshold')
+        direction = params.get('direction', 'absolute')
+        if direction not in {'positive', 'negative', 'absolute'}:
+            raise NotificationConfigError('invalid direction')
+        try:
+            recovery_confirmations = int(params.get('recovery_confirmations', 3))
+        except (TypeError, ValueError) as exc:
+            raise NotificationConfigError('invalid recovery_confirmations') from exc
+        if recovery_confirmations < 1 or recovery_confirmations > 12:
+            raise NotificationConfigError('invalid recovery_confirmations')
+        symbols = scope.get('symbols', [])
+        if symbols is None:
+            symbols = []
+        if not isinstance(symbols, list) or len(symbols) > 500:
+            raise NotificationConfigError('symbols must be a list with at most 500 items')
+        symbols = list(dict.fromkeys(
+            str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()
+        ))
+        params = {
+            'metric': metric,
+            'threshold': threshold,
+            'direction': direction,
+            'recovery_confirmations': recovery_confirmations,
+        }
+        scope = {'symbols': symbols}
     else:
         job_ids = params.get('job_ids') or []
         if not isinstance(job_ids, list) or not all(isinstance(item, str) and item.strip() for item in job_ids):
@@ -1049,6 +1086,7 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         EVENT_JOB_FAILURE: ('定时任务执行失败', '定时任务已恢复', '定时任务'),
         EVENT_TRADE_OPPORTUNITY: ('可做交易机会', '可做交易机会已退出', '交易机会'),
         EVENT_PRICE_OI_OUTFLOW_RETEST: ('前高反弹结构告警', '前高反弹结构告警已恢复', '前高反弹结构'),
+        EVENT_COINGLASS_GLOBAL_ASSET: ('全球资产指标异常', '全球资产指标已恢复', '全球资产指标'),
     }[rule.event_type]
     if triggered and recovered:
         title = f'📊 {event_titles[2]}状态更新'
@@ -1253,6 +1291,126 @@ def _load_price_volume_metrics(db, scope_limit):
         }
         for row in rows
     }
+
+
+def _format_coinglass_metric(metric, value):
+    if value is None:
+        return '--'
+    if metric == 'oi_market_cap_ratio':
+        return f'{float(value):.8f}'
+    if metric == 'avg_funding_rate':
+        return f'{float(value):+.4f}%'
+    if metric in {'h1_oi_change', 'h4_oi_change', 'h24_oi_change', 'h24_price_change', 'h24_volume_change'}:
+        return f'{float(value):+.2f}%'
+    return f'{float(value):,.4f}'
+
+
+def evaluate_coinglass_global_asset_rules(session=None, rule_id=None):
+    if not config.NOTIFICATIONS_ENABLED:
+        return _notifications_disabled_result()
+    own_session = session is None
+    db = session or get_session()
+    started_at = time.perf_counter()
+    stages = defaultdict(float)
+    try:
+        rules = _enabled_rules(db, EVENT_COINGLASS_GLOBAL_ASSET, rule_id=rule_id)
+        if not rules:
+            return {
+                'status': 'success', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0,
+                'metrics': _evaluation_metrics(started_at, stages, symbols=0),
+            }
+        stage_started = time.perf_counter()
+        assets = load_latest_global_assets(session=db)
+        stages['asset_load_ms'] += (time.perf_counter() - stage_started) * 1000
+        sent = checked = matched_count = 0
+        for rule in rules:
+            params = rule.params_json or {}
+            metric = params.get('metric', 'h24_liquidation')
+            threshold = float(params.get('threshold'))
+            direction = params.get('direction', 'absolute')
+            recovery_confirmations = int(params.get('recovery_confirmations', 3))
+            scope_symbols = set((rule.scope_json or {}).get('symbols') or [])
+            scoped_assets = {
+                symbol: row for symbol, row in assets.items()
+                if not scope_symbols or symbol.upper() in scope_symbols
+            }
+            dimension = f'{metric}:{direction}'
+            states = _load_rule_states(db, rule.id, dimension, scoped_assets)
+            events = []
+            rule_checked = 0
+            for symbol, row in scoped_assets.items():
+                value = row.get(metric)
+                if value is None:
+                    continue
+                value = float(value)
+                matched = (
+                    abs(value) >= threshold
+                    if direction == 'absolute'
+                    else value >= threshold
+                    if direction == 'positive'
+                    else value <= -threshold
+                )
+                checked += 1
+                rule_checked += 1
+                matched_count += int(matched)
+                result = _observe(
+                    db,
+                    rule,
+                    symbol,
+                    dimension,
+                    matched,
+                    {
+                        'metric': metric,
+                        'value': value,
+                        'threshold': threshold,
+                        'direction': direction,
+                        'snapshot_time': row.get('snapshot_time'),
+                    },
+                    f'{symbol} 全球资产指标异常',
+                    f'{metric} 当前值 {_format_coinglass_metric(metric, value)}，规则阈值 {_format_coinglass_metric(metric, threshold)}。',
+                    recovery_confirmations=recovery_confirmations,
+                    state=states.get(symbol),
+                    aggregate=True,
+                )
+                if result.get('state') and result['event_status']:
+                    previous_value = (result.get('previous_values') or {}).get('value')
+                    events.append({
+                        'status': result['event_status'],
+                        'state': result['state'],
+                        'severity': abs(value) / threshold,
+                        'triggered': (
+                            f'{symbol}  {_format_coinglass_metric(metric, value)}'
+                            f' · {abs(value) / threshold:.2f}x 阈值'
+                        ),
+                        'recovered': (
+                            f'{symbol} 当前 {_format_coinglass_metric(metric, value)}'
+                            f' · 之前 {_format_coinglass_metric(metric, previous_value)}'
+                        ),
+                    })
+            sent += _deliver_evaluation_summary(
+                db,
+                rule,
+                rule_checked,
+                events,
+                f'规则：{metric} {direction} 阈值 {_format_coinglass_metric(metric, threshold)}',
+            )
+        db.commit()
+        return {
+            'status': 'success', 'evaluated': len(rules), 'checked': checked,
+            'matched': matched_count, 'sent': sent,
+            'metrics': _evaluation_metrics(started_at, stages, symbols=len(assets)),
+        }
+    except Exception:
+        db.rollback()
+        logger.exception('CoinGlass 全球资产告警评估失败')
+        return {
+            'status': 'error', 'evaluated': 0, 'checked': 0, 'matched': 0, 'sent': 0,
+            'error': 'CoinGlass global asset evaluation failed',
+            'metrics': _evaluation_metrics(started_at, stages),
+        }
+    finally:
+        if own_session:
+            db.close()
 
 
 def evaluate_funding_rate_rules(session=None, rule_id=None):
@@ -1831,6 +1989,8 @@ def evaluate_job_failure_rules(metadata, session=None, rule_id=None):
 
 
 def evaluate_rule(rule, session=None, metadata=None):
+    if rule.event_type == EVENT_COINGLASS_GLOBAL_ASSET:
+        return evaluate_coinglass_global_asset_rules(session=session, rule_id=rule.id)
     if rule.event_type == EVENT_FUNDING_RATE:
         return evaluate_funding_rate_rules(session=session, rule_id=rule.id)
     if rule.event_type == EVENT_PRICE_VOLUME:

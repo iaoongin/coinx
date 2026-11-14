@@ -1,5 +1,6 @@
 from flask import Blueprint, redirect, render_template, url_for
 
+from coinx import config
 from coinx.config import TIME_INTERVALS
 from coinx.utils import logger
 
@@ -56,6 +57,25 @@ def open_interest():
     """跨交易所持仓量与流通量页面。"""
     logger.info("访问持仓量概览页面")
     return render_template('open_interest.html')
+
+
+@pages_bp.route('/global-assets')
+def global_assets():
+    """CoinGlass global-assets snapshot page."""
+    logger.info('访问 CoinGlass 全球资产页面')
+    return render_template(
+        'global_assets.html',
+        global_assets_defaults={
+            'page_size': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_PAGE_SIZE,
+            'sort_by': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_SORT_BY,
+            'sort_order': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_SORT_ORDER,
+            'min_market_cap': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_MIN_MARKET_CAP,
+            'min_oi_market_cap_ratio': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_MIN_OI_MARKET_CAP_RATIO,
+            'min_h1_oi_change': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_MIN_H1_OI_CHANGE,
+            'min_h4_oi_change': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_MIN_H4_OI_CHANGE,
+            'min_h24_oi_change': config.COINGLASS_GLOBAL_ASSETS_DEFAULT_MIN_H24_OI_CHANGE,
+        },
+    )
 
 
 @pages_bp.route('/hedge-calculator')

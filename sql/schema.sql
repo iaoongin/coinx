@@ -66,6 +66,29 @@ CREATE TABLE IF NOT EXISTS market_futures_smart_money_signal (
     KEY idx_fsm_signal_snapshot_time (snapshot_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='聪明钱快照';
 
+-- CoinGlass 全球资产快照。每个抓取批次使用同一个 snapshot_time。
+CREATE TABLE IF NOT EXISTS market_coinglass_global_asset (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    symbol VARCHAR(40) NOT NULL COMMENT '资产符号',
+    snapshot_time BIGINT NOT NULL COMMENT '快照时间戳，毫秒',
+    oi_market_cap_ratio DECIMAL(20, 8) DEFAULT NULL COMMENT '持仓/市值',
+    h1_oi_change DECIMAL(20, 8) DEFAULT NULL COMMENT '持仓变化（1小时）',
+    h4_oi_change DECIMAL(20, 8) DEFAULT NULL COMMENT '持仓变化（4小时）',
+    h24_oi_change DECIMAL(20, 8) DEFAULT NULL COMMENT '持仓变化（24小时）',
+    market_cap DECIMAL(38, 12) DEFAULT NULL COMMENT '市值',
+    open_interest DECIMAL(38, 12) DEFAULT NULL COMMENT '持仓',
+    price DECIMAL(38, 18) DEFAULT NULL COMMENT '价格',
+    h24_price_change DECIMAL(20, 8) DEFAULT NULL COMMENT '价格变化（24小时）',
+    avg_funding_rate DECIMAL(20, 12) DEFAULT NULL COMMENT '资金费率',
+    h24_volume DECIMAL(38, 12) DEFAULT NULL COMMENT '24小时成交额',
+    h24_volume_change DECIMAL(20, 8) DEFAULT NULL COMMENT '成交额变化（24小时）',
+    h24_liquidation DECIMAL(38, 12) DEFAULT NULL COMMENT '24小时爆仓',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+    UNIQUE KEY uk_cg_global_asset_symbol_time (symbol, snapshot_time),
+    KEY idx_cg_global_asset_snapshot_time (snapshot_time),
+    KEY idx_cg_global_asset_symbol_time (symbol, snapshot_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CoinGlass全球资产快照';
+
 -- 行情快照原始数据表
 CREATE TABLE IF NOT EXISTS market_tickers (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
