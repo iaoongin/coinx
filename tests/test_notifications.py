@@ -1,8 +1,12 @@
 from cryptography.fernet import Fernet
+import sys
+import json
+from types import SimpleNamespace
 
 from flask import Flask
 from sqlalchemy import event
 import werkzeug
+import pytest
 
 from coinx import config, notifications
 from coinx.models import (
@@ -57,6 +61,153 @@ def create_rule(db, channel, event_type, scope_type, params, scope=None):
     db.add(AlertRuleChannel(rule_id=rule.id, channel_id=channel.id))
     db.commit()
     return rule
+
+
+def test_coinglass_summary_includes_current_counts_and_asset_details(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    conditions = [
+        {'metric': 'oi_market_cap_ratio', 'direction': 'positive', 'threshold': 0.6},
+        {'metric': 'h4_oi_change', 'direction': 'positive', 'threshold': 5},
+        {'metric': 'h24_oi_change', 'direction': 'positive', 'threshold': 30},
+    ]
+    rule = create_rule(db_session, channel, notifications.EVENT_COINGLASS_GLOBAL_ASSET,
+                       'global_assets', {'conditions': conditions, 'match_mode': 'all', 'recovery_confirmations': 1})
+    rule.name = '起量筛选'
+    db_session.commit()
+    asset = {'snapshot_time': 1000, 'oi_market_cap_ratio': 1.11, 'h4_oi_change': 268.98,
+             'h24_oi_change': 465.39, 'price': 0.04002, 'open_interest': 20_850_000,
+             'market_cap': 18_850_000}
+    assets = {'BTC': dict(asset), 'ETH': dict(asset)}
+    monkeypatch.setattr(notifications, 'load_latest_global_assets', lambda **kwargs: assets)
+
+    assert notifications.evaluate_coinglass_global_asset_rules(session=db_session)['sent'] == 1
+    assets.clear()
+    assets.update({'BTC': dict(asset), 'ETH': {**asset, 'h4_oi_change': 0}, 'SHELL': dict(asset)})
+    assert notifications.evaluate_coinglass_global_asset_rules(session=db_session)['sent'] == 1
+    assert notifications.evaluate_coinglass_global_asset_rules(session=db_session)['sent'] == 0
+
+    delivery = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id.desc()).first()
+    body = delivery.payload_json['message']['body']
+    assert delivery.payload_json['message']['title'] == '🚨 起量筛选'
+    assert '触发资产：1 个' in body
+    assert 'SHELL\n持仓/市值  ： 1.11\n持仓（4h） ： +268.98%\n持仓（24h）： +465.39%' in body
+    assert '价格       ： $0.04002\n持仓       ： $20.85M\n市值       ： $18.85M' in body
+    assert '已恢复：1 个\nETH' in body
+    assert '筛选条件：持仓/市值 ≥ 0.6 且 持仓（4h） ≥ 5% 且 持仓（24h） ≥ 30%' in body
+    assert '本轮：检查 3 · 异常 2 · 恢复 1' in body
+    assert delivery.payload_json['matched'] == 2
+
+
+def test_coinglass_message_formats_missing_and_selected_metrics():
+    conditions = [
+        {'metric': 'h1_oi_change', 'direction': 'negative', 'threshold': 5},
+        {'metric': 'avg_funding_rate', 'direction': 'absolute', 'threshold': 0.1},
+    ]
+    text = notifications._format_coinglass_asset('BTC', {'h1_oi_change': -5, 'avg_funding_rate': 0}, conditions)
+    assert '持仓/市值  ： --' in text
+    assert '持仓（1h） ： -5.00%' in text
+    assert '资金费率   ： +0.0000%' in text
+    assert notifications._format_coinglass_conditions(conditions, 'any') == (
+        '筛选条件：持仓（1h） ≤ -5% 或 |资金费率| ≥ 0.1%'
+    )
+    price_text = notifications._format_coinglass_asset(
+        'BTC', {'h24_price_change': 20}, [{'metric': 'h24_price_change'}],
+    )
+    assert '价格（24h）： +20.00%' in price_text
+    assert '持仓/市值  ： --' in price_text
+    assert notifications._format_coinglass_asset_value('oi_market_cap_ratio', 0.6001) == '0.6001'
+    assert notifications._format_coinglass_conditions([
+        {'metric': 'market_cap', 'direction': 'positive', 'threshold': 123456789.12},
+    ], 'all') == '筛选条件：市值 ≥ 123456789.12'
+
+
+def test_coinglass_telegram_bolds_assets_and_escapes_html(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(db_session, channel, notifications.EVENT_COINGLASS_GLOBAL_ASSET, 'global_assets', {})
+    sent = []
+    monkeypatch.setattr(notifications, 'apprise_target_type', lambda _: 'Telegram')
+    monkeypatch.setattr(notifications, 'send_apprise', lambda *args, **kwargs: sent.append((args, kwargs)))
+    events = [
+        {'status': 'triggered', 'symbol': 'A<&', 'triggered': 'A<&\n价格：$1', 'severity': 1},
+        {'status': 'recovered', 'symbol': 'B&', 'recovered': 'B& 当前 1 · 之前 2', 'severity': 1},
+    ]
+
+    assert notifications._deliver_evaluation_summary(
+        db_session, rule, 2, events, '筛选条件：价格 ≥ 1', matched_count=1, recovered_count=1,
+    ) == 1
+    args, kwargs = sent[0]
+    assert kwargs == {'body_format': 'html'}
+    assert '<b>A&lt;&amp;</b>\n<code>价格：$1</code>' in args[2]
+    assert '<b>B&amp;</b> 当前 1 · 之前 2' in args[2]
+    assert '筛选条件：价格 ≥ 1' in args[2]
+    delivery = db_session.query(NotificationDelivery).one()
+    assert 'A<&\n价格：$1' in delivery.payload_json['message']['body']
+    assert delivery.payload_json['message']['body_html'] == args[2]
+
+
+def test_coinglass_non_telegram_keeps_plain_text(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(db_session, channel, notifications.EVENT_COINGLASS_GLOBAL_ASSET, 'global_assets', {})
+    sent = []
+    monkeypatch.setattr(notifications, 'apprise_target_type', lambda _: 'Bark')
+    monkeypatch.setattr(notifications, 'send_apprise', lambda *args, **kwargs: sent.append((args, kwargs)))
+    notifications._deliver_evaluation_summary(
+        db_session, rule, 1,
+        [{'status': 'triggered', 'symbol': 'BTC', 'triggered': 'BTC\n价格：$1'}],
+        '筛选条件：价格 ≥ 1', matched_count=1, recovered_count=0,
+    )
+    args, kwargs = sent[0]
+    assert 'BTC\n价格：$1' in args[2]
+    assert '<b>' not in args[2]
+    assert kwargs == {}
+
+
+def test_send_apprise_preserves_html_body_and_escapes_title(monkeypatch):
+    sent = []
+
+    class FakeApprise:
+        def add(self, url):
+            return True
+
+        def notify(self, **kwargs):
+            sent.append(kwargs)
+            return True
+
+    monkeypatch.setitem(sys.modules, 'apprise', SimpleNamespace(
+        Apprise=FakeApprise, NotifyType=SimpleNamespace(INFO='info'),
+    ))
+    notifications.send_apprise('tgram://test', '规则 <A&B>', '<b>BTC</b>', body_format='html')
+    assert sent[0]['title'] == '规则 &lt;A&amp;B&gt;'
+    assert sent[0]['body'] == '<b>BTC</b>'
+    assert sent[0]['body_format'] == 'html'
+
+
+def test_telegram_keeps_aligned_spaces_in_monospace_block(monkeypatch):
+    pytest.importorskip('apprise')
+    import apprise.plugins.telegram as telegram
+
+    sent = []
+    monkeypatch.setattr(telegram.requests, 'post', lambda url, data, **kwargs: (
+        sent.append(json.loads(data)) or SimpleNamespace(status_code=200)
+    ))
+    asset = notifications._format_coinglass_asset('SHELL', {
+        'oi_market_cap_ratio': 1.11, 'h4_oi_change': 268.98,
+    }, [])
+    symbol, _, details = asset.partition('\n')
+    details = notifications._format_coinglass_telegram_details(details)
+    notifications.send_apprise(
+        'tgram://123456:abcdefg/123456', '测试', f'<b>{symbol}</b>\n{details}',
+        body_format='html',
+    )
+    assert sent[0]['parse_mode'] == 'HTML'
+    assert '<b>SHELL</b>' in sent[0]['text']
+    assert '<code>持仓/市值  ： 1.11</code>\n<code>持仓（4h） ： +268.98%</code>' in sent[0]['text']
+    assert '<code>价格      </code>\u2009<code>： --</code>' in sent[0]['text']
+    assert '<code>持仓      </code>\u2009<code>： --</code>' in sent[0]['text']
+    assert '<code>市值      </code>\u2009<code>： --</code>' in sent[0]['text']
 
 
 def test_channel_url_is_encrypted_and_not_deterministic(monkeypatch):

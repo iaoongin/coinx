@@ -3,11 +3,14 @@
 All evaluators operate on data already stored by CoinX jobs.  Notification
 failures are recorded but never allowed to fail a collection or repair job.
 """
+import math
 import time
 import threading
+import unicodedata
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from html import escape
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -56,6 +59,19 @@ COINGLASS_ASSET_METRICS = {
     'market_cap', 'open_interest', 'price', 'h24_price_change',
     'avg_funding_rate', 'h24_volume', 'h24_volume_change', 'h24_liquidation',
 }
+COINGLASS_METRIC_LABELS = {
+    'oi_market_cap_ratio': '持仓/市值', 'h1_oi_change': '持仓（1h）',
+    'h4_oi_change': '持仓（4h）', 'h24_oi_change': '持仓（24h）',
+    'market_cap': '市值', 'open_interest': '持仓', 'price': '价格',
+    'h24_price_change': '价格（24h）', 'avg_funding_rate': '资金费率',
+    'h24_volume': '成交额（24h）', 'h24_volume_change': '成交额变化（24h）',
+    'h24_liquidation': '爆仓（24h）',
+}
+COINGLASS_PERCENT_METRICS = {
+    'h1_oi_change', 'h4_oi_change', 'h24_oi_change', 'h24_price_change',
+    'avg_funding_rate', 'h24_volume_change',
+}
+COINGLASS_AMOUNT_METRICS = {'market_cap', 'open_interest', 'h24_volume', 'h24_liquidation'}
 
 EVENT_SCOPE = {
     EVENT_FUNDING_RATE: 'all_market',
@@ -721,13 +737,31 @@ def validate_rule_payload(payload):
         }
         scope = {}
     elif event_type == EVENT_COINGLASS_GLOBAL_ASSET:
-        metric = str(params.get('metric', 'h24_liquidation')).strip()
-        if metric not in COINGLASS_ASSET_METRICS:
-            raise NotificationConfigError('invalid CoinGlass metric')
-        threshold = _positive_number(params.get('threshold'), 'threshold')
-        direction = params.get('direction', 'absolute')
-        if direction not in {'positive', 'negative', 'absolute'}:
-            raise NotificationConfigError('invalid direction')
+        conditions = params.get('conditions')
+        legacy = conditions is None
+        if legacy:
+            conditions = [params]
+        if not isinstance(conditions, list) or not 1 <= len(conditions) <= 12:
+            raise NotificationConfigError('CoinGlass conditions must contain 1 to 12 items')
+        match_mode = params.get('match_mode', 'all')
+        if match_mode not in {'all', 'any'}:
+            raise NotificationConfigError('invalid CoinGlass match mode')
+        normalized_conditions = []
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                raise NotificationConfigError('invalid CoinGlass condition')
+            metric = str(condition.get('metric', 'h24_liquidation')).strip()
+            if metric not in COINGLASS_ASSET_METRICS:
+                raise NotificationConfigError('invalid CoinGlass metric')
+            threshold = _positive_number(condition.get('threshold'), 'threshold')
+            if not math.isfinite(threshold):
+                raise NotificationConfigError('invalid threshold')
+            direction = condition.get('direction', 'absolute')
+            if direction not in {'positive', 'negative', 'absolute'}:
+                raise NotificationConfigError('invalid direction')
+            normalized_conditions.append({
+                'metric': metric, 'threshold': threshold, 'direction': direction,
+            })
         try:
             recovery_confirmations = int(params.get('recovery_confirmations', 3))
         except (TypeError, ValueError) as exc:
@@ -742,12 +776,14 @@ def validate_rule_payload(payload):
         symbols = list(dict.fromkeys(
             str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()
         ))
-        params = {
-            'metric': metric,
-            'threshold': threshold,
-            'direction': direction,
-            'recovery_confirmations': recovery_confirmations,
-        }
+        params = (
+            {**normalized_conditions[0], 'recovery_confirmations': recovery_confirmations}
+            if legacy else {
+                'conditions': normalized_conditions,
+                'match_mode': match_mode,
+                'recovery_confirmations': recovery_confirmations,
+            }
+        )
         scope = {'symbols': symbols}
     else:
         job_ids = params.get('job_ids') or []
@@ -812,7 +848,7 @@ def _rule_channels(db, rule_id):
     ).all()
 
 
-def send_apprise(url, title, body):
+def send_apprise(url, title, body, body_format=None):
     try:
         import apprise
     except ImportError as exc:
@@ -820,12 +856,13 @@ def send_apprise(url, title, body):
     notifier = apprise.Apprise()
     if not notifier.add(url):
         raise NotificationConfigError('invalid Apprise URL')
-    if not notifier.notify(title=title, body=body, notify_type=apprise.NotifyType.INFO):
+    safe_title = escape(title) if body_format == 'html' else title
+    if not notifier.notify(title=safe_title, body=body, notify_type=apprise.NotifyType.INFO, body_format=body_format):
         raise RuntimeError('Apprise delivery failed')
     return True
 
 
-def _delivery(db, rule, channel, event_key, event_status, payload, title, body, include_time=True):
+def _delivery(db, rule, channel, event_key, event_status, payload, title, body, include_time=True, html_body=None):
     timestamp = now_ms()
     body_with_time = f'{body}\n\n时间：{format_notification_time(timestamp)}' if include_time else body
     body_with_time = format_channel_body(channel, body_with_time)
@@ -833,7 +870,12 @@ def _delivery(db, rule, channel, event_key, event_status, payload, title, body, 
     # Keep the exact rendered content so delivery history can be audited later.
     payload['message'] = {'title': title, 'body': body_with_time}
     try:
-        send_apprise(decrypt_apprise_url(channel), title, body_with_time)
+        if html_body is not None and apprise_target_type(channel) == 'Telegram':
+            formatted_html = format_channel_body(channel, html_body)
+            payload['message']['body_html'] = formatted_html
+            send_apprise(decrypt_apprise_url(channel), title, formatted_html, body_format='html')
+        else:
+            send_apprise(decrypt_apprise_url(channel), title, body_with_time)
         delivery = NotificationDelivery(
             rule_id=rule.id if rule else None,
             channel_id=channel.id,
@@ -1053,7 +1095,7 @@ def _enabled_rules(db, event_type, rule_id=None):
     return query.all()
 
 
-def _deliver_evaluation_summary(db, rule, checked, events, condition):
+def _deliver_evaluation_summary(db, rule, checked, events, condition, *, matched_count=None, recovered_count=None):
     """Send one consistently formatted summary per rule evaluation and channel."""
     if not events:
         return 0
@@ -1097,7 +1139,31 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
     else:
         title = f'✅ {event_titles[1]}'
 
-    if is_trade_opportunity:
+    html_body = None
+    if rule.event_type == EVENT_COINGLASS_GLOBAL_ASSET:
+        title = f'🚨 {rule.name}'
+        sections = [f'时间：{format_notification_time(timestamp)}\n触发资产：{len(triggered_events)} 个']
+        html_sections = [escape(sections[0])]
+        sections.extend(event['triggered'] for event in triggered_events)
+        for event in triggered_events:
+            symbol, separator, details = event['triggered'].partition('\n')
+            details = _format_coinglass_telegram_details(details)
+            html_sections.append(f'<b>{escape(symbol)}</b>{separator}{details}')
+        if recovered:
+            sections.append(f'已恢复：{len(recovered)} 个\n' + '\n'.join(recovered))
+            html_recoveries = []
+            for event in recovered_events:
+                symbol = event['symbol']
+                html_recoveries.append(f'<b>{escape(symbol)}</b>{escape(event["recovered"][len(symbol):])}')
+            html_sections.append(f'已恢复：{len(recovered)} 个\n' + '\n'.join(html_recoveries))
+        sections.append(condition)
+        sections.append(
+            f'本轮：检查 {checked} · 异常 {matched_count if matched_count is not None else len(triggered)}'
+            f' · 恢复 {recovered_count if recovered_count is not None else len(recovered)}'
+        )
+        html_sections.extend([escape(condition), escape(sections[-1])])
+        html_body = '\n\n'.join(html_sections)
+    elif is_trade_opportunity:
         if triggered and not recovered:
             title = f'📣 {event_titles[0]} · {len(triggered)} 个'
         elif recovered and not triggered:
@@ -1140,10 +1206,13 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition):
         'triggered': len(triggered),
         'recovered': len(recovered),
     }
+    if rule.event_type == EVENT_COINGLASS_GLOBAL_ASSET:
+        payload['matched'] = matched_count
+        payload['recovered_count'] = recovered_count
     deliveries = [
         _delivery(
             db, rule, channel, f'rule:{rule.id}|evaluation:{timestamp}', 'summary', payload,
-            title, '\n\n'.join(sections), include_time=False,
+            title, '\n\n'.join(sections), include_time=False, html_body=html_body,
         )
         for channel in _rule_channels(db, rule.id)
     ]
@@ -1305,6 +1374,75 @@ def _format_coinglass_metric(metric, value):
     return f'{float(value):,.4f}'
 
 
+def _format_coinglass_asset_value(metric, value):
+    if value is None:
+        return '--'
+    if metric == 'oi_market_cap_ratio':
+        formatted = f'{float(value):.8f}'.rstrip('0')
+        whole, _, fraction = formatted.partition('.')
+        return f'{whole}.{fraction.ljust(2, "0")}'
+    if metric in COINGLASS_PERCENT_METRICS:
+        precision = 4 if metric == 'avg_funding_rate' else 2
+        return f'{float(value):+.{precision}f}%'
+    if metric == 'price':
+        return f'${format_trade_price(value)}'
+    if metric in COINGLASS_AMOUNT_METRICS:
+        amount = float(value)
+        for size, suffix in ((1e12, 'T'), (1e9, 'B'), (1e6, 'M'), (1e3, 'K')):
+            if abs(amount) >= size:
+                return f'${amount / size:,.2f}{suffix}'
+        return f'${amount:,.2f}'
+    return _format_coinglass_metric(metric, value)
+
+
+def _format_coinglass_asset(symbol, row, conditions):
+    fields = ['oi_market_cap_ratio', 'h4_oi_change', 'h24_oi_change', 'price', 'open_interest', 'market_cap']
+    fields.extend(
+        metric for metric in dict.fromkeys(item['metric'] for item in conditions)
+        if metric not in fields
+    )
+    labels = [COINGLASS_METRIC_LABELS[metric] for metric in fields]
+    widths = [sum(2 if unicodedata.east_asian_width(char) in 'WF' else 1 for char in label) for label in labels]
+    max_width = max(widths)
+    return '\n'.join([symbol] + [
+        f'{label}{" " * (max_width - width)}： {_format_coinglass_asset_value(metric, row.get(metric))}'
+        for metric, label, width in zip(fields, labels, widths)
+    ])
+
+
+def _format_coinglass_telegram_details(details):
+    # Telegram's code font renders narrow spaces as a full cell, so place the
+    # fractional spacer outside the code entity while keeping the text fixed-width.
+    lines = []
+    for line in details.split('\n'):
+        label, separator, value = line.partition('：')
+        if separator and label.rstrip(' ') in {'价格', '持仓', '市值'} and label.endswith(' '):
+            lines.append(f'<code>{escape(label[:-1])}</code>\u2009<code>：{escape(value)}</code>')
+        else:
+            lines.append(f'<code>{escape(line)}</code>')
+    return '\n'.join(lines)
+
+
+def _format_coinglass_conditions(conditions, match_mode):
+    formatted = []
+    for item in conditions:
+        metric = item.get('metric', 'h24_liquidation')
+        direction = item.get('direction', 'absolute')
+        label = COINGLASS_METRIC_LABELS[metric]
+        if direction == 'absolute':
+            label = f'|{label}|'
+        threshold = Decimal(str(item['threshold']))
+        if direction == 'negative':
+            threshold = -threshold
+        threshold_text = format(threshold, 'f')
+        if '.' in threshold_text:
+            threshold_text = threshold_text.rstrip('0').rstrip('.')
+        suffix = '%' if metric in COINGLASS_PERCENT_METRICS else ''
+        operator = '≤' if direction == 'negative' else '≥'
+        formatted.append(f'{label} {operator} {threshold_text}{suffix}')
+    return '筛选条件：' + (' 且 ' if match_mode == 'all' else ' 或 ').join(formatted)
+
+
 def evaluate_coinglass_global_asset_rules(session=None, rule_id=None):
     if not config.NOTIFICATIONS_ENABLED:
         return _notifications_disabled_result()
@@ -1325,74 +1463,93 @@ def evaluate_coinglass_global_asset_rules(session=None, rule_id=None):
         sent = checked = matched_count = 0
         for rule in rules:
             params = rule.params_json or {}
-            metric = params.get('metric', 'h24_liquidation')
-            threshold = float(params.get('threshold'))
-            direction = params.get('direction', 'absolute')
+            conditions = params.get('conditions') or [params]
+            match_mode = params.get('match_mode', 'all')
             recovery_confirmations = int(params.get('recovery_confirmations', 3))
             scope_symbols = set((rule.scope_json or {}).get('symbols') or [])
             scoped_assets = {
                 symbol: row for symbol, row in assets.items()
                 if not scope_symbols or symbol.upper() in scope_symbols
             }
-            dimension = f'{metric}:{direction}'
+            dimension = (
+                f"{conditions[0].get('metric', 'h24_liquidation')}:{conditions[0].get('direction', 'absolute')}"
+                if len(conditions) == 1 else 'composite'
+            )
             states = _load_rule_states(db, rule.id, dimension, scoped_assets)
             events = []
-            rule_checked = 0
+            rule_checked = rule_matched = rule_recovered = 0
             for symbol, row in scoped_assets.items():
-                value = row.get(metric)
-                if value is None:
+                observations = []
+                for condition in conditions:
+                    metric = condition.get('metric', 'h24_liquidation')
+                    value = row.get(metric)
+                    if value is None:
+                        break
+                    value = float(value)
+                    threshold = float(condition['threshold'])
+                    direction = condition.get('direction', 'absolute')
+                    condition_matched = (
+                        abs(value) >= threshold if direction == 'absolute'
+                        else value >= threshold if direction == 'positive'
+                        else value <= -threshold
+                    )
+                    observations.append({
+                        'metric': metric, 'value': value, 'threshold': threshold,
+                        'direction': direction, 'matched': condition_matched,
+                    })
+                if len(observations) != len(conditions):
                     continue
-                value = float(value)
-                matched = (
-                    abs(value) >= threshold
-                    if direction == 'absolute'
-                    else value >= threshold
-                    if direction == 'positive'
-                    else value <= -threshold
+                matched = (all if match_mode == 'all' else any)(
+                    item['matched'] for item in observations
+                )
+                values = {'conditions': observations, 'match_mode': match_mode, 'snapshot_time': row.get('snapshot_time')}
+                if len(observations) == 1:
+                    values.update(observations[0])
+                observed_text = ' · '.join(
+                    f"{item['metric']} {_format_coinglass_metric(item['metric'], item['value'])}"
+                    for item in observations
                 )
                 checked += 1
                 rule_checked += 1
                 matched_count += int(matched)
+                rule_matched += int(matched)
                 result = _observe(
                     db,
                     rule,
                     symbol,
                     dimension,
                     matched,
-                    {
-                        'metric': metric,
-                        'value': value,
-                        'threshold': threshold,
-                        'direction': direction,
-                        'snapshot_time': row.get('snapshot_time'),
-                    },
+                    values,
                     f'{symbol} 全球资产指标异常',
-                    f'{metric} 当前值 {_format_coinglass_metric(metric, value)}，规则阈值 {_format_coinglass_metric(metric, threshold)}。',
+                    observed_text,
                     recovery_confirmations=recovery_confirmations,
                     state=states.get(symbol),
                     aggregate=True,
                 )
+                rule_recovered += int(result.get('event_status') == 'recovered')
                 if result.get('state') and result['event_status']:
-                    previous_value = (result.get('previous_values') or {}).get('value')
+                    previous = result.get('previous_values') or {}
+                    previous_items = previous.get('conditions') or ([previous] if 'metric' in previous else [])
+                    previous_text = ' · '.join(
+                        f"{item['metric']} {_format_coinglass_metric(item['metric'], item.get('value'))}"
+                        for item in previous_items
+                    )
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
-                        'severity': abs(value) / threshold,
-                        'triggered': (
-                            f'{symbol}  {_format_coinglass_metric(metric, value)}'
-                            f' · {abs(value) / threshold:.2f}x 阈值'
-                        ),
-                        'recovered': (
-                            f'{symbol} 当前 {_format_coinglass_metric(metric, value)}'
-                            f' · 之前 {_format_coinglass_metric(metric, previous_value)}'
-                        ),
+                        'symbol': symbol,
+                        'severity': max(abs(item['value']) / item['threshold'] for item in observations),
+                        'triggered': _format_coinglass_asset(symbol, row, conditions),
+                        'recovered': f'{symbol} 当前 {observed_text} · 之前 {previous_text}',
                     })
             sent += _deliver_evaluation_summary(
                 db,
                 rule,
                 rule_checked,
                 events,
-                f'规则：{metric} {direction} 阈值 {_format_coinglass_metric(metric, threshold)}',
+                _format_coinglass_conditions(conditions, match_mode),
+                matched_count=rule_matched,
+                recovered_count=rule_recovered,
             )
         db.commit()
         return {
