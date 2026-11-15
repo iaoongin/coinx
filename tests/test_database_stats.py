@@ -46,17 +46,22 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, rows):
+    def __init__(self, rows, row_counts=None):
         self.rows = rows
+        self.row_counts = row_counts or {}
         self.statements = []
 
     def get_bind(self):
         return SimpleNamespace(dialect=SimpleNamespace(name='mysql'))
 
     def execute(self, statement):
-        self.statements.append(str(statement))
-        if 'SELECT DATABASE()' in str(statement):
+        sql = str(statement)
+        self.statements.append(sql)
+        if 'SELECT DATABASE()' in sql:
             return FakeResult(scalar_value='coinx')
+        if 'COUNT(*)' in sql:
+            table_name = sql.rsplit('`', 2)[1]
+            return FakeResult(scalar_value=self.row_counts[table_name])
         return FakeResult(rows=self.rows)
 
 
@@ -70,7 +75,6 @@ def test_get_database_stats_aggregates_table_space_and_comment():
         {
             'table_name': 'market_klines',
             'table_comment': '多交易所K线历史数据表',
-            'estimated_rows': 1200,
             'data_bytes': 800,
             'index_bytes': 200,
             'free_bytes': 100,
@@ -78,19 +82,17 @@ def test_get_database_stats_aggregates_table_space_and_comment():
         {
             'table_name': 'coins',
             'table_comment': None,
-            'estimated_rows': None,
             'data_bytes': 100,
             'index_bytes': 50,
             'free_bytes': 0,
         },
-    ])
+    ], row_counts={'market_klines': 1200, 'coins': 25})
 
     result = database_stats.get_database_stats(session=session)
 
     assert result['database'] == 'coinx'
     assert result['summary']['table_count'] == 2
-    assert result['summary']['estimated_rows'] == 1200
-    assert result['summary']['estimated_row_tables'] == 1
+    assert result['summary']['row_count'] == 1225
     assert result['summary']['data_bytes'] == 900
     assert result['summary']['index_bytes'] == 250
     assert result['summary']['used_bytes'] == 1150
@@ -100,6 +102,9 @@ def test_get_database_stats_aggregates_table_space_and_comment():
     assert result['tables'][0]['free_percent'] == 9.09
     assert result['tables'][1]['table_comment'] == ''
     assert 'TABLE_COMMENT' in session.statements[0]
+    assert 'TABLE_ROWS' not in session.statements[0]
+    assert 'SELECT COUNT(*) FROM `market_klines`' in session.statements
+    assert 'SELECT COUNT(*) FROM `coins`' in session.statements
 
 
 def test_get_database_stats_rejects_non_mysql_session():
@@ -148,5 +153,5 @@ def test_database_stats_page_renders():
     assert '数据存储'.encode('utf-8') in response.data
     assert '/api/database-stats'.encode('utf-8') in response.data
     assert '搜索表名或表注释'.encode('utf-8') in response.data
-    assert 'information_schema.TABLES'.encode('utf-8') in response.data
+    assert 'COUNT(*)'.encode('utf-8') in response.data
     assert 'var(--page-max-width)'.encode('utf-8') in response.data

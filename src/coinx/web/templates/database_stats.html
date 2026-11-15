@@ -205,7 +205,7 @@
         <div>
           <div class="eyebrow">MySQL Storage</div>
           <h1>数据存储</h1>
-          <p class="subtitle">查看当前数据库各表的行数估算与空间占用。</p>
+          <p class="subtitle">查看当前数据库各表的精确行数与空间占用。</p>
         </div>
         <div class="header-meta">
           <span v-if="stats">数据库：[[ stats.database || '--' ]]</span>
@@ -222,7 +222,7 @@
       </header>
 
       <div class="notice">
-        行数来自 MySQL <code>information_schema.TABLES</code>，InnoDB 下属于估算值；占用空间为数据空间与索引空间之和，空闲空间仅作为碎片参考。
+        行数通过对每张 MySQL 表执行 <code>COUNT(*)</code> 获取；占用空间为数据空间与索引空间之和，空闲空间仅作为碎片参考。
       </div>
 
       <div v-if="loading && !stats" class="empty-state">正在读取数据库统计...</div>
@@ -230,7 +230,7 @@
       <template v-else-if="stats">
         <section class="stats-grid" aria-label="存储摘要">
           <div class="stat"><div class="stat-label">表总数</div><div class="stat-value accent">[[ formatNumber(stats.summary.table_count) ]]</div></div>
-          <div class="stat"><div class="stat-label">估算总行数</div><div class="stat-value">[[ formatNumber(stats.summary.estimated_rows) ]]</div></div>
+          <div class="stat"><div class="stat-label">总行数</div><div class="stat-value">[[ formatNumber(stats.summary.row_count) ]]</div></div>
           <div class="stat"><div class="stat-label">数据空间</div><div class="stat-value">[[ formatBytes(stats.summary.data_bytes) ]]</div></div>
           <div class="stat"><div class="stat-label">索引空间</div><div class="stat-value">[[ formatBytes(stats.summary.index_bytes) ]]</div></div>
           <div class="stat"><div class="stat-label">已用 / 空闲</div><div class="stat-value">[[ formatBytes(stats.summary.used_bytes) ]] / [[ formatBytes(stats.summary.free_bytes) ]]</div></div>
@@ -256,7 +256,7 @@
                     <th :aria-sort="ariaSort('table_name')"><button class="sort-button" type="button" @click="setSort('table_name')">表名 <span class="sort-icon" :class="{ active: sortKey === 'table_name' }" aria-hidden="true">[[ sortMark('table_name') ]]</span></button></th>
                     <th :aria-sort="ariaSort('table_comment')"><button class="sort-button" type="button" @click="setSort('table_comment')">表注释 <span class="sort-icon" :class="{ active: sortKey === 'table_comment' }" aria-hidden="true">[[ sortMark('table_comment') ]]</span></button></th>
                     <th :aria-sort="ariaSort('used_bytes')"><button class="sort-button" type="button" @click="setSort('used_bytes')">已用空间 <span class="sort-icon" :class="{ active: sortKey === 'used_bytes' }" aria-hidden="true">[[ sortMark('used_bytes') ]]</span></button></th>
-                    <th :aria-sort="ariaSort('estimated_rows')"><button class="sort-button" type="button" @click="setSort('estimated_rows')">行数 <span class="sort-icon" :class="{ active: sortKey === 'estimated_rows' }" aria-hidden="true">[[ sortMark('estimated_rows') ]]</span></button></th>
+                    <th :aria-sort="ariaSort('row_count')"><button class="sort-button" type="button" @click="setSort('row_count')">行数 <span class="sort-icon" :class="{ active: sortKey === 'row_count' }" aria-hidden="true">[[ sortMark('row_count') ]]</span></button></th>
                     <th :aria-sort="ariaSort('data_bytes')"><button class="sort-button" type="button" @click="setSort('data_bytes')">数据空间 <span class="sort-icon" :class="{ active: sortKey === 'data_bytes' }" aria-hidden="true">[[ sortMark('data_bytes') ]]</span></button></th>
                     <th :aria-sort="ariaSort('index_bytes')"><button class="sort-button" type="button" @click="setSort('index_bytes')">索引空间 <span class="sort-icon" :class="{ active: sortKey === 'index_bytes' }" aria-hidden="true">[[ sortMark('index_bytes') ]]</span></button></th>
                     <th :aria-sort="ariaSort('free_bytes')"><button class="sort-button" type="button" @click="setSort('free_bytes')">空闲空间 <span class="sort-icon" :class="{ active: sortKey === 'free_bytes' }" aria-hidden="true">[[ sortMark('free_bytes') ]]</span></button></th>
@@ -268,7 +268,7 @@
                     <td><div class="table-name" :title="table.table_name">[[ table.table_name ]]</div></td>
                     <td><div class="table-comment" :title="table.table_comment || '--'">[[ table.table_comment || '--' ]]</div></td>
                     <td class="number-cell">[[ formatBytes(table.used_bytes) ]]</td>
-                    <td class="number-cell">[[ formatNumber(table.estimated_rows) ]]</td>
+                    <td class="number-cell">[[ formatNumber(table.row_count) ]]</td>
                     <td class="number-cell">[[ formatBytes(table.data_bytes) ]]</td>
                     <td class="number-cell">[[ formatBytes(table.index_bytes) ]]</td>
                     <td class="number-cell">[[ formatBytes(table.free_bytes) ]]</td>

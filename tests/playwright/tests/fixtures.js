@@ -427,8 +427,7 @@ const test = base.extend({
             query_duration_ms: 8,
             summary: {
               table_count: 3,
-              estimated_rows: 1234567,
-              estimated_row_tables: 3,
+              row_count: 1234567,
               data_bytes: 2147483648,
               index_bytes: 536870912,
               used_bytes: 2684354560,
@@ -442,7 +441,7 @@ const test = base.extend({
               {
                 table_name: 'market_klines',
                 table_comment: '多交易所K线历史数据表',
-                estimated_rows: 900000,
+                row_count: 900000,
                 data_bytes: 1717986918,
                 index_bytes: 429496730,
                 used_bytes: 2147483648,
@@ -452,7 +451,7 @@ const test = base.extend({
               {
                 table_name: 'market_futures_smart_money_signal',
                 table_comment: '聪明钱快照',
-                estimated_rows: 300000,
+                row_count: 300000,
                 data_bytes: 322122547,
                 index_bytes: 80530636,
                 used_bytes: 402653183,
@@ -462,7 +461,7 @@ const test = base.extend({
               {
                 table_name: 'scheduled_job_runs',
                 table_comment: '定时任务执行记录',
-                estimated_rows: 134567,
+                row_count: 134567,
                 data_bytes: 107374183,
                 index_bytes: 26843546,
                 used_bytes: 134217729,
