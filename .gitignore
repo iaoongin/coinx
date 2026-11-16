@@ -66,6 +66,9 @@ data/app.pid
 data/open_interest_cache.json
 # data/coins_data.json  # 取消注释以忽略数据文件
 
+# 一次性抓取和导出结果
+outputs/
+
 # 操作系统
 .DS_Store
 Thumbs.db
