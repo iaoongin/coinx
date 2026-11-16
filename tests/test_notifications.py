@@ -89,14 +89,93 @@ def test_coinglass_summary_includes_current_counts_and_asset_details(db_session,
 
     delivery = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id.desc()).first()
     body = delivery.payload_json['message']['body']
-    assert delivery.payload_json['message']['title'] == '🚨 起量筛选'
-    assert '触发资产：1 个' in body
+    assert delivery.payload_json['message']['title'] == '📊 起量筛选 · 状态更新'
+    assert '数据时间：1970-01-01 08:00:01' in body
+    assert '新增异常 · 1 个\n1. SHELL' in body
     assert 'SHELL\n持仓/市值  ： 1.11\n持仓（4h） ： +268.98%\n持仓（24h）： +465.39%' in body
     assert '价格       ： $0.04002\n持仓       ： $20.85M\n市值       ： $18.85M' in body
-    assert '已恢复：1 个\nETH' in body
+    assert '本轮恢复 · 1 个\nETH' in body
+    assert '恢复项：持仓（4h）当前 +0.00%' in body
+    assert '恢复判据：持仓（4h）已不再满足 ≥ +5.00%' in body
+    assert '触发值：持仓（4h） +268.98%' in body
+    assert '当前快照：持仓/市值 1.11 · 价格 $0.04002 · 持仓 $20.85M · 市值 $18.85M' in body
     assert '筛选条件：持仓/市值 ≥ 0.6 且 持仓（4h） ≥ 5% 且 持仓（24h） ≥ 30%' in body
-    assert '本轮：检查 3 · 异常 2 · 恢复 1' in body
+    assert '本轮：检查 3 · 当前异常 2 · 新触发 1 · 恢复 1' in body
     assert delivery.payload_json['matched'] == 2
+
+
+def test_coinglass_recovery_only_uses_recovery_title(db_session, monkeypatch):
+    configure_notifications(monkeypatch)
+    channel = create_channel(db_session)
+    rule = create_rule(
+        db_session,
+        channel,
+        notifications.EVENT_COINGLASS_GLOBAL_ASSET,
+        'global_assets',
+        {
+            'metric': 'h4_oi_change',
+            'direction': 'positive',
+            'threshold': 5,
+            'recovery_confirmations': 1,
+        },
+    )
+    rule.name = '恢复模板'
+    db_session.commit()
+    assets = {
+        'ETH': {
+            'snapshot_time': 1000,
+            'h4_oi_change': 10,
+            'oi_market_cap_ratio': 1.1,
+            'price': 100,
+            'open_interest': 2_000_000,
+            'market_cap': 10_000_000,
+        },
+    }
+    monkeypatch.setattr(notifications, 'load_latest_global_assets', lambda **kwargs: assets)
+
+    assert notifications.evaluate_coinglass_global_asset_rules(session=db_session)['sent'] == 1
+    assets['ETH']['h4_oi_change'] = 0
+    assert notifications.evaluate_coinglass_global_asset_rules(session=db_session)['sent'] == 1
+
+    delivery = db_session.query(NotificationDelivery).order_by(NotificationDelivery.id.desc()).first()
+    body = delivery.payload_json['message']['body']
+    assert delivery.payload_json['message']['title'] == '✅ 恢复模板 · 已恢复 1 个'
+    assert '新增异常' not in body
+    assert '本轮恢复 · 1 个\nETH' in body
+    assert '触发资产：' not in body
+
+
+def test_coinglass_recovery_formats_negative_and_absolute_conditions():
+    text = notifications._format_coinglass_recovery(
+        'BTC',
+        {},
+        [
+            {
+                'metric': 'h1_oi_change', 'value': -2, 'threshold': 5,
+                'direction': 'negative', 'matched': False,
+            },
+            {
+                'metric': 'avg_funding_rate', 'value': 0.02, 'threshold': 0.1,
+                'direction': 'absolute', 'matched': False,
+            },
+        ],
+        {
+            'conditions': [
+                {
+                    'metric': 'h1_oi_change', 'value': -6, 'threshold': 5,
+                    'direction': 'negative', 'matched': True,
+                },
+                {
+                    'metric': 'avg_funding_rate', 'value': 0.2, 'threshold': 0.1,
+                    'direction': 'absolute', 'matched': True,
+                },
+            ],
+        },
+    )
+
+    assert '恢复项：持仓（1h）当前 -2.00%；|资金费率|当前 0.0200%' in text
+    assert '恢复判据：持仓（1h）已不再满足 ≤ -5.00%；|资金费率|已不再满足 ≥ 0.1000%' in text
+    assert '触发值：持仓（1h） -6.00%；|资金费率| 0.2000%' in text
 
 
 def test_coinglass_message_formats_missing_and_selected_metrics():

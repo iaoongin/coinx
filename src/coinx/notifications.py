@@ -1141,25 +1141,54 @@ def _deliver_evaluation_summary(db, rule, checked, events, condition, *, matched
 
     html_body = None
     if rule.event_type == EVENT_COINGLASS_GLOBAL_ASSET:
-        title = f'🚨 {rule.name}'
-        sections = [f'时间：{format_notification_time(timestamp)}\n触发资产：{len(triggered_events)} 个']
-        html_sections = [escape(sections[0])]
-        sections.extend(event['triggered'] for event in triggered_events)
-        for event in triggered_events:
+        if triggered and recovered:
+            title = f'📊 {rule.name} · 状态更新'
+        elif triggered:
+            title = f'🚨 {rule.name} · 新增异常 {len(triggered)} 个'
+        else:
+            title = f'✅ {rule.name} · 已恢复 {len(recovered)} 个'
+        snapshot_times = {
+            event.get('snapshot_time')
+            for event in (*triggered_events, *recovered_events)
+            if event.get('snapshot_time') is not None
+        }
+        if len(snapshot_times) == 1:
+            snapshot_time_text = format_notification_time(snapshot_times.pop())
+        elif snapshot_times:
+            snapshot_time_text = '多时间快照'
+        else:
+            snapshot_time_text = '--'
+        time_section = (
+            f'数据时间：{snapshot_time_text}\n'
+            f'推送时间：{format_notification_time(timestamp)}'
+        )
+        sections = [time_section]
+        html_sections = [escape(time_section)]
+        if triggered:
+            sections.append(f'新增异常 · {len(triggered)} 个\n' + '\n'.join(triggered))
+            html_sections.append(f'新增异常 · {len(triggered)} 个')
+        for index, event in enumerate(triggered_events, start=1):
             symbol, separator, details = event['triggered'].partition('\n')
             details = _format_coinglass_telegram_details(details)
-            html_sections.append(f'<b>{escape(symbol)}</b>{separator}{details}')
+            if len(triggered_events) == 1:
+                html_sections.append(
+                    f'<b>{escape(symbol)}</b>{separator}{details}'
+                )
+            else:
+                html_sections.append(
+                    f'{index}. <b>{escape(symbol)}</b>{separator}{details}'
+                )
         if recovered:
-            sections.append(f'已恢复：{len(recovered)} 个\n' + '\n'.join(recovered))
+            sections.append(f'本轮恢复 · {len(recovered)} 个\n' + '\n'.join(recovered))
             html_recoveries = []
             for event in recovered_events:
                 symbol = event['symbol']
                 html_recoveries.append(f'<b>{escape(symbol)}</b>{escape(event["recovered"][len(symbol):])}')
-            html_sections.append(f'已恢复：{len(recovered)} 个\n' + '\n'.join(html_recoveries))
+            html_sections.append(f'本轮恢复 · {len(recovered)} 个\n' + '\n'.join(html_recoveries))
         sections.append(condition)
         sections.append(
-            f'本轮：检查 {checked} · 异常 {matched_count if matched_count is not None else len(triggered)}'
-            f' · 恢复 {recovered_count if recovered_count is not None else len(recovered)}'
+            f'本轮：检查 {checked} · 当前异常 {matched_count if matched_count is not None else len(triggered)}'
+            f' · 新触发 {len(triggered)} · 恢复 {recovered_count if recovered_count is not None else len(recovered)}'
         )
         html_sections.extend([escape(condition), escape(sections[-1])])
         html_body = '\n\n'.join(html_sections)
@@ -1410,6 +1439,74 @@ def _format_coinglass_asset(symbol, row, conditions):
     ])
 
 
+def _format_coinglass_condition_label(condition):
+    label = COINGLASS_METRIC_LABELS[condition.get('metric', 'h24_liquidation')]
+    return f'|{label}|' if condition.get('direction', 'absolute') == 'absolute' else label
+
+
+def _format_coinglass_condition_threshold(condition):
+    metric = condition.get('metric', 'h24_liquidation')
+    direction = condition.get('direction', 'absolute')
+    threshold = _format_coinglass_asset_value(metric, abs(float(condition['threshold'])))
+    if direction == 'absolute':
+        threshold = threshold.lstrip('+')
+    if direction == 'negative':
+        return f'≤ -{threshold.lstrip("+")}'
+    return f'≥ {threshold}'
+
+
+def _format_coinglass_recovery_value(metric, value, direction):
+    formatted = _format_coinglass_asset_value(metric, value)
+    return formatted.lstrip('+') if direction == 'absolute' else formatted
+
+
+def _format_coinglass_snapshot(row):
+    fields = ('oi_market_cap_ratio', 'price', 'open_interest', 'market_cap')
+    return '当前快照：' + ' · '.join(
+        f'{COINGLASS_METRIC_LABELS[field]} {_format_coinglass_asset_value(field, row.get(field))}'
+        for field in fields
+    )
+
+
+def _format_coinglass_recovery(symbol, row, observations, previous_values):
+    current_items = observations or []
+    previous_items = previous_values.get('conditions') or (
+        [previous_values] if 'metric' in previous_values else []
+    )
+    recovery_items = []
+    for index, current in enumerate(current_items):
+        previous = previous_items[index] if index < len(previous_items) else {}
+        if not current.get('matched') and previous.get('matched', True):
+            recovery_items.append((current, previous))
+    if not recovery_items:
+        recovery_items = [
+            (current, previous_items[index] if index < len(previous_items) else {})
+            for index, current in enumerate(current_items)
+            if not current.get('matched')
+        ]
+
+    current_text = []
+    criterion_text = []
+    previous_text = []
+    for current, previous in recovery_items:
+        metric = current.get('metric', 'h24_liquidation')
+        direction = current.get('direction', 'absolute')
+        label = _format_coinglass_condition_label(current)
+        current_value = _format_coinglass_recovery_value(metric, current.get('value'), direction)
+        previous_value = _format_coinglass_recovery_value(metric, previous.get('value'), direction)
+        current_text.append(f'{label}当前 {current_value}')
+        criterion_text.append(f'{label}已不再满足 {_format_coinglass_condition_threshold(current)}')
+        previous_text.append(f'{label} {previous_value}')
+
+    return '\n'.join((
+        symbol,
+        '恢复项：' + '；'.join(current_text),
+        '恢复判据：' + '；'.join(criterion_text),
+        '触发值：' + '；'.join(previous_text),
+        _format_coinglass_snapshot(row),
+    ))
+
+
 def _format_coinglass_telegram_details(details):
     # Telegram's code font renders narrow spaces as a full cell, so place the
     # fractional spacer outside the code entity while keeping the text fixed-width.
@@ -1428,9 +1525,7 @@ def _format_coinglass_conditions(conditions, match_mode):
     for item in conditions:
         metric = item.get('metric', 'h24_liquidation')
         direction = item.get('direction', 'absolute')
-        label = COINGLASS_METRIC_LABELS[metric]
-        if direction == 'absolute':
-            label = f'|{label}|'
+        label = _format_coinglass_condition_label(item)
         threshold = Decimal(str(item['threshold']))
         if direction == 'negative':
             threshold = -threshold
@@ -1529,18 +1624,16 @@ def evaluate_coinglass_global_asset_rules(session=None, rule_id=None):
                 rule_recovered += int(result.get('event_status') == 'recovered')
                 if result.get('state') and result['event_status']:
                     previous = result.get('previous_values') or {}
-                    previous_items = previous.get('conditions') or ([previous] if 'metric' in previous else [])
-                    previous_text = ' · '.join(
-                        f"{item['metric']} {_format_coinglass_metric(item['metric'], item.get('value'))}"
-                        for item in previous_items
-                    )
                     events.append({
                         'status': result['event_status'],
                         'state': result['state'],
                         'symbol': symbol,
+                        'snapshot_time': row.get('snapshot_time'),
                         'severity': max(abs(item['value']) / item['threshold'] for item in observations),
                         'triggered': _format_coinglass_asset(symbol, row, conditions),
-                        'recovered': f'{symbol} 当前 {observed_text} · 之前 {previous_text}',
+                        'recovered': _format_coinglass_recovery(
+                            symbol, row, observations, previous,
+                        ),
                     })
             sent += _deliver_evaluation_summary(
                 db,
